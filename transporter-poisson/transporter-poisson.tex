@@ -1,0 +1,115 @@
+\documentclass[reprint, amsmath,amssymb, aps]{revtex4-1}
+\usepackage{graphicx}%
+\usepackage{amsmath}
+
+\begin{document}
+\section{The Poisson Equation in 1D}
+In this module we aim to solve the one-dimensional Poisson equation as typically utilised in calculations of electronic transport. The one-dimensional Poisson equation is given by
+\begin{equation}
+    \frac{\mathrm{d}}{\mathrm{d} z} \left[\epsilon\left(z\right) \frac{\mathrm{d}}{\mathrm{d} z} \phi\left(z\right)\right] = F\left(z, \phi\right),
+\end{equation}
+where $\epsilon$ is the out-of-plane dielectric constant in the electrostatic regime, $\phi$ is the electrostatic potential and $F$ is the residual.
+
+The first step to solving the Poisson equation is to discretize the differential operator on the left hand side. We consider in that the observable $\phi$ is evaluated on an inhomogeneous cell-centered grid $z = z_1, z_2 \dots z_{\mathrm{N}}$ with $\mathrm{N}$ cells. We can write the differential operator acting on the potential as
+\begin{equation}
+  \frac{\mathrm{d}}{\mathrm{d} z} \left[\epsilon\left(z\right) \frac{\mathrm{d}}{\mathrm{d} z} \phi\left(z\right)\right] = \frac{\mathrm{d} \epsilon\left(z\right)}{\mathrm{d} z} \frac{\mathrm{d} \phi\left(z\right)}{\mathrm{d} z} + \epsilon\left(z\right) \frac{\mathrm{d}^2 \phi\left(z\right)}{\mathrm{d} z^2},
+\end{equation}
+so it is necessary to calculate the first and second order finite differences on the inhomogeneous grid. For the first order difference we calculate the Taylor expansion of the first order derivate at $z_i$
+\begin{multline}
+  \frac{\mathrm{d} \phi\left(z_i\right)}{\mathrm{d} z} = \frac{\phi\left(z_{i + 1}\right) - \phi\left(z_{i}\right)}{z_{i+1} - z_i}  \\ -\frac{\phi^{(2)}\left(z_i\right)}{2!} \left[z_{i+1} - z_i\right] + \mathcal{O} \left[\left(z_{i+1} - z_i \right)^2\right] + \dots
+\end{multline}
+where $\dots$ represents higher order derivatives. In a three-point stencil we do not care about these. We can do the same in the inverse direction
+\begin{multline}
+  \frac{\mathrm{d} \phi\left(z_i\right)}{\mathrm{d} z} = - \frac{\phi\left(z_{i - 1}\right) - \phi\left(z_{i}\right)}{z_{i} - z_{i-1}} \\ + \frac{\phi^{(2)}\left(z_i\right)}{2!} \left[z_{i} - z_{i-1}\right] + \mathcal{O}\left[\left(z_{i} - z_{i-1}\right)^2\right] +\dots
+\end{multline}
+If we evaluated on a uniform grid $z_{i+1} - z_{i} = z_{i} - z_{i-1} = h$. Then we can add the equations to find
+\begin{equation}
+  \phi^{(1)}\left(z_i\right) = \frac{\phi\left(z_{i + 1}\right) - \phi\left(z_{i-1}\right)}{2 h} + \mathcal{O}\left(h^2\right),
+\end{equation}
+however on a non-uniform grid this cancellation does not occur and we are left with terms proportional to the grid spacing. This is a significant source of error.
+
+We can derive the appropriate relation for the non-uniform grid by asserting that we want the second-order error to disappear. This leads to the result
+\begin{multline}
+  \phi^{(1)}\left(z\right) = \\ \frac{\Delta_-^2 \phi \left(z_{i + 1}\right) + \left(\Delta_+^2 - \Delta_-^2\right) \phi\left(z_i\right) - \Delta_+^2 \phi\left(z_{i-1}\right)}{\left(\Delta_+  + \Delta_-\right)\Delta_+ \Delta_-}\\ + \mathcal{O}\left(\Delta^3 \right),
+\end{multline}
+in which we defined the forward and backward step $\Delta_+ = z_{i+1} - z_i$, $\Delta_- = z_i - z_{i-1}$. In the limit $\Delta_+ = \Delta_- = h$ this reduces to the homogeneous result.
+
+We can do the same for the second order derivative. Writing 
+\begin{align}
+  \phi^{(1)}\left(z_i\right) &= \frac{\phi\left(z_{i+1}\right) - \phi\left(z_i\right)}{\Delta_+} \nonumber \\ 
+                             & \quad - \frac{\phi^{(2)}\left(z_i\right)}{2!}\Delta_+ - \frac{\phi^{(3)}\left(z_i\right)}{3!} \Delta_+^2 + \mathcal{O}\left(\Delta_+^3\right), \\
+  \phi^{(1)}\left(z_i\right) &= - \frac{\phi\left(z_{i-1}\right) - \phi\left(z_i\right)}{\Delta_-} \nonumber \\ 
+                             & \quad + \frac{\phi^{(2)}\left(z_i\right)}{2!}\Delta_- - \frac{\phi^{(3)}\left(z_i\right)}{3!} \Delta_-^2 + \mathcal{O}\left(\Delta_+^3\right),
+\end{align}
+and as before we want the third derivatives to cancel. This leads to
+\begin{align}
+  \phi^{(2)}\left(z_i\right) &= \frac{2}{\Delta_+ \Delta_- \left(\Delta_+ + \Delta_-\right)} \nonumber \\
+                             & \quad \biggr[ \left(\Delta_+^2 - \Delta_-^2\right) \phi^{(1)}\left(z_i\right) \nonumber \\
+                             & \quad + \frac{\Delta_-^2}{\Delta_+} \left(\phi\left(z_{i+1}\right) - \phi\left(z_i\right)\right) \nonumber \\ 
+                             & \quad + \frac{\Delta_+^2}{\Delta_-} \left(\phi\left(z_{i-1}\right) - \phi\left(z_i\right)\right)\biggr] + \mathcal{O}\left(\Delta^2\right),
+\end{align}
+which reduces to the standard result for the three-point stencil in the homogeneous mesh limit.
+
+\subsection{Boundary Conditions}
+We want to utilise either Dirichlet boundary conditions or Neumann boundary conditions in our solver. The former can be dealt with as follows. The general form of the Poisson operator that we have derived is tridiagonal
+\begin{equation}
+  \mathcal{M} = \begin{bmatrix} 
+    a_{11} & a_{12} & 0 & \dots & 0\\
+    a_{21} & a_{22} & a_{23} & 0 & \vdots \\
+    0 & \vdots  & \ddots   &  & \vdots \\
+    0 & 0 & 0 & a_{\mathrm{N} \mathrm{N}-1} & a_{\mathrm{NN}}
+    \end{bmatrix}.
+\end{equation}
+To set a Dirichlet boundary condition at the system edge we enforce
+\begin{equation}
+	\phi\left(z_1\right) = g_1,
+\end{equation}
+which entails settings the first row of the matrix $\mathcal{M}$ so the equation gives
+\begin{equation}
+  \begin{bmatrix} 
+    1 & 0 & 0 & \dots & 0\\
+    a_{21} & a_{22} & a_{23} & 0 & \vdots \\
+    0 & \vdots  & \ddots   &  & \vdots \\
+    0 & 0 & 0 & a_{\mathrm{N} \mathrm{N}-1} & a_{\mathrm{NN}}
+    \end{bmatrix} 
+    \begin{bmatrix}
+    \phi_1 \\
+    \phi_2 \\
+    \vdots \\
+    \phi_\mathrm{N}	
+    \end{bmatrix}
+    =  \begin{bmatrix}
+    g_1 \\
+    F_2 \\
+    \vdots \\
+    F_\mathrm{N}	
+    \end{bmatrix}.
+\end{equation}
+
+To utilise Neumann boundary conditions on the derivative of $\phi$ it is necessary to consider ghost points outside the mesh. For a Neumann boundary condition we set the differential at the mesh edge to a constant
+\begin{equation}
+	\frac{\mathrm{d} \phi \left(z\right)}{\mathrm{d} z} \biggr\vert_{z = z_1} = \sigma.
+\end{equation}
+We already evaluated this derivative in the case of a homogeneous mesh, so we can write this as
+\begin{equation}
+	\frac{\phi\left(z_{2}\right) - \phi\left(z_{0}\right)}{2 h} = \sigma.
+\end{equation}
+We can also write a second equation, arising from the introduction of the new mesh point
+\begin{equation}
+	\frac{\phi\left(z_0\right) - 2 \phi \left(z_1\right) + \phi \left(z_2\right)}{h^2} = F_1,
+\end{equation}
+which allows us to eliminate $\phi\left(z_0\right)$ in terms of the interior mesh points
+\begin{equation}
+	\phi\left(z_0\right) = h^2 F_1 + 2 \phi\left(z_1\right) - \phi\left(z_2\right)
+\end{equation}
+and find the condition for $\phi\left(z_1\right)$
+\begin{equation}
+	2 h \sigma = \phi\left(z_2\right) - h^2 F_1 - 2 \phi\left(z_1\right) + \phi\left(z_2\right)
+\end{equation}
+or
+\begin{equation}
+	\frac{\phi\left(z_2\right) - \phi\left(z_1\right)}{h^2} = \frac{\sigma}{h} + \frac{F_1}{2}.
+\end{equation}
+Note that this assumes the dielectric function in the stack does not vary at the edge, which can be ensured by choosing a sensible structure.
+
+\end{document}
