@@ -1,12 +1,51 @@
 use crate::connectivity::Segment1dConnectivity;
 use crate::mesh::Mesh1d;
 use nalgebra::{OPoint, Point1, RealField, Vector1, U1};
+use std::ops::Range;
 
 pub fn create_unit_line_segment_mesh_1d<T>(cells_per_dim: usize) -> Mesh1d<T>
 where
     T: Copy + RealField,
 {
     create_line_segment_mesh_1d(T::one(), 1, cells_per_dim, &Vector1::new(T::zero()))
+}
+
+pub fn create_line_segment_from_endpoints_and_number_of_points<T>(
+    range: Range<T>,
+    num_cells_x: usize,
+) -> Mesh1d<T>
+where
+    T: Copy + RealField,
+{
+    if num_cells_x == 0 {
+        Mesh1d::from_vertices_and_connectivity(Vec::new(), Vec::new())
+    } else {
+        let cell_size = (range.end - range.start) / T::from_usize(num_cells_x).unwrap();
+        let num_vertices_x = num_cells_x + 1;
+        let mut vertices = Vec::with_capacity(num_vertices_x);
+        let mut cells = Vec::with_capacity(num_vertices_x);
+        let left = Vector1::new(range.start);
+
+        let to_global_vertex_index = |i| i;
+        for i in 0..num_vertices_x {
+            let i_as_t = T::from_usize(i).expect("Must be able to fit usize in T");
+            let v = left + Vector1::new(i_as_t) * cell_size;
+            vertices.push(Point1::from(v));
+        }
+
+        cells.push(Segment1dConnectivity::Boundary([to_global_vertex_index(1)]));
+        for i in 1..num_vertices_x - 1 {
+            cells.push(Segment1dConnectivity::Core([
+                to_global_vertex_index(i - 1),
+                to_global_vertex_index(i + 1),
+            ]));
+        }
+        cells.push(Segment1dConnectivity::Boundary([to_global_vertex_index(
+            num_vertices_x - 2,
+        )]));
+
+        Mesh1d::from_vertices_and_connectivity(vertices, cells)
+    }
 }
 
 pub fn create_line_segment_mesh_1d<T>(
