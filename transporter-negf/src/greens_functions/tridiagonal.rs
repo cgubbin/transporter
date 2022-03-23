@@ -1,5 +1,5 @@
 use crate::Hamiltonian;
-use nalgebra::{ComplexField, DVector, Dim};
+use nalgebra::{ComplexField, DVector};
 
 pub(crate) fn diagonal<T>(
     energy: T::RealField,

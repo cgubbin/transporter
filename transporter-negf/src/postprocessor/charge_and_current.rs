@@ -19,16 +19,23 @@ where
         })
     }
 
+    pub(crate) fn deref_charge(self) -> Charge<T> {
+        self.charge
+    }
+
+    /// Returns a chained iterator over both charge and current densities
     fn charge_and_current_iter(
         &self,
     ) -> std::iter::Chain<std::slice::Iter<'_, DVector<T>>, std::slice::Iter<'_, DVector<T>>> {
         self.charge_iter().chain(self.current_iter())
     }
 
+    /// Returns an iterator over the held charge densities
     fn charge_iter(&self) -> std::slice::Iter<'_, DVector<T>> {
         self.charge.charge.iter()
     }
 
+    /// Returns an iterator over the held current densities
     fn current_iter(&self) -> std::slice::Iter<'_, DVector<T>> {
         self.current.current.iter()
     }
@@ -40,14 +47,11 @@ where
         previous: &ChargeAndCurrent<T>,
         tolerance: T,
     ) -> color_eyre::Result<bool> {
-        let differences: Vec<T> = self
+        Ok(self
             .charge_and_current_iter()
             .zip(previous.charge_and_current_iter())
             .map(|(new, previous)| (new - previous, new.norm()))
             .map(|(difference, norm)| difference.norm() / norm)
-            .collect();
-        Ok(differences
-            .into_iter()
             .all(|difference| difference < tolerance))
     }
 }

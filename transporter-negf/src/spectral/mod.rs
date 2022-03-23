@@ -7,9 +7,20 @@ use energy::EnergySpace;
 use nalgebra::allocator::Allocator;
 use nalgebra::{DVector, DefaultAllocator, DimName, RealField, U1};
 use transporter_mesher::{Mesh, Segment1dConnectivity};
+use wavevector::WavevectorSpace;
 
-pub(crate) struct SpectralDiscretisation<T: RealField> {
+pub(crate) trait SpectralDiscretisation<T: RealField> {
+    fn total_number_of_points(&self) -> usize;
+    fn iter_all(&self) -> std::slice::Iter<'_, (T, T)>;
+}
+
+pub(crate) struct BallisticSpectral<T: RealField> {
     energy: EnergySpace<T, IntegrationRule>,
+}
+
+pub(crate) struct ScatteringSpectral<T: RealField> {
+    energy: EnergySpace<T, IntegrationRule>,
+    wavevector: WavevectorSpace<T, IntegrationRule>,
 }
 
 /// Enum for discrete integration methods

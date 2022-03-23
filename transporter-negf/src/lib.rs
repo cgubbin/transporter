@@ -2,6 +2,7 @@ mod greens_functions;
 mod hamiltonian;
 mod inner_loop;
 mod postprocessor;
+mod self_energy;
 mod spectral;
 
 pub use hamiltonian::*;
