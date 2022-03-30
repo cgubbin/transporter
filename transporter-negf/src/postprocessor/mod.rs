@@ -4,39 +4,55 @@ mod postprocess;
 pub(crate) use charge_and_current::{Charge, ChargeAndCurrent, Current};
 pub(crate) use postprocess::PostProcess;
 
+use nalgebra::{allocator::Allocator, ComplexField, DefaultAllocator};
+use std::marker::PhantomData;
+use transporter_mesher::{Connectivity, Mesh, SmallDim};
+
 pub(crate) struct PostProcessorBuilder<T, RefMesh> {
     mesh: RefMesh,
-    marker: std::marker::PhantomData<T>,
+    marker: PhantomData<T>,
 }
 
-pub(crate) struct PostProcessor<'a, T, Mesh> {
-    mesh: &'a Mesh,
-    marker: std::marker::PhantomData<T>,
+pub(crate) struct PostProcessor<'a, T, GeometryDim, Conn>
+where
+    T: ComplexField,
+    Conn: Connectivity<T::RealField, GeometryDim>,
+    GeometryDim: SmallDim,
+    DefaultAllocator: Allocator<T::RealField, GeometryDim>,
+{
+    mesh: &'a Mesh<T::RealField, GeometryDim, Conn>,
+    marker: PhantomData<T>,
 }
 
-impl PostProcessorBuilder<(), ()> {
+impl<T: ComplexField> PostProcessorBuilder<T, ()> {
     pub(crate) fn new() -> Self {
         PostProcessorBuilder {
             mesh: (),
-            marker: std::marker::PhantomData,
+            marker: PhantomData,
         }
     }
 }
 
-impl<RefMesh> PostProcessorBuilder<(), RefMesh> {
-    pub(crate) fn with_mesh<Mesh>(self, mesh: &Mesh) -> PostProcessorBuilder<(), &Mesh> {
+impl<T: ComplexField, RefMesh> PostProcessorBuilder<T, RefMesh> {
+    pub(crate) fn with_mesh<Mesh>(self, mesh: &Mesh) -> PostProcessorBuilder<T, &Mesh> {
         PostProcessorBuilder {
             mesh,
-            marker: std::marker::PhantomData,
+            marker: PhantomData,
         }
     }
 }
 
-impl<'a, Mesh> PostProcessorBuilder<(), &'a Mesh> {
-    pub(crate) fn build<T>(self) -> PostProcessor<'a, T, Mesh> {
+impl<'a, T, GeometryDim, Conn> PostProcessorBuilder<T, &'a Mesh<T::RealField, GeometryDim, Conn>>
+where
+    T: ComplexField,
+    Conn: Connectivity<T::RealField, GeometryDim>,
+    GeometryDim: SmallDim,
+    DefaultAllocator: Allocator<T::RealField, GeometryDim>,
+{
+    pub(crate) fn build(self) -> PostProcessor<'a, T, GeometryDim, Conn> {
         PostProcessor {
             mesh: self.mesh,
-            marker: std::marker::PhantomData,
+            marker: PhantomData,
         }
     }
 }

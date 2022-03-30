@@ -1,5 +1,5 @@
 use super::GenerateWeights;
-use nalgebra::{DVector, RealField, U1};
+use nalgebra::{DVector, OPoint, RealField, U1};
 use num_traits::NumCast;
 use std::ops::Range;
 use transporter_mesher::{
@@ -13,8 +13,8 @@ pub(crate) struct EnergySpaceBuilder<T, EnergyRange, IntegrationMethod> {
     marker: std::marker::PhantomData<T>,
 }
 
-impl EnergySpaceBuilder<(), (), ()> {
-    fn new() -> Self {
+impl<T> EnergySpaceBuilder<T, (), ()> {
+    pub(crate) fn new() -> Self {
         Self {
             number_of_points: 0,
             energy_range: (),
@@ -24,11 +24,11 @@ impl EnergySpaceBuilder<(), (), ()> {
     }
 }
 
-impl<EnergyRange, IntegrationMethod> EnergySpaceBuilder<(), EnergyRange, IntegrationMethod> {
-    fn with_integration_rule<IntegrationRule>(
+impl<T, EnergyRange, IntegrationMethod> EnergySpaceBuilder<T, EnergyRange, IntegrationMethod> {
+    pub(crate) fn with_integration_rule<IntegrationRule>(
         self,
         integration_rule: IntegrationRule,
-    ) -> EnergySpaceBuilder<(), EnergyRange, IntegrationRule> {
+    ) -> EnergySpaceBuilder<T, EnergyRange, IntegrationRule> {
         EnergySpaceBuilder {
             number_of_points: self.number_of_points,
             energy_range: self.energy_range,
@@ -37,7 +37,7 @@ impl<EnergyRange, IntegrationMethod> EnergySpaceBuilder<(), EnergyRange, Integra
         }
     }
 
-    fn with_number_of_points(self, number_of_points: usize) -> Self {
+    pub(crate) fn with_number_of_points(self, number_of_points: usize) -> Self {
         EnergySpaceBuilder {
             number_of_points,
             energy_range: self.energy_range,
@@ -46,10 +46,10 @@ impl<EnergyRange, IntegrationMethod> EnergySpaceBuilder<(), EnergyRange, Integra
         }
     }
 
-    fn with_energy_range<T>(
+    pub(crate) fn with_energy_range(
         self,
         energy_range: Range<T>,
-    ) -> EnergySpaceBuilder<(), Range<T>, IntegrationMethod> {
+    ) -> EnergySpaceBuilder<T, Range<T>, IntegrationMethod> {
         EnergySpaceBuilder {
             number_of_points: self.number_of_points,
             energy_range,
@@ -59,10 +59,23 @@ impl<EnergyRange, IntegrationMethod> EnergySpaceBuilder<(), EnergyRange, Integra
     }
 }
 
-pub(crate) struct EnergySpace<T: RealField, IntegrationRule> {
+pub(crate) struct EnergySpace<T: Copy + RealField> {
     grid: Mesh1d<T>,
     weights: DVector<T>,
-    integration_rule: IntegrationRule,
+    integration_rule: super::IntegrationRule,
+}
+
+use nalgebra::{allocator::Allocator, DefaultAllocator};
+use transporter_mesher::{Connectivity, SmallDim};
+
+pub(crate) trait BuildEnergySpace<T, IntegrationRule, GeometryDim: SmallDim, Conn>
+where
+    T: Copy + RealField + NumCast,
+    Conn: Connectivity<T, GeometryDim>,
+    IntegrationRule: GenerateWeights<T, U1, Segment1dConnectivity>,
+    DefaultAllocator: Allocator<T, GeometryDim>,
+{
+    fn build(self) -> EnergySpace<T>;
 }
 
 impl<T, IntegrationRule> EnergySpaceBuilder<T, Range<T>, IntegrationRule>
@@ -70,18 +83,33 @@ where
     T: Copy + RealField + NumCast,
     IntegrationRule: GenerateWeights<T, U1, Segment1dConnectivity>,
 {
-    fn build(self) -> EnergySpace<T, IntegrationRule> {
+    pub(crate) fn build(self) -> EnergySpace<T> {
         // Build the energy mesh in meV
         assert!(self.energy_range.end > self.energy_range.start); // Need an order range, or something upsteam went wrong
         let grid = create_line_segment_from_endpoints_and_number_of_points(
             self.energy_range,
             self.number_of_points,
+            0,
         );
         let weights = self.integration_rule.generate_weights_from_grid(&grid);
         EnergySpace {
             grid,
             weights,
-            integration_rule: self.integration_rule,
+            integration_rule: self.integration_rule.query_integration_rule(),
         }
+    }
+}
+
+impl<T: Copy + RealField> EnergySpace<T> {
+    pub(crate) fn num_points(&self) -> usize {
+        self.grid.vertices().len()
+    }
+
+    pub(crate) fn points(&self) -> impl Iterator<Item = &OPoint<T, U1>> + '_ {
+        self.grid.vertices().iter().map(|x| &x.0)
+    }
+
+    pub(crate) fn weights(&self) -> impl Iterator<Item = &T> {
+        self.weights.iter()
     }
 }

@@ -1,18 +1,21 @@
 mod tridiagonal;
-use tridiagonal::*;
 
+use crate::postprocessor::{Charge, Current};
 use crate::{spectral::SpectralDiscretisation, Hamiltonian};
 use nalgebra::{ComplexField, DMatrix};
 use nalgebra_sparse::CsrMatrix;
 use std::boxed::Box;
 
-pub(crate) struct GreensFunctionsBuilder<T, RefSpectral> {
+pub(crate) struct GreensFunctionBuilder<T, RefSpectral> {
     spectral: RefSpectral,
     marker: std::marker::PhantomData<T>,
 }
 
-impl GreensFunctionsBuilder<(), ()> {
-    fn new() -> Self {
+impl<T> GreensFunctionBuilder<T, ()>
+where
+    T: ComplexField,
+{
+    pub(crate) fn new() -> Self {
         Self {
             spectral: (),
             marker: std::marker::PhantomData,
@@ -20,30 +23,30 @@ impl GreensFunctionsBuilder<(), ()> {
     }
 }
 
-impl<RefSpectral> GreensFunctionsBuilder<(), RefSpectral> {
-    fn with_spectral_discretisation<Spectral>(
+impl<T, RefSpectral> GreensFunctionBuilder<T, RefSpectral> {
+    pub(crate) fn with_spectral_discretisation<Spectral>(
         self,
         spectral: &Spectral,
-    ) -> GreensFunctionsBuilder<(), &Spectral> {
-        GreensFunctionsBuilder {
+    ) -> GreensFunctionBuilder<T, &Spectral> {
+        GreensFunctionBuilder {
             spectral,
             marker: std::marker::PhantomData,
         }
     }
 }
 
-impl<'a, T, Spectral> GreensFunctionsBuilder<T, &'a Spectral>
+impl<'a, T, Spectral> GreensFunctionBuilder<T, &'a Spectral>
 where
     T: ComplexField + Copy,
     <T as ComplexField>::RealField: Copy,
     Spectral: SpectralDiscretisation<T::RealField>,
 {
-    fn build<Matrix>(self) -> AggregateGreensFunctions<'a, Matrix, T>
+    pub(crate) fn build<Matrix>(self) -> AggregateGreensFunctions<T, Matrix>
     where
         Matrix: GreensFunctionMethods<T>,
     {
         AggregateGreensFunctions {
-            spectral: self.spectral,
+            //    spectral: self.spectral,
             retarded: Vec::with_capacity(self.spectral.total_number_of_points()),
             advanced: Vec::with_capacity(self.spectral.total_number_of_points()),
             lesser: Vec::with_capacity(self.spectral.total_number_of_points()),
@@ -52,20 +55,63 @@ where
     }
 }
 
-pub(crate) struct AggregateGreensFunctions<'a, Matrix, T>
+pub(crate) struct AggregateGreensFunctions<T, Matrix>
 where
     Matrix: GreensFunctionMethods<T>,
     T: ComplexField + Copy,
     <T as ComplexField>::RealField: Copy,
 {
-    spectral: &'a dyn SpectralDiscretisation<T::RealField>,
+    // spectral: &'a dyn SpectralDiscretisation<T::RealField>,
     retarded: Vec<GreensFunction<Matrix, T>>,
     advanced: Vec<GreensFunction<Matrix, T>>,
     lesser: Vec<GreensFunction<Matrix, T>>,
     greater: Vec<GreensFunction<Matrix, T>>,
 }
 
-impl<'a, Matrix, T> AggregateGreensFunctions<'a, Matrix, T>
+pub(crate) trait AggregateGreensFunctionMethods<T, Integrator>
+where
+    T: ComplexField,
+    Integrator: SpectralDiscretisation<T::RealField>,
+{
+    fn accumulate_into_charge_density_vector(
+        &self,
+        integrator: &Integrator,
+    ) -> Charge<T::RealField>;
+    fn accumulate_into_current_density_vector(
+        &self,
+        integrator: &Integrator,
+    ) -> Current<T::RealField>;
+    fn update_greens_functions(&self) -> color_eyre::Result<()>;
+}
+
+impl<Integrator, Matrix, T> AggregateGreensFunctionMethods<T, Integrator>
+    for AggregateGreensFunctions<T, Matrix>
+where
+    Matrix: GreensFunctionMethods<T>,
+    T: ComplexField + Copy,
+    <T as ComplexField>::RealField: Copy,
+    Integrator: SpectralDiscretisation<T::RealField>,
+{
+    fn accumulate_into_charge_density_vector(
+        &self,
+        _integrator: &Integrator,
+    ) -> Charge<T::RealField> {
+        todo!()
+    }
+
+    fn accumulate_into_current_density_vector(
+        &self,
+        _integrator: &Integrator,
+    ) -> Current<T::RealField> {
+        todo!()
+    }
+
+    fn update_greens_functions(&self) -> color_eyre::Result<()> {
+        todo!()
+    }
+}
+
+impl<'a, Matrix, T> AggregateGreensFunctions<T, Matrix>
 where
     T: ComplexField + Copy,
     <T as ComplexField>::RealField: Copy,
@@ -81,13 +127,13 @@ where
 
     fn update_retarded_greens_function(
         &mut self,
-        hamiltonian: &Hamiltonian<T::RealField>,
+        _hamiltonian: &Hamiltonian<T::RealField>,
     ) -> color_eyre::Result<()> {
-        for (retarded, (_, energy)) in self.retarded.iter_mut().zip(self.spectral.iter_all()) {
-            retarded
-                .as_mut()
-                .generate_retarded_into(*energy, hamiltonian, todo!())?;
-        }
+        //for (retarded, (_, energy)) in self.retarded.iter_mut().zip(self.spectral.iter_all()) {
+        //    retarded
+        //        .as_mut()
+        //        .generate_retarded_into(*energy, hamiltonian, todo!())?;
+        //}
         Ok(())
     }
 }
@@ -113,25 +159,23 @@ where
     }
 }
 
-pub trait GreensFunctionMethods<T>
+pub(crate) trait GreensFunctionMethods<T>
 where
     T: ComplexField + Copy,
     <T as ComplexField>::RealField: Copy,
 {
-    type Output;
     type SelfEnergy;
-    fn generate_advanced(retarded: Self::Output) -> color_eyre::Result<Box<Self::Output>>;
-    //fn generate_greater() -> Self;
-    fn generate_lesser(
-        retarded: Self::Output,
-        advanced: Self::Output,
-    ) -> color_eyre::Result<Box<Self::Output>>;
+    fn generate_advanced(retarded: &Self) -> color_eyre::Result<Box<Self>>;
+    fn generate_advanced_into(&mut self, retarded: &Self) -> color_eyre::Result<()>;
+    fn generate_greater() -> color_eyre::Result<Box<Self>>;
+    fn generate_greater_into(&mut self) -> color_eyre::Result<()>;
+    fn generate_lesser(retarded: &Self, advanced: &Self) -> color_eyre::Result<Box<Self>>;
+    fn generate_lesser_into(&mut self, retarded: &Self, advanced: &Self) -> color_eyre::Result<()>;
     fn generate_retarded(
         energy: T::RealField,
         hamiltonian: &Hamiltonian<T::RealField>,
         self_energy: &Self::SelfEnergy,
     ) -> color_eyre::Result<Box<Self>>;
-
     fn generate_retarded_into(
         &mut self,
         energy: T::RealField,
@@ -190,19 +234,74 @@ where
 //    }
 //}
 
+impl<T> GreensFunctionMethods<T> for CsrMatrix<T>
+where
+    T: ComplexField + Copy,
+    <T as ComplexField>::RealField: Copy,
+{
+    type SelfEnergy = CsrMatrix<T>;
+
+    fn generate_retarded_into(
+        &mut self,
+        _energy: T::RealField,
+        _hamiltonian: &Hamiltonian<T::RealField>,
+        _self_energy: &Self::SelfEnergy,
+    ) -> color_eyre::Result<()> {
+        todo!()
+    }
+
+    fn generate_retarded(
+        _energy: T::RealField,
+        _hamiltonian: &Hamiltonian<T::RealField>,
+        _self_energy: &Self::SelfEnergy,
+    ) -> color_eyre::Result<Box<Self>> {
+        todo!()
+    }
+
+    fn generate_greater() -> color_eyre::Result<Box<Self>> {
+        todo!()
+    }
+
+    fn generate_greater_into(&mut self) -> color_eyre::Result<()> {
+        todo!()
+    }
+
+    fn generate_advanced(_retarded: &CsrMatrix<T>) -> color_eyre::Result<Box<Self>> {
+        todo!()
+    }
+
+    fn generate_advanced_into(&mut self, _retarded: &CsrMatrix<T>) -> color_eyre::Result<()> {
+        todo!()
+    }
+
+    fn generate_lesser(
+        _retarded: &CsrMatrix<T>,
+        _lesser: &CsrMatrix<T>,
+    ) -> color_eyre::Result<Box<Self>> {
+        todo!()
+    }
+
+    fn generate_lesser_into(
+        &mut self,
+        _retarded: &CsrMatrix<T>,
+        _lesser: &CsrMatrix<T>,
+    ) -> color_eyre::Result<()> {
+        todo!()
+    }
+}
+
 impl<T> GreensFunctionMethods<T> for DMatrix<T>
 where
     T: ComplexField + Copy,
     <T as ComplexField>::RealField: Copy,
 {
-    type Output = DMatrix<T>;
     type SelfEnergy = DMatrix<T>;
 
     fn generate_retarded_into(
         &mut self,
         energy: T::RealField,
         hamiltonian: &Hamiltonian<T::RealField>,
-        self_energy: &Self::SelfEnergy,
+        _self_energy: &Self::SelfEnergy,
     ) -> color_eyre::Result<()> {
         let mut output: nalgebra::DMatrixSliceMut<T> = self.into();
 
@@ -222,8 +321,7 @@ where
         // Look at lines 164-172
         let matrix = DMatrix::identity(num_rows, num_rows) * T::from_real(energy)
             - nalgebra_sparse::convert::serial::convert_csr_dense(&ham); //TODO Do we have to convert? Seems dumb. Should we store H in dense form too?&ham;
-                                                                         //     - nalgebra::Complex::new(T::one(), T::zero())
-                                                                         //         * nalgebra_sparse::convert::serial::convert_csr_dense(hamiltonian.as_ref()); //TODO Do we have to convert? Seems dumb. Should we store H in dense form too?
+
         if let Some(matrix) = matrix.try_inverse() {
             output.copy_from(&matrix);
         }
@@ -238,18 +336,48 @@ where
         hamiltonian: &Hamiltonian<T::RealField>,
         self_energy: &Self::SelfEnergy,
     ) -> color_eyre::Result<Box<Self>> {
-        // do a slow matrix inversion
         let num_rows = hamiltonian.num_rows();
         let mut matrix = DMatrix::zeros(num_rows, num_rows);
         matrix.generate_retarded_into(energy, hamiltonian, self_energy)?;
         Ok(Box::new(matrix))
     }
 
-    fn generate_advanced(retarded: DMatrix<T>) -> color_eyre::Result<Box<Self>> {
-        Ok(Box::new(retarded.conjugate().transpose()))
+    fn generate_greater() -> color_eyre::Result<Box<Self>> {
+        todo!()
     }
 
-    fn generate_lesser(retarded: DMatrix<T>, lesser: DMatrix<T>) -> color_eyre::Result<Box<Self>> {
+    fn generate_greater_into(&mut self) -> color_eyre::Result<()> {
+        todo!()
+    }
+
+    fn generate_advanced(retarded: &DMatrix<T>) -> color_eyre::Result<Box<Self>> {
+        let num_rows = retarded.shape().0;
+        let mut matrix = DMatrix::zeros(num_rows, num_rows);
+        matrix.generate_advanced_into(retarded)?;
+        Ok(Box::new(matrix))
+    }
+
+    fn generate_advanced_into(&mut self, retarded: &DMatrix<T>) -> color_eyre::Result<()> {
+        let mut output: nalgebra::DMatrixSliceMut<T> = self.into();
+        output.copy_from(&retarded.conjugate().transpose());
+        Ok(())
+    }
+
+    fn generate_lesser(
+        retarded: &DMatrix<T>,
+        lesser: &DMatrix<T>,
+    ) -> color_eyre::Result<Box<Self>> {
+        let num_rows = retarded.shape().0;
+        let mut matrix = DMatrix::zeros(num_rows, num_rows);
+        matrix.generate_lesser_into(retarded, lesser)?;
+        Ok(Box::new(matrix))
+    }
+
+    fn generate_lesser_into(
+        &mut self,
+        _retarded: &DMatrix<T>,
+        _lesser: &DMatrix<T>,
+    ) -> color_eyre::Result<()> {
         todo!()
     }
 }

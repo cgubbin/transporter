@@ -8,7 +8,7 @@ edition = "2021"
 [dependencies]
 color-eyre = "0.6.1"
 itertools = "0.10.3"
-nalgebra = "0.30"
+nalgebra = "=0.30.0"
 nalgebra-sparse = "0.6.0"
 transporter-mesher = { path = '../transporter-mesher' }
 

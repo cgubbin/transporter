@@ -112,4 +112,20 @@ or
 \end{equation}
 Note that this assumes the dielectric function in the stack does not vary at the edge, which can be ensured by choosing a sensible structure.
 
+\section{Hamiltonian in 1D}
+We can do the same calculation for the Hamiltonian in one spatial dimension. The Hamiltonian we are considering is given for a single band
+\begin{equation}
+	\hat{\mathcal{H}} = - \frac{\hbar^2}{2} \frac{\mathrm{d}}{\mathrm{d} z} \frac{1}{m_{\parallel} \left(z\right)} \frac{\mathrm{d}}{\mathrm{d} z} + V_{\mathbf{k}} \left(z\right)+ \frac{\hbar^2 k^2}{2 m_{\perp}\left(z\right)},
+\end{equation}
+where $m_{\parallel} \; (m_{\perp})$ are the effective mass of the charge carrier parallel (perpendicular) to the growth axis and the spatial potential is
+\begin{equation}
+	V_{\mathbf{k}} \left(z\right) = V\left(z\right) + \frac{\hbar^2 k^2}{2 m_{\perp}} \left(\frac{m_{\parallel}}{m_{\perp}} - 1\right).
+\end{equation}
+The wavevector independent component $V\left(z\right)$ contains contributions from the conduction band offsets, the applied momentum and the Hartree potential.
+
+We start by discretising the differential operator. The expanded operator is given by
+\begin{equation}
+	\mathcal{D} = - \frac{\hbar^2}{2} \left[ \frac{\mathrm{d}}{\mathrm{d} z} \frac{1}{m_{\parallel}\left(z\right)} \frac{\mathrm{d}}{\mathrm{d} z} + \frac{1}{m_{\parallel}\left(z\right)} \frac{\mathrm{d^2}}{\mathrm{d} z^2}\right].
+\end{equation}
+Discretising and applied to a test function $\psi_i = \psi\left(z_i\right)$ we get two terms. We can reuse our results from the Poisson equation.
 \end{document}

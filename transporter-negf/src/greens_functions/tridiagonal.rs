@@ -71,7 +71,7 @@ where
 }
 
 pub(crate) fn bottom_row<T>(
-    energy: T::RealField,
+    _energy: T::RealField,
     fully_connected_diagonal: &DVector<T>,
     left_connected_diagonal: &DVector<T>,
     hamiltonian: &Hamiltonian<T::RealField>,
@@ -95,6 +95,7 @@ where
     {
         let hopping = T::from_real(hamiltonian.as_ref().row(num_rows - 2 - idx).values()[2]);
         *element = -left_diagonal_element * previous * hopping;
+        previous = *element;
     }
     Ok(bottom_row)
 }

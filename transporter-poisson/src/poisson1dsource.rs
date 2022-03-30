@@ -91,7 +91,7 @@ where
     }
 
     /// Update the Jacobian based on the current potential
-    pub fn update_jacobian(&'a self, solution: &DVector<T>) -> color_eyre::Result<()> {
+    pub fn update_jacobian(&'a self, _solution: &DVector<T>) -> color_eyre::Result<()> {
         Ok(())
     }
 }

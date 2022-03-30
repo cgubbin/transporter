@@ -1,5 +1,6 @@
 use nalgebra::{DVector, RealField};
 
+#[derive(Clone)]
 pub(crate) struct ChargeAndCurrent<T> {
     charge: Charge<T>,
     current: Current<T>,
@@ -17,6 +18,10 @@ where
             charge: Charge::new(charge)?,
             current: Current::new(current)?,
         })
+    }
+
+    pub(crate) fn from_charge_and_current(charge: Charge<T>, current: Current<T>) -> Self {
+        Self { charge, current }
     }
 
     pub(crate) fn deref_charge(self) -> Charge<T> {
@@ -56,10 +61,12 @@ where
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct Charge<T> {
     charge: Vec<DVector<T>>,
 }
 
+#[derive(Clone)]
 pub(crate) struct Current<T> {
     current: Vec<DVector<T>>,
 }

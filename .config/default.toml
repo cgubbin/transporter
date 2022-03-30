@@ -1,0 +1,15 @@
+[global]
+number_of_bands = 1
+
+[inner_loop]
+maximum_iterations = 100
+tolerance = 1e-7
+
+[outer_loop]
+maximum_iterations = 20
+tolerance = 1e-7
+
+[mesh]
+unit_size = 1e-9
+elements_per_unit = 10
+maximum_growth_rate = 1.2

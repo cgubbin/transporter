@@ -23,7 +23,7 @@ where
     T: RealField,
     D: SmallDim,
 {
-    fn update_jacobian(&mut self, solution: DVector<T>) -> color_eyre::Result<CsrMatrix<T>> {
+    fn update_jacobian(&mut self, _solution: DVector<T>) -> color_eyre::Result<CsrMatrix<T>> {
         todo!()
     }
 }

@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 /// This module solves the Poisson equation for electron transport on a cell-centered
 /// grid.
 ///

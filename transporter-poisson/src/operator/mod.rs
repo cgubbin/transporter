@@ -125,7 +125,6 @@ where
         row_offsets.push(row_tick);
 
         for (idx, (vertex, connections)) in mesh_data.enumerate() {
-            let mut core_value = T::zero();
             let mut new_cols = vec![];
             let mut new_vals = vec![];
             let dx = connections

@@ -1,0 +1,14 @@
+[[layers]]
+thickness = [2.0]
+material = "GaAs"
+doping_density = 1e24
+
+[[layers]]
+thickness = [1.0]
+material = "SiC"
+doping_density = 1e24
+
+[[layers]]
+thickness = [2.0]
+material = "GaAs"
+doping_density = 1e24
