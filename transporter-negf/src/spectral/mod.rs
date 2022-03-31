@@ -4,11 +4,12 @@ pub(crate) mod constructors;
 mod energy;
 mod wavevector;
 
+pub(crate) use wavevector::WavevectorSpace;
+
 use energy::EnergySpace;
 use nalgebra::allocator::Allocator;
 use nalgebra::{DVector, DefaultAllocator, RealField, U1};
 use transporter_mesher::{Connectivity, Mesh, Segment1dConnectivity, SmallDim};
-use wavevector::WavevectorSpace;
 
 pub(crate) trait SpectralDiscretisation<T: RealField> {
     fn total_number_of_points(&self) -> usize {
@@ -19,40 +20,19 @@ pub(crate) trait SpectralDiscretisation<T: RealField> {
     fn integrate(&self, integrand: &[T]) -> T;
     fn integrate_over_wavevector(&self, integrand: &[T]) -> T;
     fn integrate_over_energy(&self, integrand: &[T]) -> T;
-    // fn iter_all(&self) -> std::slice::Iter<'_, (T, T)>;
 }
 
-pub(crate) struct BallisticSpectral<T: Copy + RealField> {
+/// A general `SpectralSpace` which contains the wavevector and energy discretisation and associated integration rules
+pub(crate) struct SpectralSpace<T: Copy + RealField, WavevectorSpace> {
+    /// A `SpectralSpace` always has an associated energy space, so this is a concrete type
     energy: EnergySpace<T>,
-}
-
-impl<T: Copy + RealField> BallisticSpectral<T> {
-    fn new(energy: EnergySpace<T>) -> Self {
-        Self { energy }
-    }
-}
-
-pub(crate) struct ScatteringSpectral<T: Copy + RealField, GeometryDim: SmallDim, Conn>
-where
-    Conn: Connectivity<T, GeometryDim>,
-    DefaultAllocator: Allocator<T, GeometryDim>,
-{
-    energy: EnergySpace<T>,
-    wavevector: WavevectorSpace<T, GeometryDim, Conn>,
-}
-
-impl<T: Copy + RealField, GeometryDim: SmallDim, Conn> ScatteringSpectral<T, GeometryDim, Conn>
-where
-    Conn: Connectivity<T, GeometryDim>,
-    DefaultAllocator: Allocator<T, GeometryDim>,
-{
-    fn new(energy: EnergySpace<T>, wavevector: WavevectorSpace<T, GeometryDim, Conn>) -> Self {
-        Self { energy, wavevector }
-    }
+    /// A `SpectralSpace` may have a wavevector space, either if the calculation is incoherent or the
+    /// carrier effective mass varies across the structure
+    wavevector: WavevectorSpace,
 }
 
 impl<T: RealField + Copy, GeometryDim: SmallDim, Conn> SpectralDiscretisation<T>
-    for ScatteringSpectral<T, GeometryDim, Conn>
+    for SpectralSpace<T, WavevectorSpace<T, GeometryDim, Conn>>
 where
     Conn: Connectivity<T, GeometryDim>,
     DefaultAllocator: Allocator<T, GeometryDim>,
@@ -107,7 +87,7 @@ where
     }
 }
 
-impl<T: RealField + Copy> SpectralDiscretisation<T> for BallisticSpectral<T> {
+impl<T: RealField + Copy> SpectralDiscretisation<T> for SpectralSpace<T, ()> {
     fn number_of_energy_points(&self) -> usize {
         self.energy.num_points()
     }
@@ -135,10 +115,6 @@ impl<T: RealField + Copy> SpectralDiscretisation<T> for BallisticSpectral<T> {
     fn integrate_over_wavevector(&self, _: &[T]) -> T {
         unreachable!()
     }
-
-    // fn iter_all(&self) -> std::slice::Iter<'_, (T, T)> {
-    //     self.energy.points().map(|x| (T::zero(), x))
-    // }
 }
 
 /// Enum for discrete integration methods

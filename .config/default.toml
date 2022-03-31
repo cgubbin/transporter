@@ -13,3 +13,9 @@ tolerance = 1e-7
 unit_size = 1e-9
 elements_per_unit = 10
 maximum_growth_rate = 1.2
+
+[spectral]
+number_of_energy_points = 100
+minimum_energy = 0.0
+maximum_energy = 0.5
+energy_integration_rule = "Trapezium"

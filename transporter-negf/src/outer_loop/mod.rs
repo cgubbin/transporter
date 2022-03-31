@@ -1,13 +1,15 @@
 mod convergence;
 mod methods;
 
-pub(crate) use convergence::{CalculationType, Convergence};
+pub(crate) use convergence::Convergence;
+pub(crate) use methods::{Outer, Potential};
 
-use crate::{hamiltonian::Hamiltonian, spectral::ScatteringSpectral};
+use crate::{hamiltonian::Hamiltonian, postprocessor::ChargeAndCurrent};
 use nalgebra::{allocator::Allocator, ComplexField, DefaultAllocator};
 use std::marker::PhantomData;
 use transporter_mesher::{Connectivity, Mesh, SmallDim};
 
+/// Builder struct for the outer loop allows for polymorphism over the `SpectralSpace`
 pub(crate) struct OuterLoopBuilder<T, RefConvergenceSettings, RefMesh, RefSpectral, RefHamiltonian>
 {
     mesh: RefMesh,
@@ -18,7 +20,8 @@ pub(crate) struct OuterLoopBuilder<T, RefConvergenceSettings, RefMesh, RefSpectr
 }
 
 impl<T> OuterLoopBuilder<T, (), (), (), ()> {
-    fn new() -> Self {
+    /// Initialise an empty OuterLoopBuilder
+    pub(crate) fn new() -> Self {
         Self {
             mesh: (),
             spectral: (),
@@ -29,10 +32,11 @@ impl<T> OuterLoopBuilder<T, (), (), (), ()> {
     }
 }
 
-impl<T, RefConvergenceSettings, RefMesh, RefSpectral, RefHamiltonian>
+impl<T: ComplexField, RefConvergenceSettings, RefMesh, RefSpectral, RefHamiltonian>
     OuterLoopBuilder<T, RefConvergenceSettings, RefMesh, RefSpectral, RefHamiltonian>
 {
-    fn with_mesh<Mesh>(
+    /// Attach the problem's `Mesh`
+    pub(crate) fn with_mesh<Mesh>(
         self,
         mesh: &Mesh,
     ) -> OuterLoopBuilder<T, RefConvergenceSettings, &Mesh, RefSpectral, RefHamiltonian> {
@@ -45,7 +49,8 @@ impl<T, RefConvergenceSettings, RefMesh, RefSpectral, RefHamiltonian>
         }
     }
 
-    fn with_spectral_space<Spectral>(
+    /// Attach the `SpectralSpace` associated with the problem
+    pub(crate) fn with_spectral_space<Spectral>(
         self,
         spectral: &Spectral,
     ) -> OuterLoopBuilder<T, RefConvergenceSettings, RefMesh, &Spectral, RefHamiltonian> {
@@ -58,7 +63,8 @@ impl<T, RefConvergenceSettings, RefMesh, RefSpectral, RefHamiltonian>
         }
     }
 
-    fn with_hamiltonian<Hamiltonian>(
+    /// Attach the constructed `Hamiltonian` associated with the problem
+    pub(crate) fn with_hamiltonian<Hamiltonian>(
         self,
         hamiltonian: &Hamiltonian,
     ) -> OuterLoopBuilder<T, RefConvergenceSettings, RefMesh, RefSpectral, &Hamiltonian> {
@@ -71,7 +77,8 @@ impl<T, RefConvergenceSettings, RefMesh, RefSpectral, RefHamiltonian>
         }
     }
 
-    fn with_convergence_settings<ConvergenceSettings>(
+    /// Attach convergence information for the inner and outer loop
+    pub(crate) fn with_convergence_settings<ConvergenceSettings>(
         self,
         convergence_settings: &ConvergenceSettings,
     ) -> OuterLoopBuilder<T, &ConvergenceSettings, RefMesh, RefSpectral, RefHamiltonian> {
@@ -85,7 +92,8 @@ impl<T, RefConvergenceSettings, RefMesh, RefSpectral, RefHamiltonian>
     }
 }
 
-struct OuterLoop<'a, T, GeometryDim, Conn>
+/// A structure holding the information to carry out the outer iteration
+pub(crate) struct OuterLoop<'a, T, GeometryDim, Conn, SpectralSpace>
 where
     T: ComplexField,
     <T as ComplexField>::RealField: Copy,
@@ -93,19 +101,24 @@ where
     Conn: Connectivity<T::RealField, GeometryDim>,
     DefaultAllocator: Allocator<T::RealField, GeometryDim>,
 {
+    /// The convergence information for the outerloop and the spawned innerloop
     convergence_settings: &'a Convergence<T::RealField>,
+    /// The mesh associated with the problem
     mesh: &'a Mesh<T::RealField, GeometryDim, Conn>,
-    spectral: &'a ScatteringSpectral<T::RealField, GeometryDim, Conn>,
+    /// The spectral mesh and integration weights associated with the problem
+    spectral: &'a SpectralSpace,
+    /// The Hamiltonian associated with the problem
     hamiltonian: &'a Hamiltonian<T::RealField>,
+    // TODO A solution tracker, think about this IMPL. We already have a top-level tracker
     tracker: Tracker<T::RealField>,
 }
 
-impl<'a, T, GeometryDim, Conn>
+impl<'a, T, GeometryDim, Conn, SpectralSpace>
     OuterLoopBuilder<
         T,
         &'a Convergence<T::RealField>,
         &'a Mesh<T::RealField, GeometryDim, Conn>,
-        &'a ScatteringSpectral<T::RealField, GeometryDim, Conn>,
+        &'a SpectralSpace,
         &'a Hamiltonian<T::RealField>,
     >
 where
@@ -115,7 +128,10 @@ where
     Conn: Connectivity<T::RealField, GeometryDim>,
     DefaultAllocator: Allocator<T::RealField, GeometryDim>,
 {
-    fn build(self) -> color_eyre::Result<OuterLoop<'a, T, GeometryDim, Conn>> {
+    /// Build out the OuterLoop -> Generic over the SpectralSpace so the OuterLoop can do both coherent and incoherent transport
+    pub(crate) fn build(
+        self,
+    ) -> color_eyre::Result<OuterLoop<'a, T, GeometryDim, Conn, SpectralSpace>> {
         Ok(OuterLoop {
             convergence_settings: self.convergence_settings,
             mesh: self.mesh,
@@ -125,9 +141,6 @@ where
         })
     }
 }
-
-use crate::postprocessor::ChargeAndCurrent;
-use methods::Potential;
 
 pub(crate) struct Tracker<T: nalgebra::RealField> {
     converged_coherent_calculation: bool,

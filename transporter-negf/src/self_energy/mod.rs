@@ -55,16 +55,13 @@ impl<T, RefSpectral, RefMesh> SelfEnergyBuilder<T, RefSpectral, RefMesh> {
     }
 }
 
-impl<'a, T, GeometryDim, Conn>
-    SelfEnergyBuilder<
-        T,
-        &'a crate::spectral::ScatteringSpectral<T::RealField, GeometryDim, Conn>,
-        &'a Mesh<T::RealField, GeometryDim, Conn>,
-    >
+impl<'a, T, GeometryDim, Conn, SpectralSpace>
+    SelfEnergyBuilder<T, &'a SpectralSpace, &'a Mesh<T::RealField, GeometryDim, Conn>>
 where
     T: ComplexField + Copy,
     <T as ComplexField>::RealField: Copy,
     GeometryDim: SmallDim,
+    SpectralSpace: crate::spectral::SpectralDiscretisation<T::RealField>,
     Conn: Connectivity<T::RealField, GeometryDim>,
     DefaultAllocator: Allocator<T::RealField, GeometryDim>,
 {

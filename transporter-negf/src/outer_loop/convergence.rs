@@ -1,19 +1,15 @@
+use crate::app::Calculation;
 use nalgebra::RealField;
-
-pub(crate) enum CalculationType {
-    Coherent,
-    Incoherent,
-}
 
 pub(crate) struct Convergence<T>
 where
     T: RealField,
 {
-    outer_tolerance: T,
-    inner_tolerance: T,
-    maximum_outer_iterations: usize,
-    maximum_inner_iterations: usize,
-    calculation_type: CalculationType,
+    pub(crate) outer_tolerance: T,
+    pub(crate) inner_tolerance: T,
+    pub(crate) maximum_outer_iterations: usize,
+    pub(crate) maximum_inner_iterations: usize,
+    pub(crate) calculation_type: Calculation,
 }
 
 impl<T: Copy + RealField> Convergence<T> {
@@ -33,7 +29,7 @@ impl<T: Copy + RealField> Convergence<T> {
         self.inner_tolerance
     }
 
-    pub(crate) fn calculation_type(&self) -> &CalculationType {
+    pub(crate) fn calculation_type(&self) -> &Calculation {
         &self.calculation_type
     }
 }

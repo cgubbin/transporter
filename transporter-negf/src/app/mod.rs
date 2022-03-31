@@ -1,20 +1,19 @@
 /// This module governs the high-level implementation of the simulation
 mod configuration;
 mod tracker;
-use crate::device::{
-    info_desk::{BuildInfoDesk, DeviceInfoDesk},
-    reader::Device,
+use crate::{
+    device::{info_desk::BuildInfoDesk, reader::Device},
+    outer_loop::{Outer, Potential},
 };
 //use crate::hamiltonian::HamiltonianConstructor;
 use clap::{ArgEnum, Parser};
 use color_eyre::eyre::eyre;
-use nalgebra::{allocator::Allocator, DefaultAllocator, RealField, U1, U2};
-use num_traits::ToPrimitive;
+use configuration::Configuration;
+use nalgebra::{allocator::Allocator, DefaultAllocator, RealField, U1};
+use num_traits::{NumCast, ToPrimitive};
 use serde::{de::DeserializeOwned, Deserialize};
 use std::path::PathBuf;
-use transporter_mesher::{Connectivity, Mesh, Mesh1d, SmallDim};
-
-use configuration::Configuration;
+use transporter_mesher::{Connectivity, Mesh, Mesh1d};
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
@@ -37,7 +36,7 @@ enum LogLevel {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, ArgEnum)]
-enum Calculation {
+pub(crate) enum Calculation {
     Coherent,
     Incoherent,
 }
@@ -48,15 +47,20 @@ enum Dimension {
     D2,
 }
 
-pub fn run<T: Copy + DeserializeOwned + RealField + ToPrimitive>() -> color_eyre::Result<()> {
+pub fn run<T: Copy + ComplexField>() -> color_eyre::Result<()>
+where
+    <T as ComplexField>::RealField: Copy + DeserializeOwned + NumCast + RealField + ToPrimitive,
+{
     let cli = App::parse();
+
+    let __marker: std::marker::PhantomData<T> = std::marker::PhantomData;
 
     println!("calculation: {:?}", cli.calculation);
     println!("log_level: {:?}", cli.log_level);
     println!("path: {:?}", cli.file_path);
     println!("dimension: {:?}", cli.dimension);
 
-    let config: Configuration<T> = Configuration::build()?;
+    let config: Configuration<T::RealField> = Configuration::build()?;
 
     let path = cli
         .file_path
@@ -64,15 +68,16 @@ pub fn run<T: Copy + DeserializeOwned + RealField + ToPrimitive>() -> color_eyre
 
     match cli.dimension {
         Dimension::D1 => {
-            let device: Device<T, U1> = Device::build(path)?;
+            let device: Device<T::RealField, U1> = Device::build(path)?;
             // TODO Info_desk is currently always U1 because it is informed by the device dimension right now, this is no good. We need n_bands to be in-play here.
             let info_desk = device.build_device_info_desk()?;
-            let mesh: Mesh1d<T> = build_mesh_with_config(&config, device)?;
+            let mesh: Mesh1d<T::RealField> = build_mesh_with_config(&config, device)?;
             let tracker = tracker::TrackerBuilder::new()
                 .with_mesh(&mesh)
                 .with_info_desk(&info_desk)
                 .build();
-            run_internal(config, &mesh, &tracker, cli.calculation)?;
+
+            build_and_run(config, &mesh, &tracker, cli.calculation, __marker)?;
         }
         Dimension::D2 => {
             unimplemented!()
@@ -109,43 +114,61 @@ where
     )
 }
 
-use tracker::Tracker;
-fn run_internal<T: Copy + RealField, Conn, Tracker>(
-    config: Configuration<T>,
-    mesh: &Mesh<T, Tracker::GeometryDim, Conn>,
+use nalgebra::ComplexField;
+
+fn build_and_run<T: Copy + ComplexField, Conn, Tracker>(
+    config: Configuration<T::RealField>,
+    mesh: &Mesh<T::RealField, Tracker::GeometryDim, Conn>,
     tracker: &Tracker,
     calculation_type: Calculation,
+    marker: std::marker::PhantomData<T>,
 ) -> color_eyre::Result<()>
 where
-    Conn: Connectivity<T, Tracker::GeometryDim>,
-    Tracker: crate::HamiltonianInfoDesk<T>,
-    DefaultAllocator: Allocator<T, Tracker::GeometryDim>
-        + Allocator<T, Tracker::BandDim>
-        + Allocator<[T; 3], Tracker::BandDim>,
+    <T as ComplexField>::RealField: Copy + num_traits::NumCast + RealField,
+    Conn: Connectivity<T::RealField, Tracker::GeometryDim>,
+    Tracker: crate::HamiltonianInfoDesk<T::RealField>,
+    DefaultAllocator: Allocator<T::RealField, Tracker::GeometryDim>
+        + Allocator<T::RealField, Tracker::BandDim>
+        + Allocator<[T::RealField; 3], Tracker::BandDim>,
 {
     let hamiltonian = crate::hamiltonian::HamiltonianBuilder::new()
         .with_mesh(mesh)
         .with_info_desk(tracker)
         .build()?;
 
-    let tmp = hamiltonian.calculate_total(T::one());
+    // Begin by building a coherent spectral space, regardless of calculation we begin with a coherent loop
+    let spectral_space_builder = crate::spectral::constructors::SpectralSpaceBuilder::new()
+        .with_number_of_energy_points(config.spectral.number_of_energy_points)
+        .with_energy_range(std::ops::Range {
+            start: config.spectral.minimum_energy,
+            end: config.spectral.maximum_energy,
+        })
+        .with_energy_integration_method(config.spectral.energy_integration_rule);
 
-    dbg!(tmp);
+    let spectral_space = spectral_space_builder.build_coherent();
 
-    //let spectral_discretisation = crate::spectral::constructors::SpectralSpaceBuilder::new()
-    //    .with_number_of_energy_points(todo!()) //config.global.number_of_energy_points)
-    //    .with_energy_range(todo!()) //config.global.energy_range)
-    //    .with_energy_integration_method(todo!()); //config.global.energy_integration_rule);
+    let outer_config = crate::outer_loop::Convergence {
+        outer_tolerance: config.outer_loop.tolerance,
+        maximum_outer_iterations: config.outer_loop.maximum_iterations,
+        inner_tolerance: config.inner_loop.tolerance,
+        maximum_inner_iterations: config.inner_loop.maximum_iterations,
+        calculation_type: Calculation::Coherent,
+    };
+    let mut outer_loop: crate::outer_loop::OuterLoop<
+        T,
+        Tracker::GeometryDim,
+        Conn,
+        crate::spectral::SpectralSpace<T::RealField, ()>,
+    > = crate::outer_loop::OuterLoopBuilder::new()
+        .with_mesh(mesh)
+        .with_hamiltonian(&hamiltonian)
+        .with_spectral_space(&spectral_space)
+        .with_convergence_settings(&outer_config)
+        .build()?;
 
-    //let spectral: impl crate::spectral::SpectralDiscretisation<T> = match calculation_type {
-    //    Calculation::Coherent => spectral_discretisation.build(),
-    //    Calculation::Incoherent => {
-    //        let spectral_discretisation = spectral_discretisation
-    //            .with_number_of_wavevector_points(todo!()) //config.global.number_of_energy_points)
-    //            .with_wavevector_range(todo!()) //config.global.energy_range)
-    //            .with_wavevector_integration_method(todo!()); //config.global.energy_integration_rule);todo!()
-    //        spectral_discretisation.build();
-    //    }
-    //};
-    Ok(())
+    let initial_potential = Potential::from_vector(nalgebra::DVector::from_element(
+        mesh.num_nodes(),
+        T::zero().real(),
+    ));
+    outer_loop.run_loop(initial_potential)
 }

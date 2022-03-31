@@ -9,7 +9,7 @@
 //!
 //! A Hamiltonian is constructed through the `HamiltonianBuilder` class from `mesh: Mesh` and `tracker: Tracker` as
 //!
-//! ```no_run
+//! ```ignore
 //! HamiltonianBuilder::new()
 //!     .with_mesh(&mesh)
 //!     .with_tracker(&tracker)
@@ -81,13 +81,11 @@ impl<T: Copy + RealField> Hamiltonian<T> {
         C: Connectivity<T, InfoDesk::GeometryDim>,
         DefaultAllocator: Allocator<T, InfoDesk::BandDim> + Allocator<T, InfoDesk::GeometryDim>,
     {
-        let hamiltonian_constructor: CsrAssembler<T> = CsrAssembler::default();
         let element_assembler = ElementHamiltonianAssemblerBuilder::new()
             .with_info_desk(info_desk)
             .with_mesh(mesh)
             .build();
-        hamiltonian_constructor.assemble_potential_into(&element_assembler, &mut self.potential)?;
-        Ok(())
+        CsrAssembler::assemble_potential_into(&element_assembler, &mut self.potential)
     }
 
     /// Finds the total Hamiltonian at fixed `wavevector`
@@ -174,11 +172,12 @@ where
         DefaultAllocator: Allocator<T, InfoDesk::GeometryDim> + Allocator<T, InfoDesk::BandDim>,
     {
         // Build out the constructors
-        let hamiltonian_constructor: CsrAssembler<T> = CsrAssembler::default();
         let element_assembler = ElementHamiltonianAssemblerBuilder::new()
             .with_info_desk(info_desk)
             .with_mesh(mesh)
             .build();
+        let hamiltonian_constructor: CsrAssembler<T> =
+            CsrAssembler::from_element_assembler(&element_assembler)?;
 
         // Build the fixed component: the differential operator and band offsets
         let fixed = hamiltonian_constructor.assemble_fixed(&element_assembler)?;

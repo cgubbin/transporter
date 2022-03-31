@@ -5,7 +5,6 @@ use crate::{
     hamiltonian::Hamiltonian,
     outer_loop::Convergence,
     self_energy::SelfEnergy,
-    spectral::ScatteringSpectral,
 };
 pub(crate) use methods::Inner;
 use nalgebra::ComplexField;
@@ -210,7 +209,7 @@ where
     }
 }
 
-pub(crate) struct InnerLoop<'a, T, GeometryDim, Conn, Matrix>
+pub(crate) struct InnerLoop<'a, T, GeometryDim, Conn, Matrix, SpectralSpace>
 where
     T: ComplexField + Copy,
     <T as ComplexField>::RealField: Copy,
@@ -220,19 +219,19 @@ where
     DefaultAllocator: Allocator<T::RealField, GeometryDim>,
 {
     mesh: &'a Mesh<T::RealField, GeometryDim, Conn>,
-    spectral: &'a ScatteringSpectral<T::RealField, GeometryDim, Conn>,
+    spectral: &'a SpectralSpace,
     hamiltonian: &'a Hamiltonian<T::RealField>,
     greens_functions: &'a AggregateGreensFunctions<T, Matrix>,
     self_energies: &'a SelfEnergy<T, GeometryDim, Conn, Matrix>,
     convergence_settings: &'a Convergence<T::RealField>,
 }
 
-impl<'a, T, GeometryDim, Conn, Matrix>
+impl<'a, T, GeometryDim, Conn, Matrix, SpectralSpace>
     InnerLoopBuilder<
         T,
         &'a Convergence<T::RealField>,
         &'a Mesh<T::RealField, GeometryDim, Conn>,
-        &'a ScatteringSpectral<T::RealField, GeometryDim, Conn>,
+        &'a SpectralSpace,
         &'a Hamiltonian<T::RealField>,
         &'a mut AggregateGreensFunctions<T, Matrix>,
         &'a mut SelfEnergy<T, GeometryDim, Conn, Matrix>,
@@ -245,7 +244,7 @@ where
     Matrix: GreensFunctionMethods<T>,
     DefaultAllocator: Allocator<T::RealField, GeometryDim>,
 {
-    pub(crate) fn build(self) -> InnerLoop<'a, T, GeometryDim, Conn, Matrix> {
+    pub(crate) fn build(self) -> InnerLoop<'a, T, GeometryDim, Conn, Matrix, SpectralSpace> {
         InnerLoop {
             mesh: self.mesh,
             spectral: self.spectral,

@@ -434,17 +434,14 @@ fn construct_internal<T: Copy + RealField>(
     [
         second_derivatives[0]
             + first_derivatives[0] * mass_first_derivatives
-                / T::from_f64(ELECTRON_MASS).expect("Electron mass must fit in T")
-                / T::from_f64(ELECTRON_CHARGE).expect("Electron charge must fit in T"),
+                / T::from_f64(ELECTRON_MASS).expect("Electron mass must fit in T"),
         second_derivatives[1]
             + first_derivatives[1] * mass_first_derivatives
-                / T::from_f64(ELECTRON_MASS).expect("Electron mass must fit in T")
-                / T::from_f64(ELECTRON_CHARGE).expect("Electron charge must fit in T"),
+                / T::from_f64(ELECTRON_MASS).expect("Electron mass must fit in T"),
         if effective_masses.len() == 3 {
             second_derivatives[2]
                 + first_derivatives[2] * mass_first_derivatives
                     / T::from_f64(ELECTRON_MASS).expect("Electron mass must fit in T")
-                    / T::from_f64(ELECTRON_CHARGE).expect("Electron charge must fit in T")
         } else {
             T::zero()
         },
@@ -465,8 +462,7 @@ fn second_derivative<T: Copy + RealField>(
     let prefactor = prefactor * (T::one() + T::one())
         / (delta_m * delta_p * (delta_m + delta_p))
         / effective_mass
-        / T::from_f64(ELECTRON_MASS).expect("Electron mass must fit in T")
-        / T::from_f64(ELECTRON_CHARGE).expect("Electron charge must fit in T");
+        / T::from_f64(ELECTRON_MASS).expect("Electron mass must fit in T");
 
     let minus_term = prefactor * delta_m.powi(2) / delta_p;
     let plus_term = prefactor * delta_p.powi(2) / delta_m;
@@ -568,18 +564,16 @@ where
         let ele = row.get_mut(0).unwrap();
         *ele = prefactor / parallel_mass;
     }
-    println!("{}", output);
-
     Ok(())
 }
 
 #[derive(Debug)]
+/// Struct to
 pub struct AggregateElementAssembler<'a, ElementAssembler> {
     assemblers: &'a [ElementAssembler],
     solution_dim: usize,
     num_elements: usize,
     num_nodes: usize,
-    num_bands: usize,
     element_offsets: Vec<usize>,
 }
 
@@ -647,7 +641,6 @@ where
             solution_dim,
             num_elements: assemblers[0].num_elements(),
             num_nodes,
-            num_bands: 1,
             element_offsets,
         }
     }

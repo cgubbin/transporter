@@ -1,3 +1,4 @@
+use crate::spectral::IntegrationRule;
 use color_eyre::eyre::eyre;
 use config::{Config, File};
 use serde::{de::DeserializeOwned, Deserialize};
@@ -10,6 +11,16 @@ pub(crate) struct Configuration<T> {
     pub(crate) mesh: MeshConfiguration<T>,
     pub(crate) inner_loop: InnerConfiguration<T>,
     pub(crate) outer_loop: OuterConfiguration<T>,
+    pub(crate) spectral: SpectralConfiguration<T>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct SpectralConfiguration<T> {
+    pub(crate) number_of_energy_points: usize,
+    // TODO : These should be OPoint of size `BandDim`
+    pub(crate) minimum_energy: T,
+    pub(crate) maximum_energy: T,
+    pub(crate) energy_integration_rule: IntegrationRule,
 }
 
 #[derive(Debug, Deserialize)]
@@ -28,14 +39,14 @@ pub(crate) struct MeshConfiguration<T> {
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct InnerConfiguration<T> {
-    maximum_iterations: usize,
-    tolerance: T,
+    pub(crate) maximum_iterations: usize,
+    pub(crate) tolerance: T,
 }
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct OuterConfiguration<T> {
-    maximum_iterations: usize,
-    tolerance: T,
+    pub(crate) maximum_iterations: usize,
+    pub(crate) tolerance: T,
 }
 
 impl<T: DeserializeOwned> Configuration<T> {
