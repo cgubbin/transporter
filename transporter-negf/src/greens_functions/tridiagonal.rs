@@ -1,4 +1,3 @@
-use crate::Hamiltonian;
 use nalgebra::{ComplexField, DVector};
 use nalgebra_sparse::CsrMatrix;
 
@@ -12,7 +11,7 @@ where
     <T as ComplexField>::RealField: Copy,
 {
     let nrows = hamiltonian.nrows();
-    let left_diagonal = left_connected_diagonal(energy, &hamiltonian, self_energies.0, nrows)?;
+    let left_diagonal = left_connected_diagonal(energy, hamiltonian, self_energies.0, nrows)?;
 
     let mut diagonal = DVector::zeros(nrows);
     diagonal[nrows - 1] = T::one()

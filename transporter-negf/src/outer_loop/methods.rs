@@ -66,7 +66,7 @@ where
 {
     fn is_loop_converged(
         &self,
-        previous_potential: &mut Potential<T::RealField>,
+        _previous_potential: &mut Potential<T::RealField>,
     ) -> color_eyre::Result<bool> {
         //let potential = self.update_potential()?;
         //let result = potential.is_change_within_tolerance(
@@ -143,7 +143,7 @@ where
 {
     fn is_loop_converged(
         &self,
-        previous_potential: &mut Potential<T::RealField>,
+        _previous_potential: &mut Potential<T::RealField>,
     ) -> color_eyre::Result<bool> {
         //let potential = self.update_potential()?;
         //let result = potential.is_change_within_tolerance(

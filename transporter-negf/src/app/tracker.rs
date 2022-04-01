@@ -3,8 +3,10 @@ use crate::{
     outer_loop::Potential,
     postprocessor::{Charge, Current},
 };
-use nalgebra::{allocator::Allocator, DVector, DefaultAllocator, OPoint, OVector, RealField};
-use nalgebra::{Const, Dynamic, Matrix, VecStorage};
+use nalgebra::{
+    allocator::Allocator, Const, DVector, DefaultAllocator, Dynamic, Matrix, OPoint, OVector,
+    RealField, VecStorage,
+};
 use std::marker::PhantomData;
 use transporter_mesher::{Connectivity, Mesh, SmallDim};
 
@@ -132,9 +134,8 @@ where
         let charge_densities: Charge<T, BandDim> = Charge::new(
             OVector::<DVector<T>, BandDim>::from_element(empty_vector.clone()),
         )?;
-        let current_densities: Current<T, BandDim> = Current::new(
-            OVector::<DVector<T>, BandDim>::from_element(empty_vector.clone()),
-        )?;
+        let current_densities: Current<T, BandDim> =
+            Current::new(OVector::<DVector<T>, BandDim>::from_element(empty_vector))?;
         Ok(Tracker {
             info_desk: self.info_desk,
             mesh: self.mesh,

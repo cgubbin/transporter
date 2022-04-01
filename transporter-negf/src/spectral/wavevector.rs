@@ -1,6 +1,5 @@
 use super::GenerateWeights;
-use nalgebra::{allocator::Allocator, DefaultAllocator};
-use nalgebra::{DVector, OPoint, RealField, U1};
+use nalgebra::{allocator::Allocator, DVector, DefaultAllocator, OPoint, RealField, U1};
 use num_traits::NumCast;
 use transporter_mesher::{Connectivity, Mesh, Segment1dConnectivity, SmallDim};
 

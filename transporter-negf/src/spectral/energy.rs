@@ -1,9 +1,10 @@
 use super::GenerateWeights;
-use nalgebra::{DVector, OPoint, RealField, U1};
+use nalgebra::{allocator::Allocator, DVector, DefaultAllocator, RealField, U1};
 use num_traits::NumCast;
 use std::ops::Range;
 use transporter_mesher::{
-    create_line_segment_from_endpoints_and_number_of_points, Mesh1d, Segment1dConnectivity,
+    create_line_segment_from_endpoints_and_number_of_points, Connectivity, Mesh1d,
+    Segment1dConnectivity, SmallDim,
 };
 
 pub(crate) struct EnergySpaceBuilder<T, EnergyRange, IntegrationMethod> {
@@ -64,9 +65,6 @@ pub(crate) struct EnergySpace<T: Copy + RealField> {
     weights: DVector<T>,
     integration_rule: super::IntegrationRule,
 }
-
-use nalgebra::{allocator::Allocator, DefaultAllocator};
-use transporter_mesher::{Connectivity, SmallDim};
 
 pub(crate) trait BuildEnergySpace<T, IntegrationRule, GeometryDim: SmallDim, Conn>
 where

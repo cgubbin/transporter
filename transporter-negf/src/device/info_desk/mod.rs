@@ -1,12 +1,10 @@
 mod materials;
 
-use super::Device;
 pub(crate) use materials::Material;
 
-use color_eyre::eyre::eyre;
+use super::Device;
 use nalgebra::{
-    allocator::Allocator, DefaultAllocator, OMatrix, OPoint, OVector, Point1, RealField, Vector3,
-    U1, U3,
+    allocator::Allocator, DefaultAllocator, OPoint, OVector, Point1, RealField, U1, U3,
 };
 use std::marker::PhantomData;
 use transporter_mesher::SmallDim;
@@ -107,10 +105,10 @@ impl Material {
         match self {
             Material::GaAs => Ok(LayerInfoDesk::gaas()),
             Material::SiC => Ok(LayerInfoDesk::sic()),
-            _ => Err(eyre!(
-                "The material {} does not have a `get_info` implementation",
-                self
-            )),
+            // _ => Err(eyre!(
+            //     "The material {} does not have a `get_info` implementation",
+            //     self
+            // )),
         }
     }
 }

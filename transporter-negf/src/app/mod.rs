@@ -1,21 +1,23 @@
 /// This module governs the high-level implementation of the simulation
 mod configuration;
 mod tracker;
+pub(crate) use tracker::Tracker;
+
 use crate::{
     device::{info_desk::BuildInfoDesk, reader::Device},
     outer_loop::{Outer, Potential},
 };
-pub(crate) use tracker::Tracker;
-//use crate::hamiltonian::HamiltonianConstructor;
 use clap::{ArgEnum, Parser};
 use color_eyre::eyre::eyre;
 use configuration::Configuration;
-use nalgebra::{allocator::Allocator, DefaultAllocator, RealField, U1};
-use nalgebra::{Const, Dynamic, Matrix, VecStorage};
+use nalgebra::{
+    allocator::Allocator, ComplexField, Const, DefaultAllocator, Dynamic, Matrix, RealField,
+    VecStorage, U1,
+};
 use num_traits::{NumCast, ToPrimitive};
 use serde::{de::DeserializeOwned, Deserialize};
 use std::path::PathBuf;
-use transporter_mesher::{Connectivity, Mesh, Mesh1d};
+use transporter_mesher::{Connectivity, Mesh, Mesh1d, SmallDim};
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
@@ -116,15 +118,12 @@ where
     )
 }
 
-use nalgebra::ComplexField;
-use transporter_mesher::SmallDim;
-
 fn build_and_run<T: Copy + ComplexField, GeometryDim: SmallDim, Conn, BandDim: SmallDim>(
     config: Configuration<T::RealField>,
     mesh: &Mesh<T::RealField, GeometryDim, Conn>,
     tracker: &Tracker<'_, T::RealField, GeometryDim, BandDim, Conn>,
-    calculation_type: Calculation,
-    marker: std::marker::PhantomData<T>,
+    _calculation_type: Calculation,
+    _marker: std::marker::PhantomData<T>,
 ) -> color_eyre::Result<()>
 where
     <T as ComplexField>::RealField: Copy + num_traits::NumCast + RealField,

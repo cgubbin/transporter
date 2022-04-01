@@ -14,10 +14,9 @@ impl std::fmt::Display for Material {
             }
             Material::GaAs => {
                 write!(f, "GaAs")
-            }
-            _ => {
-                write!(f, "Display unimplemented")
-            }
+            } // _ => {
+              //     write!(f, "Display unimplemented")
+              // }
         }
     }
 }

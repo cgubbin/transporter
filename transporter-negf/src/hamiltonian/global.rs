@@ -8,7 +8,10 @@ use super::{
     HamiltonianInfoDesk,
 };
 use color_eyre::eyre::eyre;
-use nalgebra::{allocator::Allocator, DMatrix, DVector, DefaultAllocator, RealField};
+use nalgebra::{
+    allocator::Allocator, DMatrix, DVector, DefaultAllocator, Dynamic, Matrix, RealField, Storage,
+    U1,
+};
 use nalgebra_sparse::{pattern::SparsityPattern, CsrMatrix};
 use std::cell::RefCell;
 
@@ -312,7 +315,6 @@ impl<T: Copy + RealField> CsrAssembler<T> {
         Ok(())
     }
 }
-use nalgebra::{Dynamic, Matrix, Storage, U1};
 
 /// A helper method to add an element to the diagonal of a CsrMatrix -> in this method
 /// `row_values` is always a slice of length 1

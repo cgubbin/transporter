@@ -1,16 +1,19 @@
 mod tridiagonal;
 
+use tridiagonal::{bottom_row, diagonals, top_row};
+
 use crate::postprocessor::{Charge, Current};
 use crate::self_energy::SelfEnergy;
-use crate::{spectral::SpectralDiscretisation, Hamiltonian};
-use color_eyre::eyre::eyre;
-use nalgebra::{
-    allocator::Allocator, Const, DVector, DefaultAllocator, Dynamic, Matrix, OVector, VecStorage,
+use crate::{
+    spectral::{SpectralDiscretisation, SpectralSpace},
+    Hamiltonian,
 };
-use nalgebra::{ComplexField, DMatrix, SimdComplexField};
+use nalgebra::{
+    allocator::Allocator, ComplexField, Const, DMatrix, DVector, DefaultAllocator, Dynamic, Matrix,
+    OVector, SimdComplexField, VecStorage,
+};
 use nalgebra_sparse::CsrMatrix;
 use transporter_mesher::{Connectivity, SmallDim};
-use tridiagonal::{bottom_row, diagonals, top_row};
 
 pub(crate) struct GreensFunctionBuilder<T, RefSpectral> {
     spectral: RefSpectral,
@@ -152,13 +155,11 @@ where
 
     fn accumulate_into_current_density_vector(
         &self,
-        spectral_space: &SpectralSpace<T::RealField, ()>,
+        _spectral_space: &SpectralSpace<T::RealField, ()>,
     ) -> color_eyre::Result<Current<T::RealField, BandDim>> {
         todo!()
     }
 }
-
-use crate::spectral::SpectralSpace;
 
 // TODO This is a single band implementation
 impl<'a, T> AggregateGreensFunctions<T, CsrMatrix<T>>
@@ -217,7 +218,7 @@ where
         Conn: Connectivity<T::RealField, GeometryDim>,
         DefaultAllocator: Allocator<T::RealField, GeometryDim>,
     {
-        for (((lesser_gf, retarded_gf), retarded_self_energy), energy) in self
+        for (((lesser_gf, retarded_gf), retarded_self_energy), _energy) in self
             .lesser
             .iter_mut()
             .zip(self.retarded.iter())
@@ -384,7 +385,7 @@ where
     ) -> color_eyre::Result<()> {
         // In 1D and for 1 band:
         let values = retarded_self_energy.values();
-        let se = (values[0].clone(), values[1].clone());
+        let se = (values[0], values[1]);
         let pattern = retarded_self_energy.pattern();
         let fermi_source = T::one(); // TODO get from an info desk
         let fermi_drain = T::one();
@@ -416,13 +417,13 @@ where
             .iter()
             .map(|&x| -(T::one() + T::one()) * T::from_real(x.imaginary()))
             .collect::<Vec<_>>();
-        let gamma = CsrMatrix::try_from_pattern_and_values(
+        let _gamma = CsrMatrix::try_from_pattern_and_values(
             retarded_self_energy.pattern().clone(),
             gamma_values,
         )
         .unwrap();
 
-        let spectral_density =
+        let _spectral_density =
             retarded_greens_function * (source_se + drain_se) * advanced_greens_function;
         todo!()
     }

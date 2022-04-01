@@ -1,7 +1,9 @@
-use nalgebra::{allocator::Allocator, DVector, DefaultAllocator, OVector, RealField};
+use nalgebra::{
+    allocator::Allocator, Const, DVector, DefaultAllocator, Dynamic, Matrix, OVector, RealField,
+    VecStorage,
+};
 use transporter_mesher::SmallDim;
 
-use nalgebra::{Const, Dynamic, Matrix, VecStorage};
 #[derive(Clone)]
 pub(crate) struct ChargeAndCurrent<T, BandDim: SmallDim>
 where

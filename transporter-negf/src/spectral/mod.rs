@@ -7,8 +7,7 @@ mod wavevector;
 pub(crate) use wavevector::WavevectorSpace;
 
 use energy::EnergySpace;
-use nalgebra::allocator::Allocator;
-use nalgebra::{DVector, DefaultAllocator, RealField, U1};
+use nalgebra::{allocator::Allocator, DVector, DefaultAllocator, RealField, U1};
 use transporter_mesher::{Connectivity, Mesh, Segment1dConnectivity, SmallDim};
 
 pub(crate) trait SpectralDiscretisation<T: RealField> {

@@ -3,8 +3,7 @@ use color_eyre::eyre::eyre;
 use config::{Config, File};
 use nalgebra::{allocator::Allocator, DefaultAllocator, RealField};
 use serde::{de::DeserializeOwned, Deserialize};
-use std::ops::Deref;
-use std::path::PathBuf;
+use std::{ops::Deref, path::PathBuf};
 use transporter_mesher::SmallDim;
 
 #[derive(Debug, Deserialize)]

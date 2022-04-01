@@ -1,5 +1,5 @@
-use crate::greens_functions::GreensFunctionMethods;
-use nalgebra::{allocator::Allocator, ComplexField, DefaultAllocator};
+use crate::{greens_functions::GreensFunctionMethods, hamiltonian::Hamiltonian};
+use nalgebra::{allocator::Allocator, ComplexField, DefaultAllocator, Dim};
 use std::marker::PhantomData;
 use transporter_mesher::{Connectivity, Mesh, SmallDim};
 
@@ -122,9 +122,50 @@ where
     DefaultAllocator: Allocator<T::RealField, GeometryDim>,
 {
     // Updates the coherent Self Energy at the contacts into the scratch matrix held in `self`
-    pub(crate) fn recalculate(&mut self) -> color_eyre::Result<()> {
+    pub(crate) fn recalculate(
+        &mut self,
+        mesh: &Mesh<T::RealField, GeometryDim, Conn>,
+        hamiltonian: &Hamiltonian<T::RealField>,
+        spectral_space: &SpectralSpace<T::RealField, ()>,
+    ) -> color_eyre::Result<()> {
         match GeometryDim::dim() {
-            1 => todo!(),
+            1 => {
+                // We have 2 elements in 1D, with positions first and last in the mesh
+                let n_elements = mesh.elements().len();
+                let hamiltonian = hamiltonian.calculate_total(T::zero().real()); // We are at 0 wavevector for this spectral_space
+                for (boundary_element, diagonal_element, idx) in [
+                    (hamiltonian.values()[1], hamiltonian.values()[0], 0),
+                    (
+                        hamiltonian.values()[hamiltonian.values().len() - 2],
+                        hamiltonian.values()[hamiltonian.values().len() - 1],
+                        n_elements - 1,
+                    ),
+                ] {
+                    let ec_plus_u_plus_ek = diagonal_element - boundary_element - boundary_element;
+                    let connected_idx = mesh.element_connectivity()[idx];
+                    assert_eq!(connected_idx.len(), 1);
+                    let a = (mesh.get_element_midpoint(idx)
+                        - mesh.get_element_midpoint(connected_idx[0]))
+                    .norm();
+                    let ci = T::one(); // Should be imaginary
+                    for (jdx, &energy) in spectral_space.iter_energy().enumerate() {
+                        let z = T::one()
+                            - T::from_real(
+                                (energy - ec_plus_u_plus_ek)
+                                    / (boundary_element + boundary_element),
+                            );
+                        let k1 = T::one() / T::from_real(a) * z.acos();
+                        if idx == 0 {
+                            self.retarded[jdx].values_mut()[0] =
+                                -T::from_real(boundary_element) * (ci * k1 * T::from_real(a)).exp();
+                        } else {
+                            self.retarded[jdx].values_mut()[1] =
+                                -T::from_real(boundary_element) * (ci * k1 * T::from_real(a)).exp();
+                        }
+                    }
+                }
+                Ok(())
+            }
             _ => unimplemented!("No self-energy implementation for 2D geometries"),
         }
     }

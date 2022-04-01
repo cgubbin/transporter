@@ -1,8 +1,11 @@
 use super::{ChargeAndCurrent, PostProcessor};
-use crate::greens_functions::AggregateGreensFunctionMethods;
-use crate::spectral::{SpectralDiscretisation, SpectralSpace};
-use nalgebra::{allocator::Allocator, ComplexField, DefaultAllocator};
-use nalgebra::{Const, Dynamic, Matrix, VecStorage};
+use crate::{
+    greens_functions::AggregateGreensFunctionMethods,
+    spectral::{SpectralDiscretisation, SpectralSpace},
+};
+use nalgebra::{
+    allocator::Allocator, ComplexField, Const, DefaultAllocator, Dynamic, Matrix, VecStorage,
+};
 use transporter_mesher::{Connectivity, SmallDim};
 
 pub(crate) trait PostProcess<T, BandDim: SmallDim, Spectral>

@@ -1,9 +1,13 @@
 use super::InnerLoop;
-use crate::greens_functions::GreensFunctionMethods;
-use crate::postprocessor::{ChargeAndCurrent, PostProcess, PostProcessor, PostProcessorBuilder};
-use crate::spectral::{SpectralSpace, WavevectorSpace};
-use nalgebra::{allocator::Allocator, ComplexField, DefaultAllocator, RealField};
-use nalgebra::{Const, Dynamic, Matrix, VecStorage};
+use crate::{
+    greens_functions::GreensFunctionMethods,
+    postprocessor::{ChargeAndCurrent, PostProcess, PostProcessor, PostProcessorBuilder},
+    spectral::{SpectralSpace, WavevectorSpace},
+};
+use nalgebra::{
+    allocator::Allocator, ComplexField, Const, DefaultAllocator, Dynamic, Matrix, RealField,
+    VecStorage,
+};
 use nalgebra_sparse::CsrMatrix;
 use transporter_mesher::{Connectivity, SmallDim};
 
@@ -70,7 +74,8 @@ where
 
     fn single_iteration(&mut self) -> color_eyre::Result<()> {
         // TODO Recompute se, check it's ok, recompute green's functions
-        self.self_energies.recalculate()?;
+        self.self_energies
+            .recalculate(self.mesh, self.hamiltonian, self.spectral)?;
         self.greens_functions.update_greens_functions(
             self.hamiltonian,
             self.self_energies,
@@ -81,7 +86,7 @@ where
 
     fn run_loop(
         &mut self,
-        previous_charge_and_current: &mut ChargeAndCurrent<T::RealField, BandDim>,
+        _previous_charge_and_current: &mut ChargeAndCurrent<T::RealField, BandDim>,
     ) -> color_eyre::Result<()> {
         // In a coherent calculation there is no inner loop
         self.single_iteration()
@@ -118,7 +123,7 @@ where
     /// Check convergence and re-assign the new charge density to the old one
     fn is_loop_converged(
         &self,
-        previous_charge_and_current: &mut ChargeAndCurrent<T::RealField, BandDim>,
+        _previous_charge_and_current: &mut ChargeAndCurrent<T::RealField, BandDim>,
     ) -> color_eyre::Result<bool> {
         //let postprocessor: PostProcessor<T, GeometryDim, Conn> =
         //    PostProcessorBuilder::new().with_mesh(self.mesh).build();
