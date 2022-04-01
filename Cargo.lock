@@ -841,6 +841,7 @@ dependencies = [
  "matrixcompare",
  "nalgebra",
  "nalgebra-sparse",
+ "num-complex",
  "num-traits",
  "numeric_literals",
  "proptest",

@@ -221,8 +221,8 @@ where
     mesh: &'a Mesh<T::RealField, GeometryDim, Conn>,
     spectral: &'a SpectralSpace,
     hamiltonian: &'a Hamiltonian<T::RealField>,
-    greens_functions: &'a AggregateGreensFunctions<T, Matrix>,
-    self_energies: &'a SelfEnergy<T, GeometryDim, Conn, Matrix>,
+    greens_functions: &'a mut AggregateGreensFunctions<T, Matrix>,
+    self_energies: &'a mut SelfEnergy<T, GeometryDim, Conn, Matrix>,
     convergence_settings: &'a Convergence<T::RealField>,
 }
 

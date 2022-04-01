@@ -105,8 +105,8 @@ impl<T: Copy + RealField> EnergySpace<T> {
         self.grid.vertices().len()
     }
 
-    pub(crate) fn points(&self) -> impl Iterator<Item = &OPoint<T, U1>> + '_ {
-        self.grid.vertices().iter().map(|x| &x.0)
+    pub(crate) fn points(&self) -> impl Iterator<Item = &T> + '_ {
+        self.grid.vertices().iter().map(|x| &x.0[0])
     }
 
     pub(crate) fn weights(&self) -> impl Iterator<Item = &T> {

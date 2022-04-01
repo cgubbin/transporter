@@ -20,6 +20,7 @@ where
         this_element: &Self::Element,
         connected_elements: &[&Self::Element],
     ) -> Vec<Vec<T>>;
+    fn is_at_boundary(&self) -> bool;
 }
 
 impl<T: Copy + RealField> Connectivity<T, U1> for Segment1dConnectivity
@@ -62,5 +63,12 @@ where
             .map(|other_midpoint| (&midpoint - other_midpoint).norm())
             .collect::<Vec<_>>();
         vec![other_midpoints]
+    }
+
+    fn is_at_boundary(&self) -> bool {
+        match self {
+            Segment1dConnectivity::Core(_) => false,
+            Segment1dConnectivity::Boundary(_) => true,
+        }
     }
 }

@@ -1,18 +1,31 @@
-use nalgebra::{DVector, RealField};
+use nalgebra::{allocator::Allocator, DVector, DefaultAllocator, OVector, RealField};
+use transporter_mesher::SmallDim;
 
+use nalgebra::{Const, Dynamic, Matrix, VecStorage};
 #[derive(Clone)]
-pub(crate) struct ChargeAndCurrent<T> {
-    charge: Charge<T>,
-    current: Current<T>,
+pub(crate) struct ChargeAndCurrent<T, BandDim: SmallDim>
+where
+    DefaultAllocator: Allocator<
+        Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
+        BandDim,
+    >,
+{
+    charge: Charge<T, BandDim>,
+    current: Current<T, BandDim>,
 }
 
-impl<T> ChargeAndCurrent<T>
+impl<T, BandDim> ChargeAndCurrent<T, BandDim>
 where
     T: RealField,
+    BandDim: SmallDim,
+    DefaultAllocator: Allocator<
+        Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
+        BandDim,
+    >,
 {
     pub(crate) fn new(
-        charge: Vec<DVector<T>>,
-        current: Vec<DVector<T>>,
+        charge: OVector<DVector<T>, BandDim>,
+        current: OVector<DVector<T>, BandDim>,
     ) -> color_eyre::Result<Self> {
         Ok(Self {
             charge: Charge::new(charge)?,
@@ -20,11 +33,14 @@ where
         })
     }
 
-    pub(crate) fn from_charge_and_current(charge: Charge<T>, current: Current<T>) -> Self {
+    pub(crate) fn from_charge_and_current(
+        charge: Charge<T, BandDim>,
+        current: Current<T, BandDim>,
+    ) -> Self {
         Self { charge, current }
     }
 
-    pub(crate) fn deref_charge(self) -> Charge<T> {
+    pub(crate) fn deref_charge(self) -> Charge<T, BandDim> {
         self.charge
     }
 
@@ -37,19 +53,21 @@ where
 
     /// Returns an iterator over the held charge densities
     fn charge_iter(&self) -> std::slice::Iter<'_, DVector<T>> {
-        self.charge.charge.iter()
+        //self.charge.charge.iter()
+        todo!()
     }
 
     /// Returns an iterator over the held current densities
     fn current_iter(&self) -> std::slice::Iter<'_, DVector<T>> {
-        self.current.current.iter()
+        //self.current.current.iter()
+        todo!()
     }
 
     /// Given a tolerance, and a previous value for the charge and current
     /// calculates whether the change in the norms is less than the tolerance.
     pub(crate) fn is_change_within_tolerance(
         &self,
-        previous: &ChargeAndCurrent<T>,
+        previous: &ChargeAndCurrent<T, BandDim>,
         tolerance: T,
     ) -> color_eyre::Result<bool> {
         Ok(self
@@ -62,17 +80,35 @@ where
 }
 
 #[derive(Clone)]
-pub(crate) struct Charge<T> {
-    charge: Vec<DVector<T>>,
+pub(crate) struct Charge<T, BandDim: SmallDim>
+where
+    DefaultAllocator: Allocator<
+        Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
+        BandDim,
+    >,
+{
+    charge: OVector<DVector<T>, BandDim>,
 }
 
 #[derive(Clone)]
-pub(crate) struct Current<T> {
-    current: Vec<DVector<T>>,
+pub(crate) struct Current<T, BandDim: SmallDim>
+where
+    DefaultAllocator: Allocator<
+        Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
+        BandDim,
+    >,
+{
+    current: OVector<DVector<T>, BandDim>,
 }
 
-impl<T> Charge<T> {
-    pub(crate) fn new(charge: Vec<DVector<T>>) -> color_eyre::Result<Self> {
+impl<T, BandDim: SmallDim> Charge<T, BandDim>
+where
+    DefaultAllocator: Allocator<
+        Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
+        BandDim,
+    >,
+{
+    pub(crate) fn new(charge: OVector<DVector<T>, BandDim>) -> color_eyre::Result<Self> {
         let length = charge[0].shape();
         if charge.iter().all(|x| x.shape() == length) {
             Ok(Self { charge })
@@ -84,8 +120,14 @@ impl<T> Charge<T> {
     }
 }
 
-impl<T> Current<T> {
-    pub(crate) fn new(current: Vec<DVector<T>>) -> color_eyre::Result<Self> {
+impl<T, BandDim: SmallDim> Current<T, BandDim>
+where
+    DefaultAllocator: Allocator<
+        Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
+        BandDim,
+    >,
+{
+    pub(crate) fn new(current: OVector<DVector<T>, BandDim>) -> color_eyre::Result<Self> {
         let length = current[0].shape();
         if current.iter().all(|x| x.shape() == length) {
             Ok(Self { current })

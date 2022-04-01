@@ -78,8 +78,16 @@ where
         &self.elements
     }
 
+    pub fn inspect_connectivity(&self) -> &[C] {
+        &self.connectivity
+    }
+
     pub fn connectivity(&self) -> Vec<&[usize]> {
         self.connectivity.iter().map(|x| x.as_inner()).collect()
+    }
+
+    pub fn iter_element_connectivity(&self) -> impl std::iter::Iterator<Item = &C> {
+        self.element_connectivity.iter()
     }
 
     pub fn element_connectivity(&self) -> Vec<&[usize]> {

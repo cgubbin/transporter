@@ -25,10 +25,19 @@ pub(crate) trait SpectralDiscretisation<T: RealField> {
 /// A general `SpectralSpace` which contains the wavevector and energy discretisation and associated integration rules
 pub(crate) struct SpectralSpace<T: Copy + RealField, WavevectorSpace> {
     /// A `SpectralSpace` always has an associated energy space, so this is a concrete type
-    energy: EnergySpace<T>,
+    pub(crate) energy: EnergySpace<T>,
     /// A `SpectralSpace` may have a wavevector space, either if the calculation is incoherent or the
     /// carrier effective mass varies across the structure
     wavevector: WavevectorSpace,
+}
+
+impl<T: Copy + RealField> SpectralSpace<T, ()> {
+    pub(crate) fn iter_energy(&self) -> impl std::iter::Iterator<Item = &T> {
+        self.energy.points()
+    }
+    pub(crate) fn number_of_energies(&self) -> usize {
+        self.energy.points().count()
+    }
 }
 
 impl<T: RealField + Copy, GeometryDim: SmallDim, Conn> SpectralDiscretisation<T>

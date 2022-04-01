@@ -4,22 +4,29 @@ mod methods;
 pub(crate) use convergence::Convergence;
 pub(crate) use methods::{Outer, Potential};
 
-use crate::{hamiltonian::Hamiltonian, postprocessor::ChargeAndCurrent};
+use crate::{app::Tracker, hamiltonian::Hamiltonian, postprocessor::ChargeAndCurrent};
 use nalgebra::{allocator::Allocator, ComplexField, DefaultAllocator};
 use std::marker::PhantomData;
 use transporter_mesher::{Connectivity, Mesh, SmallDim};
 
 /// Builder struct for the outer loop allows for polymorphism over the `SpectralSpace`
-pub(crate) struct OuterLoopBuilder<T, RefConvergenceSettings, RefMesh, RefSpectral, RefHamiltonian>
-{
+pub(crate) struct OuterLoopBuilder<
+    T,
+    RefConvergenceSettings,
+    RefMesh,
+    RefSpectral,
+    RefHamiltonian,
+    RefTracker,
+> {
     mesh: RefMesh,
     spectral: RefSpectral,
     hamiltonian: RefHamiltonian,
     convergence_settings: RefConvergenceSettings,
+    tracker: RefTracker,
     marker: PhantomData<T>,
 }
 
-impl<T> OuterLoopBuilder<T, (), (), (), ()> {
+impl<T> OuterLoopBuilder<T, (), (), (), (), ()> {
     /// Initialise an empty OuterLoopBuilder
     pub(crate) fn new() -> Self {
         Self {
@@ -27,24 +34,27 @@ impl<T> OuterLoopBuilder<T, (), (), (), ()> {
             spectral: (),
             hamiltonian: (),
             convergence_settings: (),
+            tracker: (),
             marker: PhantomData,
         }
     }
 }
 
-impl<T: ComplexField, RefConvergenceSettings, RefMesh, RefSpectral, RefHamiltonian>
-    OuterLoopBuilder<T, RefConvergenceSettings, RefMesh, RefSpectral, RefHamiltonian>
+impl<T: ComplexField, RefConvergenceSettings, RefMesh, RefSpectral, RefHamiltonian, RefTracker>
+    OuterLoopBuilder<T, RefConvergenceSettings, RefMesh, RefSpectral, RefHamiltonian, RefTracker>
 {
     /// Attach the problem's `Mesh`
     pub(crate) fn with_mesh<Mesh>(
         self,
         mesh: &Mesh,
-    ) -> OuterLoopBuilder<T, RefConvergenceSettings, &Mesh, RefSpectral, RefHamiltonian> {
+    ) -> OuterLoopBuilder<T, RefConvergenceSettings, &Mesh, RefSpectral, RefHamiltonian, RefTracker>
+    {
         OuterLoopBuilder {
             mesh,
             spectral: self.spectral,
             hamiltonian: self.hamiltonian,
             convergence_settings: self.convergence_settings,
+            tracker: self.tracker,
             marker: PhantomData,
         }
     }
@@ -53,12 +63,14 @@ impl<T: ComplexField, RefConvergenceSettings, RefMesh, RefSpectral, RefHamiltoni
     pub(crate) fn with_spectral_space<Spectral>(
         self,
         spectral: &Spectral,
-    ) -> OuterLoopBuilder<T, RefConvergenceSettings, RefMesh, &Spectral, RefHamiltonian> {
+    ) -> OuterLoopBuilder<T, RefConvergenceSettings, RefMesh, &Spectral, RefHamiltonian, RefTracker>
+    {
         OuterLoopBuilder {
             mesh: self.mesh,
             spectral,
             hamiltonian: self.hamiltonian,
             convergence_settings: self.convergence_settings,
+            tracker: self.tracker,
             marker: PhantomData,
         }
     }
@@ -67,12 +79,14 @@ impl<T: ComplexField, RefConvergenceSettings, RefMesh, RefSpectral, RefHamiltoni
     pub(crate) fn with_hamiltonian<Hamiltonian>(
         self,
         hamiltonian: &Hamiltonian,
-    ) -> OuterLoopBuilder<T, RefConvergenceSettings, RefMesh, RefSpectral, &Hamiltonian> {
+    ) -> OuterLoopBuilder<T, RefConvergenceSettings, RefMesh, RefSpectral, &Hamiltonian, RefTracker>
+    {
         OuterLoopBuilder {
             mesh: self.mesh,
             spectral: self.spectral,
             hamiltonian,
             convergence_settings: self.convergence_settings,
+            tracker: self.tracker,
             marker: PhantomData,
         }
     }
@@ -81,25 +95,53 @@ impl<T: ComplexField, RefConvergenceSettings, RefMesh, RefSpectral, RefHamiltoni
     pub(crate) fn with_convergence_settings<ConvergenceSettings>(
         self,
         convergence_settings: &ConvergenceSettings,
-    ) -> OuterLoopBuilder<T, &ConvergenceSettings, RefMesh, RefSpectral, RefHamiltonian> {
+    ) -> OuterLoopBuilder<T, &ConvergenceSettings, RefMesh, RefSpectral, RefHamiltonian, RefTracker>
+    {
         OuterLoopBuilder {
             mesh: self.mesh,
             spectral: self.spectral,
             hamiltonian: self.hamiltonian,
             convergence_settings,
+            tracker: self.tracker,
+            marker: PhantomData,
+        }
+    }
+
+    /// Attach the global tracker
+    pub(crate) fn with_tracker<Tracker>(
+        self,
+        tracker: &Tracker,
+    ) -> OuterLoopBuilder<T, RefConvergenceSettings, RefMesh, RefSpectral, RefHamiltonian, &Tracker>
+    {
+        OuterLoopBuilder {
+            mesh: self.mesh,
+            spectral: self.spectral,
+            hamiltonian: self.hamiltonian,
+            convergence_settings: self.convergence_settings,
+            tracker,
             marker: PhantomData,
         }
     }
 }
 
 /// A structure holding the information to carry out the outer iteration
-pub(crate) struct OuterLoop<'a, T, GeometryDim, Conn, SpectralSpace>
+pub(crate) struct OuterLoop<'a, T, GeometryDim, Conn, BandDim, SpectralSpace>
 where
     T: ComplexField,
     <T as ComplexField>::RealField: Copy,
+    BandDim: SmallDim,
     GeometryDim: SmallDim,
     Conn: Connectivity<T::RealField, GeometryDim>,
-    DefaultAllocator: Allocator<T::RealField, GeometryDim>,
+    DefaultAllocator: Allocator<T::RealField, GeometryDim>
+        + Allocator<
+            Matrix<
+                T::RealField,
+                Dynamic,
+                Const<1_usize>,
+                VecStorage<T::RealField, Dynamic, Const<1_usize>>,
+            >,
+            BandDim,
+        >,
 {
     /// The convergence information for the outerloop and the spawned innerloop
     convergence_settings: &'a Convergence<T::RealField>,
@@ -110,59 +152,101 @@ where
     /// The Hamiltonian associated with the problem
     hamiltonian: &'a Hamiltonian<T::RealField>,
     // TODO A solution tracker, think about this IMPL. We already have a top-level tracker
-    tracker: Tracker<T::RealField>,
+    tracker: LoopTracker<T::RealField, BandDim>,
 }
 
-impl<'a, T, GeometryDim, Conn, SpectralSpace>
+impl<'a, T, GeometryDim, Conn, BandDim, SpectralSpace>
     OuterLoopBuilder<
         T,
         &'a Convergence<T::RealField>,
         &'a Mesh<T::RealField, GeometryDim, Conn>,
         &'a SpectralSpace,
         &'a Hamiltonian<T::RealField>,
+        &'a Tracker<'a, T::RealField, GeometryDim, BandDim, Conn>,
     >
 where
     T: ComplexField + Copy,
     <T as ComplexField>::RealField: Copy,
-    GeometryDim: transporter_mesher::SmallDim,
+    GeometryDim: SmallDim,
+    BandDim: SmallDim,
     Conn: Connectivity<T::RealField, GeometryDim>,
-    DefaultAllocator: Allocator<T::RealField, GeometryDim>,
+    DefaultAllocator: Allocator<T::RealField, GeometryDim>
+        + Allocator<T::RealField, BandDim>
+        + Allocator<[T::RealField; 3], BandDim>
+        + Allocator<
+            Matrix<
+                T::RealField,
+                Dynamic,
+                Const<1_usize>,
+                VecStorage<T::RealField, Dynamic, Const<1_usize>>,
+            >,
+            BandDim,
+        >,
 {
     /// Build out the OuterLoop -> Generic over the SpectralSpace so the OuterLoop can do both coherent and incoherent transport
     pub(crate) fn build(
         self,
-    ) -> color_eyre::Result<OuterLoop<'a, T, GeometryDim, Conn, SpectralSpace>> {
+    ) -> color_eyre::Result<OuterLoop<'a, T, GeometryDim, Conn, BandDim, SpectralSpace>> {
+        let tracker = LoopTracker::from_global_tracker(self.tracker);
         Ok(OuterLoop {
             convergence_settings: self.convergence_settings,
             mesh: self.mesh,
             hamiltonian: self.hamiltonian,
             spectral: self.spectral,
-            tracker: Tracker::new(),
+            tracker,
         })
     }
 }
 
-pub(crate) struct Tracker<T: nalgebra::RealField> {
-    converged_coherent_calculation: bool,
-    charge_and_currents: ChargeAndCurrent<T>,
+use nalgebra::RealField;
+use nalgebra::{Const, Dynamic, Matrix, VecStorage};
+pub(crate) struct LoopTracker<T: nalgebra::RealField, BandDim: SmallDim>
+where
+    DefaultAllocator: Allocator<
+        Matrix<
+            T::RealField,
+            Dynamic,
+            Const<1_usize>,
+            VecStorage<T::RealField, Dynamic, Const<1_usize>>,
+        >,
+        BandDim,
+    >,
+{
+    charge_and_currents: ChargeAndCurrent<T, BandDim>,
     potential: Potential<T>,
-    marker: PhantomData<T>,
 }
 
-impl<T: nalgebra::RealField> Tracker<T> {
-    pub(crate) fn new() -> Self {
-        todo!()
-        //Self {
-        //    converged_coherent_calculation: false,
-        //    marker: PhantomData,
-        //}
+impl<T: RealField, BandDim: SmallDim> LoopTracker<T, BandDim>
+where
+    DefaultAllocator: Allocator<
+        Matrix<
+            T::RealField,
+            Dynamic,
+            Const<1_usize>,
+            VecStorage<T::RealField, Dynamic, Const<1_usize>>,
+        >,
+        BandDim,
+    >,
+{
+    pub(crate) fn from_global_tracker<GeometryDim: SmallDim, Conn: Connectivity<T, GeometryDim>>(
+        global_tracker: &Tracker<'_, T, GeometryDim, BandDim, Conn>,
+    ) -> Self
+    where
+        DefaultAllocator: Allocator<T::RealField, GeometryDim>
+            + Allocator<T::RealField, BandDim>
+            + Allocator<[T::RealField; 3], BandDim>,
+    {
+        // This is a dirty clone, it might be best to just mutably update the global tracker
+        Self {
+            potential: global_tracker.potential().clone(),
+            charge_and_currents: ChargeAndCurrent::from_charge_and_current(
+                global_tracker.charge().clone(),
+                global_tracker.current().clone(),
+            ),
+        }
     }
 
-    pub(crate) fn coherent_is_converged(&self) -> bool {
-        self.converged_coherent_calculation
-    }
-
-    pub(crate) fn charge_and_currents_mut(&mut self) -> &mut ChargeAndCurrent<T> {
+    pub(crate) fn charge_and_currents_mut(&mut self) -> &mut ChargeAndCurrent<T, BandDim> {
         &mut self.charge_and_currents
     }
 

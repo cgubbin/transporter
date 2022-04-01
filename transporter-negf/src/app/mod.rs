@@ -5,11 +5,13 @@ use crate::{
     device::{info_desk::BuildInfoDesk, reader::Device},
     outer_loop::{Outer, Potential},
 };
+pub(crate) use tracker::Tracker;
 //use crate::hamiltonian::HamiltonianConstructor;
 use clap::{ArgEnum, Parser};
 use color_eyre::eyre::eyre;
 use configuration::Configuration;
 use nalgebra::{allocator::Allocator, DefaultAllocator, RealField, U1};
+use nalgebra::{Const, Dynamic, Matrix, VecStorage};
 use num_traits::{NumCast, ToPrimitive};
 use serde::{de::DeserializeOwned, Deserialize};
 use std::path::PathBuf;
@@ -75,7 +77,7 @@ where
             let tracker = tracker::TrackerBuilder::new()
                 .with_mesh(&mesh)
                 .with_info_desk(&info_desk)
-                .build();
+                .build()?;
 
             build_and_run(config, &mesh, &tracker, cli.calculation, __marker)?;
         }
@@ -115,21 +117,31 @@ where
 }
 
 use nalgebra::ComplexField;
+use transporter_mesher::SmallDim;
 
-fn build_and_run<T: Copy + ComplexField, Conn, Tracker>(
+fn build_and_run<T: Copy + ComplexField, GeometryDim: SmallDim, Conn, BandDim: SmallDim>(
     config: Configuration<T::RealField>,
-    mesh: &Mesh<T::RealField, Tracker::GeometryDim, Conn>,
-    tracker: &Tracker,
+    mesh: &Mesh<T::RealField, GeometryDim, Conn>,
+    tracker: &Tracker<'_, T::RealField, GeometryDim, BandDim, Conn>,
     calculation_type: Calculation,
     marker: std::marker::PhantomData<T>,
 ) -> color_eyre::Result<()>
 where
     <T as ComplexField>::RealField: Copy + num_traits::NumCast + RealField,
-    Conn: Connectivity<T::RealField, Tracker::GeometryDim>,
-    Tracker: crate::HamiltonianInfoDesk<T::RealField>,
-    DefaultAllocator: Allocator<T::RealField, Tracker::GeometryDim>
-        + Allocator<T::RealField, Tracker::BandDim>
-        + Allocator<[T::RealField; 3], Tracker::BandDim>,
+    Conn: Connectivity<T::RealField, GeometryDim>,
+    //Tracker: crate::HamiltonianInfoDesk<T::RealField>,
+    DefaultAllocator: Allocator<T::RealField, GeometryDim>
+        + Allocator<T::RealField, BandDim>
+        + Allocator<[T::RealField; 3], BandDim>
+        + Allocator<
+            Matrix<
+                T::RealField,
+                Dynamic,
+                Const<1_usize>,
+                VecStorage<T::RealField, Dynamic, Const<1_usize>>,
+            >,
+            BandDim,
+        >,
 {
     let hamiltonian = crate::hamiltonian::HamiltonianBuilder::new()
         .with_mesh(mesh)
@@ -156,14 +168,16 @@ where
     };
     let mut outer_loop: crate::outer_loop::OuterLoop<
         T,
-        Tracker::GeometryDim,
+        GeometryDim,
         Conn,
+        BandDim,
         crate::spectral::SpectralSpace<T::RealField, ()>,
     > = crate::outer_loop::OuterLoopBuilder::new()
         .with_mesh(mesh)
         .with_hamiltonian(&hamiltonian)
         .with_spectral_space(&spectral_space)
         .with_convergence_settings(&outer_config)
+        .with_tracker(tracker)
         .build()?;
 
     let initial_potential = Potential::from_vector(nalgebra::DVector::from_element(
