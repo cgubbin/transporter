@@ -5,8 +5,7 @@ use crate::{
     spectral::{SpectralSpace, WavevectorSpace},
 };
 use nalgebra::{
-    allocator::Allocator, ComplexField, Const, DefaultAllocator, Dynamic, Matrix, RealField,
-    VecStorage,
+    allocator::Allocator, Const, DefaultAllocator, Dynamic, Matrix, RealField, VecStorage,
 };
 use nalgebra_sparse::CsrMatrix;
 use num_complex::Complex;
@@ -77,8 +76,6 @@ where
             self.self_energies,
             self.spectral,
         )?;
-        dbg!(&self.greens_functions);
-        panic!();
         Ok(())
     }
 

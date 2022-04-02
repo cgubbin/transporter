@@ -4,8 +4,7 @@ use crate::{
     spectral::{SpectralDiscretisation, SpectralSpace},
 };
 use nalgebra::{
-    allocator::Allocator, ComplexField, Const, DefaultAllocator, Dynamic, Matrix, RealField,
-    VecStorage,
+    allocator::Allocator, Const, DefaultAllocator, Dynamic, Matrix, RealField, VecStorage,
 };
 use transporter_mesher::{Connectivity, SmallDim};
 

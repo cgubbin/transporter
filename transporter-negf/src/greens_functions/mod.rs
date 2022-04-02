@@ -115,7 +115,7 @@ where
             retarded: spectrum_of_csr.clone(),
             advanced: spectrum_of_csr.clone(),
             lesser: spectrum_of_csr.clone(),
-            greater: spectrum_of_csr.clone(),
+            greater: spectrum_of_csr,
         })
     }
 }
@@ -139,7 +139,7 @@ fn assemble_csr_sparsity_for_gf(
         row_offsets,
         col_indices,
     )
-    .map_err(|e| eyre!("Failed to construct Csr Sparsity pattern"))
+    .map_err(|e| eyre!("Failed to construct Csr Sparsity pattern {:?}", e))
 }
 
 impl<'a, T, GeometryDim, Conn, BandDim>
@@ -624,7 +624,7 @@ where
         &mut self,
         _retarded: &DMatrix<Complex<T>>,
         _lesser: &DMatrix<Complex<T>>,
-        fermi_functions: &[T],
+        _fermi_functions: &[T],
     ) -> color_eyre::Result<()> {
         todo!()
     }

@@ -7,8 +7,7 @@ use crate::{
     self_energy::SelfEnergy,
 };
 pub(crate) use methods::Inner;
-use nalgebra::{allocator::Allocator, ComplexField, DefaultAllocator, RealField};
-use num_complex::Complex;
+use nalgebra::{allocator::Allocator, DefaultAllocator, RealField};
 use std::marker::PhantomData;
 use transporter_mesher::{Connectivity, Mesh, SmallDim};
 

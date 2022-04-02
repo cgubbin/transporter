@@ -1,11 +1,8 @@
 use crate::{
     device::info_desk::DeviceInfoDesk,
-    fermi::inverse_fermi_integral_p,
-    greens_functions::GreensFunctionInfoDesk,
     hamiltonian::HamiltonianInfoDesk,
     outer_loop::Potential,
     postprocessor::{Charge, Current},
-    self_energy::SelfEnergyInfoDesk,
 };
 use nalgebra::{
     allocator::Allocator, Const, DVector, DefaultAllocator, Dynamic, Matrix, OPoint, OVector,

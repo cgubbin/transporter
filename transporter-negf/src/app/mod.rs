@@ -11,8 +11,7 @@ use clap::{ArgEnum, Parser};
 use color_eyre::eyre::eyre;
 use configuration::Configuration;
 use nalgebra::{
-    allocator::Allocator, ComplexField, Const, DefaultAllocator, Dynamic, Matrix, RealField,
-    VecStorage, U1,
+    allocator::Allocator, Const, DefaultAllocator, Dynamic, Matrix, RealField, VecStorage, U1,
 };
 use num_traits::{NumCast, ToPrimitive};
 use serde::{de::DeserializeOwned, Deserialize};

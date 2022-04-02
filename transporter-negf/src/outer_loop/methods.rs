@@ -3,7 +3,7 @@ use crate::{
     inner_loop::{Inner, InnerLoop},
     self_energy::{SelfEnergy, SelfEnergyBuilder},
 };
-use nalgebra::{allocator::Allocator, ComplexField, DMatrix, DVector, DefaultAllocator, RealField};
+use nalgebra::{allocator::Allocator, DMatrix, DVector, DefaultAllocator, RealField};
 use nalgebra_sparse::CsrMatrix;
 use num_complex::Complex;
 use transporter_mesher::{Connectivity, SmallDim};
