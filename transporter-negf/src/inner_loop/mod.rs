@@ -7,7 +7,8 @@ use crate::{
     self_energy::SelfEnergy,
 };
 pub(crate) use methods::Inner;
-use nalgebra::{allocator::Allocator, ComplexField, DefaultAllocator};
+use nalgebra::{allocator::Allocator, ComplexField, DefaultAllocator, RealField};
+use num_complex::Complex;
 use std::marker::PhantomData;
 use transporter_mesher::{Connectivity, Mesh, SmallDim};
 
@@ -20,7 +21,7 @@ pub(crate) struct InnerLoopBuilder<
     RefGreensFunctions,
     RefSelfEnergies,
 > where
-    T: ComplexField,
+    T: RealField,
 {
     convergence_settings: RefConvergenceSettings,
     mesh: RefMesh,
@@ -33,7 +34,7 @@ pub(crate) struct InnerLoopBuilder<
 
 impl<T> InnerLoopBuilder<T, (), (), (), (), (), ()>
 where
-    T: ComplexField,
+    T: RealField,
 {
     pub(crate) fn new() -> Self {
         Self {
@@ -67,7 +68,7 @@ impl<
         RefSelfEnergies,
     >
 where
-    T: ComplexField,
+    T: RealField,
 {
     pub(crate) fn with_convergence_settings<ConvergenceSettings>(
         self,
@@ -208,42 +209,46 @@ where
     }
 }
 
-pub(crate) struct InnerLoop<'a, T, GeometryDim, Conn, Matrix, SpectralSpace>
+pub(crate) struct InnerLoop<'a, T, GeometryDim, Conn, Matrix, SpectralSpace, BandDim>
 where
-    T: ComplexField + Copy,
-    <T as ComplexField>::RealField: Copy,
+    T: RealField + Copy,
     GeometryDim: SmallDim,
-    Conn: Connectivity<T::RealField, GeometryDim>,
+    BandDim: SmallDim,
+    Conn: Connectivity<T, GeometryDim>,
     Matrix: GreensFunctionMethods<T>,
-    DefaultAllocator: Allocator<T::RealField, GeometryDim>,
+    DefaultAllocator:
+        Allocator<T, GeometryDim> + Allocator<T, BandDim> + Allocator<[T; 3], BandDim>,
 {
-    mesh: &'a Mesh<T::RealField, GeometryDim, Conn>,
+    mesh: &'a Mesh<T, GeometryDim, Conn>,
     spectral: &'a SpectralSpace,
-    hamiltonian: &'a Hamiltonian<T::RealField>,
-    greens_functions: &'a mut AggregateGreensFunctions<T, Matrix>,
+    hamiltonian: &'a Hamiltonian<T>,
+    greens_functions: &'a mut AggregateGreensFunctions<'a, T, Matrix, GeometryDim, BandDim>,
     self_energies: &'a mut SelfEnergy<T, GeometryDim, Conn, Matrix>,
-    convergence_settings: &'a Convergence<T::RealField>,
+    convergence_settings: &'a Convergence<T>,
 }
 
-impl<'a, T, GeometryDim, Conn, Matrix, SpectralSpace>
+impl<'a, T, GeometryDim, Conn, Matrix, SpectralSpace, BandDim>
     InnerLoopBuilder<
         T,
-        &'a Convergence<T::RealField>,
-        &'a Mesh<T::RealField, GeometryDim, Conn>,
+        &'a Convergence<T>,
+        &'a Mesh<T, GeometryDim, Conn>,
         &'a SpectralSpace,
-        &'a Hamiltonian<T::RealField>,
-        &'a mut AggregateGreensFunctions<T, Matrix>,
+        &'a Hamiltonian<T>,
+        &'a mut AggregateGreensFunctions<'a, T, Matrix, GeometryDim, BandDim>,
         &'a mut SelfEnergy<T, GeometryDim, Conn, Matrix>,
     >
 where
-    T: ComplexField + Copy,
-    <T as ComplexField>::RealField: Copy,
+    T: RealField + Copy,
     GeometryDim: SmallDim,
-    Conn: Connectivity<T::RealField, GeometryDim>,
+    BandDim: SmallDim,
+    Conn: Connectivity<T, GeometryDim>,
     Matrix: GreensFunctionMethods<T>,
-    DefaultAllocator: Allocator<T::RealField, GeometryDim>,
+    DefaultAllocator:
+        Allocator<T, GeometryDim> + Allocator<T, BandDim> + Allocator<[T; 3], BandDim>,
 {
-    pub(crate) fn build(self) -> InnerLoop<'a, T, GeometryDim, Conn, Matrix, SpectralSpace> {
+    pub(crate) fn build(
+        self,
+    ) -> InnerLoop<'a, T, GeometryDim, Conn, Matrix, SpectralSpace, BandDim> {
         InnerLoop {
             mesh: self.mesh,
             spectral: self.spectral,

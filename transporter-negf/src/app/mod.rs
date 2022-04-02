@@ -51,9 +51,9 @@ enum Dimension {
     D2,
 }
 
-pub fn run<T: Copy + ComplexField>() -> color_eyre::Result<()>
+pub fn run<T>() -> color_eyre::Result<()>
 where
-    <T as ComplexField>::RealField: Copy + DeserializeOwned + NumCast + RealField + ToPrimitive,
+    T: Copy + DeserializeOwned + NumCast + RealField + ToPrimitive,
 {
     let cli = App::parse();
 
@@ -118,27 +118,22 @@ where
     )
 }
 
-fn build_and_run<T: Copy + ComplexField, GeometryDim: SmallDim, Conn, BandDim: SmallDim>(
-    config: Configuration<T::RealField>,
-    mesh: &Mesh<T::RealField, GeometryDim, Conn>,
-    tracker: &Tracker<'_, T::RealField, GeometryDim, BandDim, Conn>,
+fn build_and_run<T, GeometryDim: SmallDim, Conn, BandDim: SmallDim>(
+    config: Configuration<T>,
+    mesh: &Mesh<T, GeometryDim, Conn>,
+    tracker: &Tracker<'_, T, GeometryDim, BandDim, Conn>,
     _calculation_type: Calculation,
     _marker: std::marker::PhantomData<T>,
 ) -> color_eyre::Result<()>
 where
-    <T as ComplexField>::RealField: Copy + num_traits::NumCast + RealField,
-    Conn: Connectivity<T::RealField, GeometryDim>,
+    T: Copy + num_traits::NumCast + RealField,
+    Conn: Connectivity<T, GeometryDim>,
     //Tracker: crate::HamiltonianInfoDesk<T::RealField>,
-    DefaultAllocator: Allocator<T::RealField, GeometryDim>
-        + Allocator<T::RealField, BandDim>
-        + Allocator<[T::RealField; 3], BandDim>
+    DefaultAllocator: Allocator<T, GeometryDim>
+        + Allocator<T, BandDim>
+        + Allocator<[T; 3], BandDim>
         + Allocator<
-            Matrix<
-                T::RealField,
-                Dynamic,
-                Const<1_usize>,
-                VecStorage<T::RealField, Dynamic, Const<1_usize>>,
-            >,
+            Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
             BandDim,
         >,
 {
@@ -177,6 +172,7 @@ where
         .with_spectral_space(&spectral_space)
         .with_convergence_settings(&outer_config)
         .with_tracker(tracker)
+        .with_info_desk(tracker.info_desk)
         .build()?;
 
     let initial_potential = Potential::from_vector(nalgebra::DVector::from_element(

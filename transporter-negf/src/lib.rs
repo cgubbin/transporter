@@ -3,6 +3,7 @@
 pub mod app;
 mod constants;
 mod device;
+mod fermi;
 mod greens_functions;
 mod hamiltonian;
 mod inner_loop;

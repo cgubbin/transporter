@@ -1,7 +1,11 @@
 use crate::{
     device::info_desk::DeviceInfoDesk,
+    fermi::inverse_fermi_integral_p,
+    greens_functions::GreensFunctionInfoDesk,
+    hamiltonian::HamiltonianInfoDesk,
     outer_loop::Potential,
     postprocessor::{Charge, Current},
+    self_energy::SelfEnergyInfoDesk,
 };
 use nalgebra::{
     allocator::Allocator, Const, DVector, DefaultAllocator, Dynamic, Matrix, OPoint, OVector,
@@ -23,7 +27,7 @@ where
         >,
 {
     mesh: &'a Mesh<T, GeometryDim, C>,
-    info_desk: &'a DeviceInfoDesk<T, GeometryDim, BandDim>,
+    pub(crate) info_desk: &'a DeviceInfoDesk<T, GeometryDim, BandDim>,
     charge_densities: Charge<T, BandDim>,
     current_densities: Current<T, BandDim>,
     potential: Potential<T>,
@@ -54,8 +58,8 @@ where
     }
 }
 
-impl<T: Copy + RealField, BandDim: SmallDim, GeometryDim: SmallDim, C>
-    crate::hamiltonian::HamiltonianInfoDesk<T> for Tracker<'_, T, GeometryDim, BandDim, C>
+impl<T: Copy + RealField, BandDim: SmallDim, GeometryDim: SmallDim, C> HamiltonianInfoDesk<T>
+    for Tracker<'_, T, GeometryDim, BandDim, C>
 where
     C: Connectivity<T, GeometryDim>,
     DefaultAllocator: Allocator<T, BandDim>

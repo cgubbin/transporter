@@ -27,14 +27,16 @@ where
         .rev()
         .zip(left_diagonal.iter())
         .skip(1)
+        .take(nrows - 2)
         .enumerate()
     {
         let row = hamiltonian.row(nrows - 2 - idx);
         let hopping_element = T::from_real(row.values()[2]);
+
         *element = left_diagonal_element
             * (T::one()
                 + left_diagonal_element * previous * hopping_element * previous_hopping_element);
-        previous_hopping_element = T::from_real(row.values()[0]);
+        previous_hopping_element = hopping_element;
         previous = *element;
     }
     Ok((diagonal, left_diagonal))
@@ -50,10 +52,10 @@ where
     T: ComplexField + Copy,
     <T as ComplexField>::RealField: Copy,
 {
-    let num_rows = hamiltonian.nrows();
+    let nrows = hamiltonian.nrows();
     let right_connected_diagonal =
-        right_connected_diagonal(energy, hamiltonian, right_self_energy, num_rows)?;
-    let mut top_row = DVector::zeros(num_rows);
+        right_connected_diagonal(energy, hamiltonian, right_self_energy, nrows)?;
+    let mut top_row = DVector::zeros(nrows);
     top_row[0] = diagonal[0];
     let mut previous = top_row[0];
     for ((element, row), &right_diagonal_element) in top_row
@@ -61,8 +63,10 @@ where
         .zip(hamiltonian.row_iter())
         .zip(right_connected_diagonal.iter())
         .skip(1)
+        .take(nrows - 2)
     {
         let hopping_element = T::from_real(row.values()[2]);
+
         *element = -right_diagonal_element * hopping_element * previous;
         previous = *element;
     }
@@ -89,6 +93,7 @@ where
         .zip(left_connected_diagonal.iter())
         .rev()
         .skip(1)
+        .take(nrows - 2)
         .enumerate()
     {
         let hopping = T::from_real(hamiltonian.row(nrows - 2 - idx).values()[2]);
@@ -108,19 +113,25 @@ where
     T: ComplexField + Copy,
     <T as ComplexField>::RealField: Copy,
 {
+    let nrows = hamiltonian.nrows();
     let mut diagonal = DVector::zeros(terminate_after);
     diagonal[0] =
         T::one() / (T::from_real(energy - hamiltonian.row(0).values()[0]) - left_self_energy);
     let mut previous = diagonal[0];
     let mut previous_hopping_element = T::from_real(hamiltonian.row(0).values()[1]);
 
-    for (element, row) in diagonal.iter_mut().skip(1).zip(hamiltonian.row_iter()) {
+    for (element, row) in diagonal
+        .iter_mut()
+        .skip(1)
+        .zip(hamiltonian.row_iter())
+        .take(nrows - 2)
+    {
         let hopping_element = T::from_real(row.values()[0]);
         *element = T::one()
             / (T::from_real(energy)
                 - T::from_real(row.values()[1])
                 - previous * hopping_element * previous_hopping_element);
-        previous_hopping_element = T::from_real(row.values()[2]);
+        previous_hopping_element = hopping_element;
         previous = *element;
     }
     Ok(diagonal)
@@ -143,14 +154,20 @@ where
     let mut previous = diagonal[0];
     let mut previous_hopping_element = T::from_real(hamiltonian.row(nrows - 1).values()[0]);
     // TODO CsrMatrix does not implement double ended iter, so we can't zip with the diagonal. When this changes change.
-    for (idx, element) in diagonal.iter_mut().rev().skip(1).enumerate() {
+    for (idx, element) in diagonal
+        .iter_mut()
+        .rev()
+        .skip(1)
+        .enumerate()
+        .take(nrows - 2)
+    {
         let row = hamiltonian.row(nrows - 2 - idx);
         let hopping_element = T::from_real(row.values()[2]);
         *element = T::one()
             / (T::from_real(energy)
                 - T::from_real(row.values()[1])
                 - previous * hopping_element * previous_hopping_element);
-        previous_hopping_element = T::from_real(row.values()[0]);
+        previous_hopping_element = hopping_element;
         previous = *element;
     }
     Ok(diagonal)

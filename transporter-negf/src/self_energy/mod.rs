@@ -1,16 +1,18 @@
+mod contact;
+
 use crate::{greens_functions::GreensFunctionMethods, hamiltonian::Hamiltonian};
-use nalgebra::{allocator::Allocator, ComplexField, DefaultAllocator, Dim};
+use nalgebra::{allocator::Allocator, ComplexField, DefaultAllocator, RealField};
+use num_complex::Complex;
 use std::marker::PhantomData;
 use transporter_mesher::{Connectivity, Mesh, SmallDim};
 
 pub(crate) struct SelfEnergy<T, GeometryDim, Conn, Matrix>
 where
-    T: ComplexField + Copy,
-    <T as ComplexField>::RealField: Copy,
+    T: RealField + Copy,
     GeometryDim: SmallDim,
-    Conn: Connectivity<T::RealField, GeometryDim>,
+    Conn: Connectivity<T, GeometryDim>,
     Matrix: GreensFunctionMethods<T>,
-    DefaultAllocator: Allocator<T::RealField, GeometryDim>,
+    DefaultAllocator: Allocator<T, GeometryDim>,
 {
     ma: PhantomData<GeometryDim>,
     mc: PhantomData<Conn>,
@@ -63,21 +65,16 @@ use nalgebra_sparse::CsrMatrix;
 
 /// Coherent impl
 impl<'a, T, GeometryDim, Conn>
-    SelfEnergyBuilder<
-        T,
-        &'a SpectralSpace<T::RealField, ()>,
-        &'a Mesh<T::RealField, GeometryDim, Conn>,
-    >
+    SelfEnergyBuilder<T, &'a SpectralSpace<T, ()>, &'a Mesh<T, GeometryDim, Conn>>
 where
-    T: ComplexField + Copy,
-    <T as ComplexField>::RealField: Copy,
+    T: RealField + Copy,
     GeometryDim: SmallDim,
-    Conn: Connectivity<T::RealField, GeometryDim>,
-    DefaultAllocator: Allocator<T::RealField, GeometryDim>,
+    Conn: Connectivity<T, GeometryDim>,
+    DefaultAllocator: Allocator<T, GeometryDim>,
 {
     pub(crate) fn build(
         self,
-    ) -> color_eyre::Result<SelfEnergy<T, GeometryDim, Conn, CsrMatrix<T>>> {
+    ) -> color_eyre::Result<SelfEnergy<T, GeometryDim, Conn, CsrMatrix<Complex<T>>>> {
         // In the coherent case there is no inner loop -> there is no need to retain the calculated self-energies
 
         // Collect the indices of all elements at the boundaries
@@ -97,7 +94,7 @@ where
             construct_csr_pattern_from_elements(&elements_at_boundary, self.mesh.elements().len())?;
         let initial_values = elements_at_boundary
             .iter()
-            .map(|_| T::zero())
+            .map(|_| Complex::from(T::zero()))
             .collect::<Vec<_>>();
         let matrix = CsrMatrix::try_from_pattern_and_values(pattern, initial_values)
             .map_err(|e| eyre!("Failed to initialise sparse self energy matrix {}", e))?;
@@ -113,20 +110,19 @@ where
     }
 }
 
-impl<T, GeometryDim, Conn> SelfEnergy<T, GeometryDim, Conn, CsrMatrix<T>>
+impl<T, GeometryDim, Conn> SelfEnergy<T, GeometryDim, Conn, CsrMatrix<Complex<T>>>
 where
-    T: ComplexField + Copy,
-    <T as ComplexField>::RealField: Copy,
+    T: RealField + Copy,
     GeometryDim: SmallDim,
-    Conn: Connectivity<T::RealField, GeometryDim>,
-    DefaultAllocator: Allocator<T::RealField, GeometryDim>,
+    Conn: Connectivity<T, GeometryDim>,
+    DefaultAllocator: Allocator<T, GeometryDim>,
 {
     // Updates the coherent Self Energy at the contacts into the scratch matrix held in `self`
     pub(crate) fn recalculate(
         &mut self,
-        mesh: &Mesh<T::RealField, GeometryDim, Conn>,
-        hamiltonian: &Hamiltonian<T::RealField>,
-        spectral_space: &SpectralSpace<T::RealField, ()>,
+        mesh: &Mesh<T, GeometryDim, Conn>,
+        hamiltonian: &Hamiltonian<T>,
+        spectral_space: &SpectralSpace<T, ()>,
     ) -> color_eyre::Result<()> {
         match GeometryDim::dim() {
             1 => {
@@ -147,20 +143,20 @@ where
                     let a = (mesh.get_element_midpoint(idx)
                         - mesh.get_element_midpoint(connected_idx[0]))
                     .norm();
-                    let ci = T::one(); // Should be imaginary
+                    let imaginary_unit = Complex::new(T::zero(), T::one());
                     for (jdx, &energy) in spectral_space.iter_energy().enumerate() {
-                        let z = T::one()
-                            - T::from_real(
-                                (energy - ec_plus_u_plus_ek)
+                        let z = Complex::from(
+                            T::one()
+                                - (energy - ec_plus_u_plus_ek)
                                     / (boundary_element + boundary_element),
-                            );
-                        let k1 = T::one() / T::from_real(a) * z.acos();
+                        );
+                        let k1 = Complex::from(T::one() / a) * z.acos();
                         if idx == 0 {
-                            self.retarded[jdx].values_mut()[0] =
-                                -T::from_real(boundary_element) * (ci * k1 * T::from_real(a)).exp();
+                            self.retarded[jdx].values_mut()[0] = -Complex::from(boundary_element)
+                                * (imaginary_unit * k1 * T::from_real(a)).exp();
                         } else {
-                            self.retarded[jdx].values_mut()[1] =
-                                -T::from_real(boundary_element) * (ci * k1 * T::from_real(a)).exp();
+                            self.retarded[jdx].values_mut()[1] = -Complex::from(boundary_element)
+                                * (imaginary_unit * k1 * T::from_real(a)).exp();
                         }
                     }
                 }
@@ -200,17 +196,16 @@ fn construct_csr_pattern_from_elements(
 impl<'a, T, GeometryDim, Conn>
     SelfEnergyBuilder<
         T,
-        &'a SpectralSpace<T::RealField, WavevectorSpace<T::RealField, GeometryDim, Conn>>,
-        &'a Mesh<T::RealField, GeometryDim, Conn>,
+        &'a SpectralSpace<T, WavevectorSpace<T::RealField, GeometryDim, Conn>>,
+        &'a Mesh<T, GeometryDim, Conn>,
     >
 where
-    T: ComplexField + Copy,
-    <T as ComplexField>::RealField: Copy,
+    T: RealField + Copy,
     GeometryDim: SmallDim,
     Conn: Connectivity<T::RealField, GeometryDim>,
     DefaultAllocator: Allocator<T::RealField, GeometryDim>,
 {
-    pub(crate) fn build(self) -> SelfEnergy<T, GeometryDim, Conn, DMatrix<T>> {
+    pub(crate) fn build(self) -> SelfEnergy<T, GeometryDim, Conn, DMatrix<Complex<T>>> {
         // TODO Should take a Vec<DMatrix<T>> -> which corresponds to the spectral space
         // In the incoherent case the inner loop iterates between updating the Green's functions and self-energies
         // so we need to retain the full stack
@@ -222,6 +217,10 @@ where
         //}
         todo!()
     }
+}
+
+pub(crate) trait SelfEnergyInfoDesk<T: RealField> {
+    fn get_fermi_level_at_source(&self) -> T;
 }
 
 #[cfg(test)]

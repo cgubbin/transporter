@@ -4,7 +4,10 @@ mod methods;
 pub(crate) use convergence::Convergence;
 pub(crate) use methods::{Outer, Potential};
 
-use crate::{app::Tracker, hamiltonian::Hamiltonian, postprocessor::ChargeAndCurrent};
+use crate::{
+    app::Tracker, device::info_desk::DeviceInfoDesk, hamiltonian::Hamiltonian,
+    postprocessor::ChargeAndCurrent,
+};
 use nalgebra::{allocator::Allocator, ComplexField, DefaultAllocator};
 use std::marker::PhantomData;
 use transporter_mesher::{Connectivity, Mesh, SmallDim};
@@ -17,16 +20,18 @@ pub(crate) struct OuterLoopBuilder<
     RefSpectral,
     RefHamiltonian,
     RefTracker,
+    RefInfoDesk,
 > {
     mesh: RefMesh,
     spectral: RefSpectral,
     hamiltonian: RefHamiltonian,
     convergence_settings: RefConvergenceSettings,
     tracker: RefTracker,
+    info_desk: RefInfoDesk,
     marker: PhantomData<T>,
 }
 
-impl<T> OuterLoopBuilder<T, (), (), (), (), ()> {
+impl<T> OuterLoopBuilder<T, (), (), (), (), (), ()> {
     /// Initialise an empty OuterLoopBuilder
     pub(crate) fn new() -> Self {
         Self {
@@ -35,26 +40,51 @@ impl<T> OuterLoopBuilder<T, (), (), (), (), ()> {
             hamiltonian: (),
             convergence_settings: (),
             tracker: (),
+            info_desk: (),
             marker: PhantomData,
         }
     }
 }
 
-impl<T: ComplexField, RefConvergenceSettings, RefMesh, RefSpectral, RefHamiltonian, RefTracker>
-    OuterLoopBuilder<T, RefConvergenceSettings, RefMesh, RefSpectral, RefHamiltonian, RefTracker>
+impl<
+        T: ComplexField,
+        RefConvergenceSettings,
+        RefMesh,
+        RefSpectral,
+        RefHamiltonian,
+        RefTracker,
+        RefInfoDesk,
+    >
+    OuterLoopBuilder<
+        T,
+        RefConvergenceSettings,
+        RefMesh,
+        RefSpectral,
+        RefHamiltonian,
+        RefTracker,
+        RefInfoDesk,
+    >
 {
     /// Attach the problem's `Mesh`
     pub(crate) fn with_mesh<Mesh>(
         self,
         mesh: &Mesh,
-    ) -> OuterLoopBuilder<T, RefConvergenceSettings, &Mesh, RefSpectral, RefHamiltonian, RefTracker>
-    {
+    ) -> OuterLoopBuilder<
+        T,
+        RefConvergenceSettings,
+        &Mesh,
+        RefSpectral,
+        RefHamiltonian,
+        RefTracker,
+        RefInfoDesk,
+    > {
         OuterLoopBuilder {
             mesh,
             spectral: self.spectral,
             hamiltonian: self.hamiltonian,
             convergence_settings: self.convergence_settings,
             tracker: self.tracker,
+            info_desk: self.info_desk,
             marker: PhantomData,
         }
     }
@@ -63,14 +93,22 @@ impl<T: ComplexField, RefConvergenceSettings, RefMesh, RefSpectral, RefHamiltoni
     pub(crate) fn with_spectral_space<Spectral>(
         self,
         spectral: &Spectral,
-    ) -> OuterLoopBuilder<T, RefConvergenceSettings, RefMesh, &Spectral, RefHamiltonian, RefTracker>
-    {
+    ) -> OuterLoopBuilder<
+        T,
+        RefConvergenceSettings,
+        RefMesh,
+        &Spectral,
+        RefHamiltonian,
+        RefTracker,
+        RefInfoDesk,
+    > {
         OuterLoopBuilder {
             mesh: self.mesh,
             spectral,
             hamiltonian: self.hamiltonian,
             convergence_settings: self.convergence_settings,
             tracker: self.tracker,
+            info_desk: self.info_desk,
             marker: PhantomData,
         }
     }
@@ -79,14 +117,22 @@ impl<T: ComplexField, RefConvergenceSettings, RefMesh, RefSpectral, RefHamiltoni
     pub(crate) fn with_hamiltonian<Hamiltonian>(
         self,
         hamiltonian: &Hamiltonian,
-    ) -> OuterLoopBuilder<T, RefConvergenceSettings, RefMesh, RefSpectral, &Hamiltonian, RefTracker>
-    {
+    ) -> OuterLoopBuilder<
+        T,
+        RefConvergenceSettings,
+        RefMesh,
+        RefSpectral,
+        &Hamiltonian,
+        RefTracker,
+        RefInfoDesk,
+    > {
         OuterLoopBuilder {
             mesh: self.mesh,
             spectral: self.spectral,
             hamiltonian,
             convergence_settings: self.convergence_settings,
             tracker: self.tracker,
+            info_desk: self.info_desk,
             marker: PhantomData,
         }
     }
@@ -95,14 +141,22 @@ impl<T: ComplexField, RefConvergenceSettings, RefMesh, RefSpectral, RefHamiltoni
     pub(crate) fn with_convergence_settings<ConvergenceSettings>(
         self,
         convergence_settings: &ConvergenceSettings,
-    ) -> OuterLoopBuilder<T, &ConvergenceSettings, RefMesh, RefSpectral, RefHamiltonian, RefTracker>
-    {
+    ) -> OuterLoopBuilder<
+        T,
+        &ConvergenceSettings,
+        RefMesh,
+        RefSpectral,
+        RefHamiltonian,
+        RefTracker,
+        RefInfoDesk,
+    > {
         OuterLoopBuilder {
             mesh: self.mesh,
             spectral: self.spectral,
             hamiltonian: self.hamiltonian,
             convergence_settings,
             tracker: self.tracker,
+            info_desk: self.info_desk,
             marker: PhantomData,
         }
     }
@@ -111,14 +165,46 @@ impl<T: ComplexField, RefConvergenceSettings, RefMesh, RefSpectral, RefHamiltoni
     pub(crate) fn with_tracker<Tracker>(
         self,
         tracker: &Tracker,
-    ) -> OuterLoopBuilder<T, RefConvergenceSettings, RefMesh, RefSpectral, RefHamiltonian, &Tracker>
-    {
+    ) -> OuterLoopBuilder<
+        T,
+        RefConvergenceSettings,
+        RefMesh,
+        RefSpectral,
+        RefHamiltonian,
+        &Tracker,
+        RefInfoDesk,
+    > {
         OuterLoopBuilder {
             mesh: self.mesh,
             spectral: self.spectral,
             hamiltonian: self.hamiltonian,
             convergence_settings: self.convergence_settings,
             tracker,
+            info_desk: self.info_desk,
+            marker: PhantomData,
+        }
+    }
+
+    /// Attach the info desk
+    pub(crate) fn with_info_desk<InfoDesk>(
+        self,
+        info_desk: &InfoDesk,
+    ) -> OuterLoopBuilder<
+        T,
+        RefConvergenceSettings,
+        RefMesh,
+        RefSpectral,
+        RefHamiltonian,
+        RefTracker,
+        &InfoDesk,
+    > {
+        OuterLoopBuilder {
+            mesh: self.mesh,
+            spectral: self.spectral,
+            hamiltonian: self.hamiltonian,
+            convergence_settings: self.convergence_settings,
+            tracker: self.tracker,
+            info_desk,
             marker: PhantomData,
         }
     }
@@ -141,7 +227,8 @@ where
                 VecStorage<T::RealField, Dynamic, Const<1_usize>>,
             >,
             BandDim,
-        >,
+        > + Allocator<T::RealField, BandDim>
+        + Allocator<[T::RealField; 3], BandDim>,
 {
     /// The convergence information for the outerloop and the spawned innerloop
     convergence_settings: &'a Convergence<T::RealField>,
@@ -153,6 +240,7 @@ where
     hamiltonian: &'a Hamiltonian<T::RealField>,
     // TODO A solution tracker, think about this IMPL. We already have a top-level tracker
     tracker: LoopTracker<T::RealField, BandDim>,
+    info_desk: &'a DeviceInfoDesk<T::RealField, GeometryDim, BandDim>,
 }
 
 impl<'a, T, GeometryDim, Conn, BandDim, SpectralSpace>
@@ -163,6 +251,7 @@ impl<'a, T, GeometryDim, Conn, BandDim, SpectralSpace>
         &'a SpectralSpace,
         &'a Hamiltonian<T::RealField>,
         &'a Tracker<'a, T::RealField, GeometryDim, BandDim, Conn>,
+        &'a DeviceInfoDesk<T::RealField, GeometryDim, BandDim>,
     >
 where
     T: ComplexField + Copy,
@@ -194,6 +283,7 @@ where
             hamiltonian: self.hamiltonian,
             spectral: self.spectral,
             tracker,
+            info_desk: self.info_desk,
         })
     }
 }

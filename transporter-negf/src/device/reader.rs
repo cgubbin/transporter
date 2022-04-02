@@ -13,6 +13,8 @@ where
     DefaultAllocator: Allocator<T, GeometryDim>,
     <DefaultAllocator as Allocator<T, GeometryDim>>::Buffer: Deserialize<'static>,
 {
+    pub(crate) voltage_offsets: Vec<T>,
+    pub(crate) temperature: T,
     pub(crate) layers: Vec<Layer<T, GeometryDim>>,
 }
 
@@ -37,7 +39,8 @@ where
 {
     pub(crate) thickness: nalgebra::OPoint<T, GeometryDim>,
     pub(crate) material: Material,
-    pub(crate) doping_density: T,
+    pub(crate) acceptor_density: T,
+    pub(crate) donor_density: T,
 }
 
 impl<T: DeserializeOwned + RealField, GeometryDim: SmallDim> Device<T, GeometryDim>

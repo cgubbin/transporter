@@ -1,14 +1,20 @@
+temperature = 300.0
+voltage_offsets = [0.0, -0.5]
+
 [[layers]]
 thickness = [2.0]
 material = "GaAs"
-doping_density = 1e24
+acceptor_density = 0.0
+donor_density = 1e24
 
 [[layers]]
 thickness = [1.0]
 material = "SiC"
-doping_density = 1e24
+acceptor_density = 0.0
+donor_density = 1e24
 
 [[layers]]
 thickness = [2.0]
 material = "GaAs"
-doping_density = 1e24
+acceptor_density = 0.0
+donor_density = 1e24

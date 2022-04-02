@@ -9,6 +9,7 @@ use nalgebra::{
     VecStorage,
 };
 use nalgebra_sparse::CsrMatrix;
+use num_complex::Complex;
 use transporter_mesher::{Connectivity, SmallDim};
 
 pub(crate) trait Inner<T, BandDim>
@@ -37,28 +38,23 @@ where
 }
 
 impl<'a, T, GeometryDim, Conn, BandDim> Inner<T::RealField, BandDim>
-    for InnerLoop<'a, T, GeometryDim, Conn, CsrMatrix<T>, SpectralSpace<T::RealField, ()>>
+    for InnerLoop<'a, T, GeometryDim, Conn, CsrMatrix<Complex<T>>, SpectralSpace<T, ()>, BandDim>
 where
-    T: Copy + ComplexField,
+    T: Copy + RealField,
     GeometryDim: SmallDim,
     BandDim: SmallDim,
-    Conn: Connectivity<T::RealField, GeometryDim>,
-    <T as ComplexField>::RealField: Copy,
-    DefaultAllocator: Allocator<T::RealField, GeometryDim>
+    Conn: Connectivity<T, GeometryDim>,
+    DefaultAllocator: Allocator<T, GeometryDim>
         + Allocator<
-            Matrix<
-                T::RealField,
-                Dynamic,
-                Const<1_usize>,
-                VecStorage<T::RealField, Dynamic, Const<1_usize>>,
-            >,
+            Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
             BandDim,
-        >,
+        > + Allocator<T, BandDim>
+        + Allocator<[T; 3], BandDim>,
 {
     /// Check convergence and re-assign the new charge density to the old one
     fn is_loop_converged(
         &self,
-        previous_charge_and_current: &mut ChargeAndCurrent<T::RealField, BandDim>,
+        previous_charge_and_current: &mut ChargeAndCurrent<T, BandDim>,
     ) -> color_eyre::Result<bool> {
         let postprocessor: PostProcessor<T, GeometryDim, Conn> =
             PostProcessorBuilder::new().with_mesh(self.mesh).build();
@@ -81,49 +77,47 @@ where
             self.self_energies,
             self.spectral,
         )?;
+        dbg!(&self.greens_functions);
+        panic!();
         Ok(())
     }
 
     fn run_loop(
         &mut self,
-        _previous_charge_and_current: &mut ChargeAndCurrent<T::RealField, BandDim>,
+        _previous_charge_and_current: &mut ChargeAndCurrent<T, BandDim>,
     ) -> color_eyre::Result<()> {
         // In a coherent calculation there is no inner loop
         self.single_iteration()
     }
 }
 
-impl<'a, T, GeometryDim, Conn, BandDim, MatrixType> Inner<T::RealField, BandDim>
+impl<'a, T, GeometryDim, Conn, BandDim, MatrixType> Inner<T, BandDim>
     for InnerLoop<
         'a,
         T,
         GeometryDim,
         Conn,
         MatrixType,
-        SpectralSpace<T::RealField, WavevectorSpace<T::RealField, GeometryDim, Conn>>,
+        SpectralSpace<T, WavevectorSpace<T, GeometryDim, Conn>>,
+        BandDim,
     >
 where
-    T: Copy + ComplexField,
+    T: Copy + RealField,
     GeometryDim: SmallDim,
     BandDim: SmallDim,
-    Conn: Connectivity<T::RealField, GeometryDim>,
-    <T as ComplexField>::RealField: Copy,
+    Conn: Connectivity<T, GeometryDim>,
     MatrixType: GreensFunctionMethods<T>,
-    DefaultAllocator: Allocator<T::RealField, GeometryDim>
+    DefaultAllocator: Allocator<T, GeometryDim>
         + Allocator<
-            Matrix<
-                T::RealField,
-                Dynamic,
-                Const<1_usize>,
-                VecStorage<T::RealField, Dynamic, Const<1_usize>>,
-            >,
+            Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
             BandDim,
-        >,
+        > + Allocator<T, BandDim>
+        + Allocator<[T; 3], BandDim>,
 {
     /// Check convergence and re-assign the new charge density to the old one
     fn is_loop_converged(
         &self,
-        _previous_charge_and_current: &mut ChargeAndCurrent<T::RealField, BandDim>,
+        _previous_charge_and_current: &mut ChargeAndCurrent<T, BandDim>,
     ) -> color_eyre::Result<bool> {
         //let postprocessor: PostProcessor<T, GeometryDim, Conn> =
         //    PostProcessorBuilder::new().with_mesh(self.mesh).build();
@@ -147,7 +141,7 @@ where
 
     fn run_loop(
         &mut self,
-        previous_charge_and_current: &mut ChargeAndCurrent<T::RealField, BandDim>,
+        previous_charge_and_current: &mut ChargeAndCurrent<T, BandDim>,
     ) -> color_eyre::Result<()> {
         let mut iteration = 0;
         while !self.is_loop_converged(previous_charge_and_current)? {

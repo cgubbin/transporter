@@ -5,6 +5,7 @@ use crate::{
 };
 use nalgebra::{allocator::Allocator, ComplexField, DMatrix, DVector, DefaultAllocator, RealField};
 use nalgebra_sparse::CsrMatrix;
+use num_complex::Complex;
 use transporter_mesher::{Connectivity, SmallDim};
 
 use nalgebra::{Const, Dynamic, Matrix, VecStorage};
@@ -45,28 +46,23 @@ where
     fn run_loop(&mut self, potential: Potential<T>) -> color_eyre::Result<()>;
 }
 
-impl<T, GeometryDim, Conn, BandDim> Outer<T::RealField>
-    for OuterLoop<'_, T, GeometryDim, Conn, BandDim, SpectralSpace<T::RealField, ()>>
+impl<T, GeometryDim, Conn, BandDim> Outer<T>
+    for OuterLoop<'_, T, GeometryDim, Conn, BandDim, SpectralSpace<T, ()>>
 where
-    T: ComplexField + Copy,
-    <T as ComplexField>::RealField: Copy,
-    Conn: Connectivity<T::RealField, GeometryDim>,
+    T: RealField + Copy,
+    Conn: Connectivity<T, GeometryDim>,
     GeometryDim: SmallDim,
     BandDim: SmallDim,
-    DefaultAllocator: Allocator<T::RealField, GeometryDim>
+    DefaultAllocator: Allocator<T, GeometryDim>
         + Allocator<
-            Matrix<
-                T::RealField,
-                Dynamic,
-                Const<1_usize>,
-                VecStorage<T::RealField, Dynamic, Const<1_usize>>,
-            >,
+            Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
             BandDim,
-        >,
+        > + Allocator<T, BandDim>
+        + Allocator<[T; 3], BandDim>,
 {
     fn is_loop_converged(
         &self,
-        _previous_potential: &mut Potential<T::RealField>,
+        _previous_potential: &mut Potential<T>,
     ) -> color_eyre::Result<bool> {
         //let potential = self.update_potential()?;
         //let result = potential.is_change_within_tolerance(
@@ -84,8 +80,10 @@ where
         // coherent inner loop, with sparse matrices, else we create a dense one.
         // TODO Building the gfs and SE here is a bad idea, we should do this else where so it is not redone on every iteration
         let mut greens_functions = GreensFunctionBuilder::new()
+            .with_info_desk(self.info_desk)
+            .with_mesh(self.mesh)
             .with_spectral_discretisation(self.spectral)
-            .build();
+            .build()?;
         let mut self_energies = SelfEnergyBuilder::new()
             .with_mesh(self.mesh)
             .with_spectral_discretisation(self.spectral)
@@ -98,7 +96,7 @@ where
         Ok(())
     }
 
-    fn run_loop(&mut self, mut potential: Potential<T::RealField>) -> color_eyre::Result<()> {
+    fn run_loop(&mut self, mut potential: Potential<T>) -> color_eyre::Result<()> {
         let mut iteration = 0;
         while !self.is_loop_converged(&mut potential)? {
             self.single_iteration()?;
@@ -115,35 +113,30 @@ where
 
 use crate::spectral::{SpectralSpace, WavevectorSpace};
 
-impl<T, GeometryDim, Conn, BandDim> Outer<T::RealField>
+impl<T, GeometryDim, Conn, BandDim> Outer<T>
     for OuterLoop<
         '_,
         T,
         GeometryDim,
         Conn,
         BandDim,
-        SpectralSpace<T::RealField, WavevectorSpace<T::RealField, GeometryDim, Conn>>,
+        SpectralSpace<T, WavevectorSpace<T, GeometryDim, Conn>>,
     >
 where
-    T: ComplexField + Copy,
-    <T as ComplexField>::RealField: Copy,
-    Conn: Connectivity<T::RealField, GeometryDim>,
+    T: RealField + Copy,
+    Conn: Connectivity<T, GeometryDim>,
     GeometryDim: SmallDim,
     BandDim: SmallDim,
-    DefaultAllocator: Allocator<T::RealField, GeometryDim>
+    DefaultAllocator: Allocator<T, GeometryDim>
         + Allocator<
-            Matrix<
-                T::RealField,
-                Dynamic,
-                Const<1_usize>,
-                VecStorage<T::RealField, Dynamic, Const<1_usize>>,
-            >,
+            Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
             BandDim,
-        >,
+        > + Allocator<T, BandDim>
+        + Allocator<[T; 3], BandDim>,
 {
     fn is_loop_converged(
         &self,
-        _previous_potential: &mut Potential<T::RealField>,
+        _previous_potential: &mut Potential<T>,
     ) -> color_eyre::Result<bool> {
         //let potential = self.update_potential()?;
         //let result = potential.is_change_within_tolerance(
@@ -161,6 +154,8 @@ where
         // coherent inner loop, with sparse matrices, else we create a dense one.
         // TODO Builder the gfs and SE here is a bad idea, we should do this else where so it is not redone on every iteration
         let mut greens_functions = GreensFunctionBuilder::new()
+            .with_info_desk(self.info_desk)
+            .with_mesh(self.mesh)
             .with_spectral_discretisation(self.spectral)
             .build();
         let mut self_energies = SelfEnergyBuilder::new()
@@ -175,7 +170,7 @@ where
         Ok(())
     }
 
-    fn run_loop(&mut self, mut potential: Potential<T::RealField>) -> color_eyre::Result<()> {
+    fn run_loop(&mut self, mut potential: Potential<T>) -> color_eyre::Result<()> {
         let mut iteration = 0;
         while !self.is_loop_converged(&mut potential)? {
             self.single_iteration()?;
@@ -196,21 +191,16 @@ use crate::inner_loop::InnerLoopBuilder;
 impl<T, GeometryDim, Conn, BandDim, SpectralSpace>
     OuterLoop<'_, T, GeometryDim, Conn, BandDim, SpectralSpace>
 where
-    T: ComplexField + Copy,
-    <T as ComplexField>::RealField: Copy,
-    Conn: Connectivity<T::RealField, GeometryDim>,
+    T: RealField + Copy,
+    Conn: Connectivity<T, GeometryDim>,
     GeometryDim: SmallDim,
     BandDim: SmallDim,
-    DefaultAllocator: Allocator<T::RealField, GeometryDim>
+    DefaultAllocator: Allocator<T, GeometryDim>
         + Allocator<
-            Matrix<
-                T::RealField,
-                Dynamic,
-                Const<1_usize>,
-                VecStorage<T::RealField, Dynamic, Const<1_usize>>,
-            >,
+            Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
             BandDim,
-        >,
+        > + Allocator<T, BandDim>
+        + Allocator<[T; 3], BandDim>,
 {
     fn update_potential(&self) -> color_eyre::Result<Potential<T::RealField>> {
         todo!()
@@ -218,29 +208,31 @@ where
 }
 
 impl<T, GeometryDim, Conn, BandDim>
-    OuterLoop<'_, T, GeometryDim, Conn, BandDim, SpectralSpace<T::RealField, ()>>
+    OuterLoop<'_, T, GeometryDim, Conn, BandDim, SpectralSpace<T, ()>>
 where
-    T: ComplexField + Copy,
-    <T as ComplexField>::RealField: Copy,
-    Conn: Connectivity<T::RealField, GeometryDim>,
+    T: RealField + Copy,
+    Conn: Connectivity<T, GeometryDim>,
     GeometryDim: SmallDim,
     BandDim: SmallDim,
-    DefaultAllocator: Allocator<T::RealField, GeometryDim>
+    DefaultAllocator: Allocator<T, GeometryDim>
         + Allocator<
-            Matrix<
-                T::RealField,
-                Dynamic,
-                Const<1_usize>,
-                VecStorage<T::RealField, Dynamic, Const<1_usize>>,
-            >,
+            Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
             BandDim,
-        >,
+        > + Allocator<T, BandDim>
+        + Allocator<[T; 3], BandDim>,
 {
     fn build_coherent_inner_loop<'a>(
         &'a self,
-        greens_functions: &'a mut AggregateGreensFunctions<T, CsrMatrix<T>>,
-        self_energies: &'a mut SelfEnergy<T, GeometryDim, Conn, CsrMatrix<T>>,
-    ) -> InnerLoop<'a, T, GeometryDim, Conn, CsrMatrix<T>, SpectralSpace<T::RealField, ()>> {
+        greens_functions: &'a mut AggregateGreensFunctions<
+            'a,
+            T,
+            CsrMatrix<Complex<T>>,
+            GeometryDim,
+            BandDim,
+        >,
+        self_energies: &'a mut SelfEnergy<T, GeometryDim, Conn, CsrMatrix<Complex<T>>>,
+    ) -> InnerLoop<'a, T, GeometryDim, Conn, CsrMatrix<Complex<T>>, SpectralSpace<T, ()>, BandDim>
+    {
         InnerLoopBuilder::new()
             .with_convergence_settings(self.convergence_settings)
             .with_mesh(self.mesh)
@@ -259,36 +251,38 @@ impl<T, GeometryDim, Conn, BandDim>
         GeometryDim,
         Conn,
         BandDim,
-        SpectralSpace<T::RealField, WavevectorSpace<T::RealField, GeometryDim, Conn>>,
+        SpectralSpace<T, WavevectorSpace<T, GeometryDim, Conn>>,
     >
 where
-    T: ComplexField + Copy,
-    <T as ComplexField>::RealField: Copy,
-    Conn: Connectivity<T::RealField, GeometryDim>,
+    T: RealField + Copy,
+    Conn: Connectivity<T, GeometryDim>,
     GeometryDim: SmallDim,
     BandDim: SmallDim,
-    DefaultAllocator: Allocator<T::RealField, GeometryDim>
+    DefaultAllocator: Allocator<T, GeometryDim>
         + Allocator<
-            Matrix<
-                T::RealField,
-                Dynamic,
-                Const<1_usize>,
-                VecStorage<T::RealField, Dynamic, Const<1_usize>>,
-            >,
+            Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
             BandDim,
-        >,
+        > + Allocator<T, BandDim>
+        + Allocator<[T; 3], BandDim>,
 {
     fn build_incoherent_inner_loop<'a>(
         &'a self,
-        greens_functions: &'a mut AggregateGreensFunctions<T, DMatrix<T>>,
-        self_energies: &'a mut SelfEnergy<T, GeometryDim, Conn, DMatrix<T>>,
+        greens_functions: &'a mut AggregateGreensFunctions<
+            'a,
+            T,
+            DMatrix<Complex<T>>,
+            GeometryDim,
+            BandDim,
+        >,
+        self_energies: &'a mut SelfEnergy<T, GeometryDim, Conn, DMatrix<Complex<T>>>,
     ) -> InnerLoop<
         'a,
         T,
         GeometryDim,
         Conn,
-        DMatrix<T>,
-        SpectralSpace<T::RealField, WavevectorSpace<T::RealField, GeometryDim, Conn>>,
+        DMatrix<Complex<T>>,
+        SpectralSpace<T, WavevectorSpace<T, GeometryDim, Conn>>,
+        BandDim,
     > {
         InnerLoopBuilder::new()
             .with_convergence_settings(self.convergence_settings)

@@ -4,22 +4,17 @@ use crate::{
     spectral::{SpectralDiscretisation, SpectralSpace},
 };
 use nalgebra::{
-    allocator::Allocator, ComplexField, Const, DefaultAllocator, Dynamic, Matrix, VecStorage,
+    allocator::Allocator, ComplexField, Const, DefaultAllocator, Dynamic, Matrix, RealField,
+    VecStorage,
 };
 use transporter_mesher::{Connectivity, SmallDim};
 
 pub(crate) trait PostProcess<T, BandDim: SmallDim, Spectral>
 where
-    T: ComplexField + Copy,
-    <T as ComplexField>::RealField: Copy,
-    Spectral: SpectralDiscretisation<T::RealField>,
+    T: RealField + Copy,
+    Spectral: SpectralDiscretisation<T>,
     DefaultAllocator: Allocator<
-        Matrix<
-            T::RealField,
-            Dynamic,
-            Const<1_usize>,
-            VecStorage<T::RealField, Dynamic, Const<1_usize>>,
-        >,
+        Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
         BandDim,
     >,
 {
@@ -32,33 +27,26 @@ where
         AggregateGreensFunctions: AggregateGreensFunctionMethods<T, BandDim, Spectral>;
 }
 
-impl<T, GeometryDim, Conn, BandDim> PostProcess<T, BandDim, SpectralSpace<T::RealField, ()>>
+impl<T, GeometryDim, Conn, BandDim> PostProcess<T, BandDim, SpectralSpace<T, ()>>
     for PostProcessor<'_, T, GeometryDim, Conn>
 where
-    T: ComplexField + Copy,
-    <T as ComplexField>::RealField: Copy,
-    Conn: Connectivity<T::RealField, GeometryDim>,
+    T: RealField + Copy,
+    Conn: Connectivity<T, GeometryDim>,
     GeometryDim: SmallDim,
     BandDim: SmallDim,
-    DefaultAllocator: Allocator<T::RealField, GeometryDim>
+    DefaultAllocator: Allocator<T, GeometryDim>
         + Allocator<
-            Matrix<
-                T::RealField,
-                Dynamic,
-                Const<1_usize>,
-                VecStorage<T::RealField, Dynamic, Const<1_usize>>,
-            >,
+            Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
             BandDim,
         >,
 {
     fn recompute_currents_and_densities<AggregateGreensFunctions>(
         &self,
         greens_functions: &AggregateGreensFunctions,
-        spectral_discretisation: &SpectralSpace<T::RealField, ()>,
-    ) -> color_eyre::Result<ChargeAndCurrent<T::RealField, BandDim>>
+        spectral_discretisation: &SpectralSpace<T, ()>,
+    ) -> color_eyre::Result<ChargeAndCurrent<T, BandDim>>
     where
-        AggregateGreensFunctions:
-            AggregateGreensFunctionMethods<T, BandDim, SpectralSpace<T::RealField, ()>>,
+        AggregateGreensFunctions: AggregateGreensFunctionMethods<T, BandDim, SpectralSpace<T, ()>>,
     {
         //todo Do we want to get the LDOS or are we ok with doing this inside the Greens funciton itself
         let charge =

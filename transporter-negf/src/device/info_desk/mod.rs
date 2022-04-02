@@ -10,6 +10,7 @@ use std::marker::PhantomData;
 use transporter_mesher::SmallDim;
 
 /// Struct holding all the material information necessary to solve the problem
+#[derive(Debug)]
 pub(crate) struct DeviceInfoDesk<T: RealField, GeometryDim: SmallDim, BandDim: SmallDim>
 where
     DefaultAllocator: Allocator<T, BandDim> + Allocator<[T; 3], BandDim>,
@@ -20,6 +21,11 @@ where
     pub(crate) band_offsets: Vec<OPoint<T, BandDim>>,
     /// Each layer in the stack has a static dielectric constant with a component for each Cartesian axis
     dielectric_constants: Vec<[T; 3]>,
+    /// Each layer in the stack has an effective doping density -> This should probably be a Point2<> for both doping types..
+    pub(crate) donor_densities: Vec<T>,
+    pub(crate) acceptor_densities: Vec<T>,
+    pub(crate) temperature: T,
+    pub(crate) voltage_offsets: Vec<T>,
     marker: PhantomData<GeometryDim>,
 }
 
@@ -33,6 +39,10 @@ where
             effective_masses: Vec::new(),
             band_offsets: Vec::new(),
             dielectric_constants: Vec::new(),
+            donor_densities: Vec::new(),
+            acceptor_densities: Vec::new(),
+            temperature: T::zero(),
+            voltage_offsets: Vec::new(),
             marker: PhantomData,
         }
     }
@@ -57,8 +67,12 @@ where
 {
     fn build_device_info_desk(&self)
         -> color_eyre::Result<DeviceInfoDesk<T, GeometryDim, BandDim>>;
-    fn assemble_from_layers(
+    fn assemble_from_layers_and_doping_densities(
         layers: Vec<LayerInfoDesk<T, BandDim>>,
+        acceptor_density: Vec<T>,
+        donor_density: Vec<T>,
+        temperature: T,
+        voltage_offsets: Vec<T>,
     ) -> DeviceInfoDesk<T, GeometryDim, BandDim>;
 }
 
@@ -66,7 +80,7 @@ where
 ///
 ///
 
-impl<T: serde::de::DeserializeOwned + RealField, GeometryDim: SmallDim>
+impl<T: Copy + serde::de::DeserializeOwned + RealField, GeometryDim: SmallDim>
     BuildInfoDesk<T, GeometryDim, U1> for Device<T, GeometryDim>
 where
     DefaultAllocator: Allocator<T, U1> + Allocator<T, U1, U3> + Allocator<T, GeometryDim>,
@@ -74,24 +88,46 @@ where
 {
     fn build_device_info_desk(&self) -> color_eyre::Result<DeviceInfoDesk<T, GeometryDim, U1>> {
         let mut layers = Vec::new();
+        let mut acceptor_densities = Vec::new();
+        let mut donor_densities = Vec::new();
         for layer in self.layers.iter() {
             layers.push(layer.material.get_info()?);
+            acceptor_densities.push(layer.acceptor_density);
+            donor_densities.push(layer.donor_density);
         }
-        Ok(Self::assemble_from_layers(layers))
+        Ok(Self::assemble_from_layers_and_doping_densities(
+            layers,
+            acceptor_densities,
+            donor_densities,
+            self.temperature,
+            self.voltage_offsets.clone(),
+        ))
     }
 
-    fn assemble_from_layers(
+    fn assemble_from_layers_and_doping_densities(
         layers: Vec<LayerInfoDesk<T, U1>>,
+        acceptor_densities: Vec<T>,
+        donor_densities: Vec<T>,
+        temperature: T,
+        voltage_offsets: Vec<T>,
     ) -> DeviceInfoDesk<T, GeometryDim, U1> {
         // Naive implementation: must be a better way to do this.
         let mut info_desk = DeviceInfoDesk::default();
-        for layer in layers {
+        for (layer, (acceptor_density, donor_density)) in layers.into_iter().zip(
+            acceptor_densities
+                .into_iter()
+                .zip(donor_densities.into_iter()),
+        ) {
             info_desk.band_offsets.push(layer.band_offset);
             info_desk.effective_masses.push(layer.effective_mass);
             info_desk
                 .dielectric_constants
                 .push(layer.dielectric_constant);
+            info_desk.acceptor_densities.push(acceptor_density);
+            info_desk.donor_densities.push(donor_density);
         }
+        info_desk.temperature = temperature;
+        info_desk.voltage_offsets = voltage_offsets;
         info_desk
     }
 }
