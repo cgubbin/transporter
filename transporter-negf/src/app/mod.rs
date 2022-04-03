@@ -1,7 +1,8 @@
 /// This module governs the high-level implementation of the simulation
 mod configuration;
 mod tracker;
-pub(crate) use tracker::Tracker;
+pub(crate) use configuration::Configuration;
+pub(crate) use tracker::{Tracker, TrackerBuilder};
 
 use crate::{
     device::{info_desk::BuildInfoDesk, reader::Device},
@@ -9,7 +10,6 @@ use crate::{
 };
 use clap::{ArgEnum, Parser};
 use color_eyre::eyre::eyre;
-use configuration::Configuration;
 use nalgebra::{
     allocator::Allocator, Const, DefaultAllocator, Dynamic, Matrix, RealField, VecStorage, U1,
 };
@@ -90,7 +90,7 @@ where
     Ok(())
 }
 
-fn build_mesh_with_config<T: Copy + DeserializeOwned + RealField + ToPrimitive>(
+pub(crate) fn build_mesh_with_config<T: Copy + DeserializeOwned + RealField + ToPrimitive>(
     config: &Configuration<T>,
     device: Device<T, U1>,
 ) -> color_eyre::Result<Mesh1d<T>>

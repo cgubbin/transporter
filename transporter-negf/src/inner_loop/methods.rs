@@ -81,10 +81,13 @@ where
 
     fn run_loop(
         &mut self,
-        _previous_charge_and_current: &mut ChargeAndCurrent<T, BandDim>,
+        previous_charge_and_current: &mut ChargeAndCurrent<T, BandDim>,
     ) -> color_eyre::Result<()> {
         // In a coherent calculation there is no inner loop
-        self.single_iteration()
+        self.single_iteration()?;
+        // Run the convergence check, this is solely to update the charge and current in the tracker
+        let _ = self.is_loop_converged(previous_charge_and_current)?;
+        Ok(())
     }
 }
 

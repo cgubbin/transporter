@@ -1,6 +1,6 @@
 mod tridiagonal;
 
-use tridiagonal::{bottom_row, diagonals, top_row};
+use tridiagonal::{diagonals, left_column, right_column};
 
 use crate::postprocessor::{Charge, Current};
 use crate::self_energy::SelfEnergy;
@@ -109,13 +109,26 @@ where
                 marker: std::marker::PhantomData,
             })
             .collect::<Vec<_>>();
+
+        let diagonal_pattern = csr.diagonal_as_csr().pattern().clone();
+        let values = vec![Complex::from(T::zero()); diagonal_pattern.nnz()];
+        let diagonal_csr = CsrMatrix::try_from_pattern_and_values(diagonal_pattern, values)
+            .map_err(|e| eyre!("Failed to write values to Csr GF Matrix {:?}", e))?;
+        let spectrum_of_diagonal_csr = (0..self.spectral.total_number_of_points())
+            .map(|_| GreensFunction {
+                matrix: diagonal_csr.clone(),
+                marker: std::marker::PhantomData,
+            })
+            .collect::<Vec<_>>();
+
+        // In the coherent calculation we do not use the advanced or greater Greens function, other than transiently
         Ok(AggregateGreensFunctions {
             //    spectral: self.spectral,
             info_desk: self.info_desk,
-            retarded: spectrum_of_csr.clone(),
-            advanced: spectrum_of_csr.clone(),
-            lesser: spectrum_of_csr.clone(),
-            greater: spectrum_of_csr,
+            retarded: spectrum_of_csr,
+            advanced: Vec::new(),
+            lesser: spectrum_of_diagonal_csr,
+            greater: Vec::new(),
         })
     }
 }
@@ -123,16 +136,17 @@ where
 fn assemble_csr_sparsity_for_gf(
     number_of_elements_in_mesh: usize,
 ) -> color_eyre::Result<SparsityPattern> {
-    let col_indices = (0..number_of_elements_in_mesh)
-        .chain(1..number_of_elements_in_mesh - 1)
-        .chain(0..number_of_elements_in_mesh)
-        .collect::<Vec<_>>();
-    let mut row_offsets = vec![0, number_of_elements_in_mesh];
-    let mut diagonal_row_offsets = (number_of_elements_in_mesh + 1
-        ..number_of_elements_in_mesh + number_of_elements_in_mesh - 1)
-        .collect();
-    row_offsets.append(&mut diagonal_row_offsets);
-    row_offsets.push(row_offsets.last().unwrap() + number_of_elements_in_mesh);
+    let mut col_indices = vec![0, number_of_elements_in_mesh - 1];
+    let mut row_offsets = vec![0, 2]; // 2 elements in the first row
+    for idx in 1..number_of_elements_in_mesh - 1 {
+        col_indices.push(0);
+        col_indices.push(idx);
+        col_indices.push(number_of_elements_in_mesh - 1);
+        row_offsets.push(row_offsets.last().unwrap() + 3)
+    }
+    col_indices.push(0);
+    col_indices.push(number_of_elements_in_mesh - 1);
+    row_offsets.push(row_offsets.last().unwrap() + 2);
     SparsityPattern::try_from_offsets_and_indices(
         number_of_elements_in_mesh,
         number_of_elements_in_mesh,
@@ -235,6 +249,11 @@ where
             )
             .diagonal_as_csr();
 
+        dbg!(&self.retarded);
+        panic!();
+
+        dbg!(summed_diagonal.values());
+
         for band_number in 0..BandDim::dim() {
             charges.push(DVector::from(
                 summed_diagonal
@@ -322,19 +341,19 @@ where
         Conn: Connectivity<T, GeometryDim>,
         DefaultAllocator: Allocator<T, GeometryDim>,
     {
-        let source_fermi_level = self.info_desk.get_fermi_level_at_source();
-        let drain_fermi_level = self.info_desk.get_fermi_level_at_source();
-        for (((lesser_gf, retarded_gf), retarded_self_energy), _energy) in self
+        for (((lesser_gf, retarded_gf), retarded_self_energy), &energy) in self
             .lesser
             .iter_mut()
             .zip(self.retarded.iter())
             .zip(self_energy.retarded.iter())
             .zip(spectral_space.iter_energy())
         {
+            let source_fermi_integral = self.info_desk.get_fermi_integral_at_source(energy);
+            let drain_fermi_integral = self.info_desk.get_fermi_integral_at_drain(energy);
             lesser_gf.as_mut().generate_lesser_into(
                 &retarded_gf.matrix,
                 retarded_self_energy,
-                &[source_fermi_level, drain_fermi_level],
+                &[source_fermi_integral, drain_fermi_integral],
             )?;
         }
         Ok(())
@@ -459,7 +478,7 @@ where
         let (retarded_diagonal, left_diagonal) =
             diagonals(energy, &hamiltonian, &self_energy_values)?;
         // Generate the top row
-        let retarded_top_row = top_row(
+        let retarded_left_column = left_column(
             energy,
             &hamiltonian,
             &retarded_diagonal,
@@ -467,12 +486,12 @@ where
         )?;
 
         // Generate the bottom row
-        let retarded_bottom_row = bottom_row(&retarded_diagonal, &left_diagonal, &hamiltonian)?;
+        let retarded_right_column = right_column(&retarded_diagonal, &left_diagonal, &hamiltonian)?;
 
-        self.assemble_retarded_rows_and_columns_into_csr(
+        self.assemble_retarded_diagonal_and_columns_into_csr(
             retarded_diagonal,
-            retarded_top_row,
-            retarded_bottom_row,
+            retarded_left_column,
+            retarded_right_column,
         )
     }
 
@@ -494,25 +513,10 @@ where
         fermi_functions: &[T],
     ) -> color_eyre::Result<()> {
         // In 1D and for 1 band:
-        let values = retarded_self_energy.values();
-        let se = (values[0], values[1]);
-        let pattern = retarded_self_energy.pattern();
-        let i = Complex::new(T::zero(), T::one()); //TODO Should be the imaginary unit
-        let source_se = CsrMatrix::try_from_pattern_and_values(
-            pattern.clone(),
-            vec![i * fermi_functions[0] * se.0, Complex::from(T::zero())],
-        )
-        .unwrap();
-        let drain_se = CsrMatrix::try_from_pattern_and_values(
-            pattern.clone(),
-            vec![Complex::from(T::zero()), i * fermi_functions[1] * se.1],
-        )
-        .unwrap();
-
         let advanced_gf_values = retarded_greens_function
             .values()
             .iter()
-            .map(|&x| x.simd_conjugate())
+            .map(|&x| x.conjugate())
             .collect::<Vec<_>>();
         let retarded_gf_pattern = retarded_greens_function.pattern().clone();
         let advanced_greens_function =
@@ -523,48 +527,59 @@ where
         let gamma_values = retarded_self_energy
             .values()
             .iter()
-            .map(|&x| -(T::one() + T::one()) * T::from_real(x.imaginary()))
+            .zip(fermi_functions)
+            .map(|(&x, &fermi)| Complex::new(T::zero(), fermi * T::one()) * (x - x.conjugate()))
             .collect::<Vec<_>>();
-        let _gamma = CsrMatrix::try_from_pattern_and_values(
+        let gamma = CsrMatrix::try_from_pattern_and_values(
             retarded_self_energy.pattern().clone(),
             gamma_values,
         )
         .unwrap();
 
-        let _spectral_density =
-            retarded_greens_function * (source_se + drain_se) * advanced_greens_function;
-        todo!()
+        let spectral_density_diagonal =
+            (retarded_greens_function * (gamma) * advanced_greens_function).diagonal_as_csr();
+
+        for (element, &value) in self
+            .values_mut()
+            .iter_mut()
+            .zip(spectral_density_diagonal.values().iter())
+        {
+            *element = value;
+        }
+        Ok(())
     }
 }
 
 trait CsrAssembly<T: RealField> {
-    fn assemble_retarded_rows_and_columns_into_csr(
+    fn assemble_retarded_diagonal_and_columns_into_csr(
         &mut self,
         diagonal: DVector<Complex<T>>,
-        top_row: DVector<Complex<T>>,
-        bottom_row: DVector<Complex<T>>,
+        left_column: DVector<Complex<T>>,
+        right_column: DVector<Complex<T>>,
     ) -> color_eyre::Result<()>;
 }
 
 impl<T: Copy + RealField> CsrAssembly<T> for CsrMatrix<Complex<T>> {
-    fn assemble_retarded_rows_and_columns_into_csr(
+    fn assemble_retarded_diagonal_and_columns_into_csr(
         &mut self,
         diagonal: DVector<Complex<T>>,
-        top_row: DVector<Complex<T>>,
-        bottom_row: DVector<Complex<T>>,
+        left_column: DVector<Complex<T>>,
+        right_column: DVector<Complex<T>>,
     ) -> color_eyre::Result<()> {
+        let n_values = self.values().len();
         assert_eq!(
-            self.values().len(),
-            diagonal.len() + top_row.len() + bottom_row.len() - 2
+            n_values,
+            diagonal.len() + left_column.len() + right_column.len() - 2
         );
-        for (output, calculated) in self.values_mut().iter_mut().zip(
-            top_row
-                .into_iter()
-                .chain(diagonal.into_iter().skip(1).take(diagonal.len() - 2))
-                .chain(bottom_row.into_iter()),
-        ) {
-            *output = *calculated;
+        self.values_mut()[0] = diagonal[0];
+        self.values_mut()[1] = right_column[0];
+        for row in 1..diagonal.len() - 1 {
+            self.values_mut()[2 + (row - 1) * 3] = left_column[row];
+            self.values_mut()[3 + (row - 1) * 3] = diagonal[row];
+            self.values_mut()[4 + (row - 1) * 3] = right_column[row];
         }
+        self.values_mut()[n_values - 2] = left_column[left_column.len() - 1];
+        self.values_mut()[n_values - 1] = diagonal[diagonal.len() - 1];
         Ok(())
     }
 }
@@ -633,6 +648,8 @@ where
 pub(crate) trait GreensFunctionInfoDesk<T: Copy + RealField> {
     fn get_fermi_level_at_source(&self) -> T;
     fn get_fermi_level_at_drain(&self) -> T;
+    fn get_fermi_integral_at_source(&self, energy: T) -> T;
+    fn get_fermi_integral_at_drain(&self, energy: T) -> T;
 }
 
 impl<'a, T: Copy + RealField, BandDim: SmallDim, GeometryDim: SmallDim> GreensFunctionInfoDesk<T>
@@ -670,6 +687,22 @@ where
     fn get_fermi_level_at_drain(&self) -> T {
         self.get_fermi_level_at_source() + self.voltage_offsets[1]
     }
+
+    fn get_fermi_integral_at_source(&self, energy: T) -> T {
+        let fermi_level = self.get_fermi_level_at_source();
+        let argument = T::from_f64(crate::constants::ELECTRON_CHARGE).unwrap()
+            * (fermi_level - energy)
+            / (T::from_f64(crate::constants::BOLTZMANN).unwrap() * self.temperature);
+        (T::one() + argument.exp()).ln()
+    }
+
+    fn get_fermi_integral_at_drain(&self, energy: T) -> T {
+        let fermi_level = self.get_fermi_level_at_drain();
+        let argument = T::from_f64(crate::constants::ELECTRON_CHARGE).unwrap()
+            * (fermi_level - energy)
+            / (T::from_f64(crate::constants::BOLTZMANN).unwrap() * self.temperature);
+        (T::one() + argument.exp()).ln()
+    }
 }
 
 #[cfg(test)]
@@ -681,17 +714,17 @@ mod test {
     use rand::{thread_rng, Rng};
 
     #[test]
-    fn test_csr_assemble_of_diagonal_and_top_and_bottom_rows() {
-        let nrows = 50;
+    fn test_csr_assemble_of_diagonal_and_left_and_right_columns() {
+        let nrows = 5;
         let mut rng = thread_rng();
 
-        let top_row: DVector<Complex<f64>> = DVector::from(
+        let left_column: DVector<Complex<f64>> = DVector::from(
             (0..nrows)
                 .map(|_| rng.gen::<f64>())
                 .map(Complex::from)
                 .collect::<Vec<_>>(),
         );
-        let bottom_row: DVector<Complex<f64>> = DVector::from(
+        let right_column: DVector<Complex<f64>> = DVector::from(
             (0..nrows)
                 .map(|_| rng.gen::<f64>())
                 .map(Complex::from)
@@ -703,35 +736,30 @@ mod test {
                 .map(Complex::from)
                 .collect::<Vec<_>>(),
         );
-        diagonal[0] = top_row[0];
-        diagonal[nrows - 1] = bottom_row[nrows - 1];
+        diagonal[0] = left_column[0];
+        diagonal[nrows - 1] = right_column[nrows - 1];
 
         let mut dense_matrix: DMatrix<Complex<f64>> =
             DMatrix::from_element(nrows, nrows, Complex::from(0f64));
         for idx in 0..nrows {
-            dense_matrix[(0, idx)] = top_row[idx];
-            dense_matrix[(nrows - 1, idx)] = bottom_row[idx];
+            dense_matrix[(idx, 0)] = left_column[idx];
+            dense_matrix[(idx, nrows - 1)] = right_column[idx];
             dense_matrix[(idx, idx)] = diagonal[idx];
         }
 
         // Construct the sparsity pattern
-        let col_indices = (0..top_row.len())
-            .chain(1..diagonal.len() - 1)
-            .chain(0..bottom_row.len())
-            .collect::<Vec<_>>();
-        let mut row_offsets = vec![0, top_row.len()];
-        let mut diagonal_row_offsets =
-            (top_row.len() + 1..top_row.len() + diagonal.len() - 1).collect();
-        row_offsets.append(&mut diagonal_row_offsets);
-        row_offsets.push(row_offsets.last().unwrap() + bottom_row.len());
-        let values = vec![Complex::from(1f64); col_indices.len()];
-        let mut csr =
-            CsrMatrix::try_from_csr_data(nrows, nrows, row_offsets, col_indices, values).unwrap();
+        let number_of_elements_in_mesh = diagonal.len();
+        let pattern = super::assemble_csr_sparsity_for_gf(number_of_elements_in_mesh).unwrap();
+        let values = vec![Complex::from(0_f64); pattern.nnz()];
+        let mut csr = CsrMatrix::try_from_pattern_and_values(pattern, values).unwrap();
 
-        csr.assemble_retarded_rows_and_columns_into_csr(diagonal, top_row, bottom_row)
+        csr.assemble_retarded_diagonal_and_columns_into_csr(diagonal, left_column, right_column)
             .unwrap();
 
         let csr_to_dense = nalgebra_sparse::convert::serial::convert_csr_dense(&csr);
+
+        println!("{csr_to_dense}");
+        println!("{dense_matrix}");
 
         for (element, other) in dense_matrix.into_iter().zip(csr_to_dense.into_iter()) {
             assert_eq!(element, other);
