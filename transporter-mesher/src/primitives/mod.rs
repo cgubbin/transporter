@@ -10,6 +10,7 @@ where
 {
     fn vertex_indices(&self) -> &[usize];
     fn midpoint(&self) -> OPoint<T, GeometryDim>;
+    fn diameter(&self) -> T;
 }
 
 #[derive(Debug)]
@@ -55,5 +56,8 @@ impl<T: Copy + RealField> ElementMethods<T, U1> for LineSegment1d<T> {
     }
     fn vertex_indices(&self) -> &[usize] {
         &self.vertex_indices
+    }
+    fn diameter(&self) -> T {
+        (self.vertices[0].x - self.vertices[1].x).abs()
     }
 }
