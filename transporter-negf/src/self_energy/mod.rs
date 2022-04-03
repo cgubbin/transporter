@@ -14,12 +14,12 @@ where
     Matrix: GreensFunctionMethods<T>,
     DefaultAllocator: Allocator<T, GeometryDim>,
 {
-    ma: PhantomData<GeometryDim>,
-    mc: PhantomData<Conn>,
-    marker: PhantomData<T>,
+    pub(crate) ma: PhantomData<GeometryDim>,
+    pub(crate) mc: PhantomData<Conn>,
+    pub(crate) marker: PhantomData<T>,
     pub(crate) retarded: Vec<Matrix>,
-    pub(crate) lesser: Vec<Matrix>,
-    pub(crate) greater: Vec<Matrix>,
+    //pub(crate) lesser: Vec<Matrix>,
+    //pub(crate) greater: Vec<Matrix>,
 }
 
 pub(crate) struct SelfEnergyBuilder<T, RefSpectral, RefMesh> {
@@ -104,8 +104,8 @@ where
             mc: PhantomData,
             marker: PhantomData,
             retarded: vec![matrix.clone(); self.spectral.number_of_energies()],
-            lesser: vec![matrix.clone(); self.spectral.number_of_energies()],
-            greater: vec![matrix; self.spectral.number_of_energies()],
+            //lesser: vec![matrix.clone(); self.spectral.number_of_energies()],
+            //greater: vec![matrix; self.spectral.number_of_energies()],
         })
     }
 }

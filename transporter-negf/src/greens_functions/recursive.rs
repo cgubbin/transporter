@@ -105,11 +105,11 @@ where
 /// G_{N-1N-1}^{R} = g_{N-1N-1}^{LR}
 /// and we can find the previous elements using the recursion
 /// G_{i i}^{R} = g_{i i}^{LR} (1 + t_{i i+1} G_{i+1 i+1}^{R} t_{i+1 i} g_{i i}^{LR})
-pub(crate) fn diagonals<T>(
+pub(crate) fn diagonal<T>(
     energy: T::RealField,
     hamiltonian: &CsrMatrix<T::RealField>,
     self_energies: &(T, T),
-) -> color_eyre::Result<(DVector<T>, DVector<T>)>
+) -> color_eyre::Result<DVector<T>>
 where
     T: ComplexField + Copy,
     <T as ComplexField>::RealField: Copy,
@@ -141,7 +141,7 @@ where
         previous_hopping_element = hopping_element;
         previous = *element;
     }
-    Ok((diagonal, left_diagonal))
+    Ok(diagonal)
 }
 
 /// Calculate a single element of the fully connected diagonal of the retarded Green's function
@@ -379,7 +379,7 @@ mod test {
         let right_self_energy = Complex::from(0.5f64);
         let energy = 0.9;
 
-        let my_diagonal = super::diagonals(
+        let my_diagonal = super::diagonal(
             energy,
             &hamiltonian,
             &(right_self_energy, right_self_energy),
@@ -407,7 +407,7 @@ mod test {
 
         let inverse = dense_matrix.try_inverse().unwrap();
 
-        for (inv_val, my_val) in inverse.diagonal().iter().zip(my_diagonal.0.iter()) {
+        for (inv_val, my_val) in inverse.diagonal().iter().zip(my_diagonal.iter()) {
             approx::assert_relative_eq!(inv_val.re, my_val.re, epsilon = 1e-5);
             approx::assert_relative_eq!(inv_val.im, my_val.im);
         }
@@ -525,13 +525,12 @@ mod test {
 
         let inverse = dense_matrix.try_inverse().unwrap();
 
-        let fully_connected_diagonal = super::diagonals(
+        let fully_connected_diagonal = super::diagonal(
             energy,
             &hamiltonian.calculate_total(0.),
             &(right_self_energy, right_self_energy),
         )
-        .unwrap()
-        .0;
+        .unwrap();
 
         let nrows = hamiltonian.num_rows();
         for (idx, row) in inverse.row_iter().enumerate().take(nrows / 2) {
@@ -618,13 +617,12 @@ mod test {
 
         let inverse = dense_matrix.try_inverse().unwrap();
 
-        let fully_connected_diagonal = super::diagonals(
+        let fully_connected_diagonal = super::diagonal(
             energy,
             &hamiltonian.calculate_total(0.),
             &(right_self_energy, right_self_energy),
         )
-        .unwrap()
-        .0;
+        .unwrap();
 
         let nrows = hamiltonian.num_rows();
         for (idx, column) in inverse.column_iter().enumerate().take(nrows / 2) {

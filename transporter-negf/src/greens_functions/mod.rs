@@ -1,6 +1,6 @@
-mod tridiagonal;
+mod recursive;
 
-use tridiagonal::{diagonals, left_column, right_column};
+use recursive::{build_out_column, diagonal};
 
 use crate::postprocessor::{Charge, Current};
 use crate::self_energy::SelfEnergy;
@@ -16,7 +16,7 @@ use nalgebra::{
 };
 use nalgebra_sparse::{pattern::SparsityPattern, CsrMatrix};
 use num_complex::Complex;
-use transporter_mesher::{Connectivity, Mesh, SmallDim};
+use transporter_mesher::{Connectivity, ElementMethods, Mesh, SmallDim};
 
 pub(crate) struct GreensFunctionBuilder<T, RefInfoDesk, RefMesh, RefSpectral> {
     info_desk: RefInfoDesk,
@@ -131,6 +131,32 @@ where
             greater: Vec::new(),
         })
     }
+
+    pub(crate) fn build_dense(
+        self,
+    ) -> color_eyre::Result<
+        AggregateGreensFunctions<'a, T, DMatrix<Complex<T>>, GeometryDim, BandDim>,
+    > {
+        // A 1D implementation. All 2D should redirect to the dense method
+        let dmatrix = DMatrix::zeros(self.mesh.elements().len(), self.mesh.elements().len());
+
+        let spectrum_of_dmatrix = (0..self.spectral.total_number_of_points())
+            .map(|_| GreensFunction {
+                matrix: dmatrix.clone(),
+                marker: std::marker::PhantomData,
+            })
+            .collect::<Vec<_>>();
+
+        // In the coherent calculation we do not use the advanced or greater Greens function, other than transiently
+        Ok(AggregateGreensFunctions {
+            //    spectral: self.spectral,
+            info_desk: self.info_desk,
+            retarded: spectrum_of_dmatrix.clone(),
+            advanced: spectrum_of_dmatrix.clone(),
+            lesser: spectrum_of_dmatrix.clone(),
+            greater: spectrum_of_dmatrix.clone(),
+        })
+    }
 }
 
 fn assemble_csr_sparsity_for_gf(
@@ -211,10 +237,15 @@ where
         BandDim,
     >,
 {
-    fn accumulate_into_charge_density_vector(
+    fn accumulate_into_charge_density_vector<GeometryDim, Conn>(
         &self,
+        mesh: &Mesh<T, GeometryDim, Conn>,
         integrator: &Integrator,
-    ) -> color_eyre::Result<Charge<T, BandDim>>;
+    ) -> color_eyre::Result<Charge<T, BandDim>>
+    where
+        GeometryDim: SmallDim,
+        Conn: Connectivity<T, GeometryDim>,
+        DefaultAllocator: Allocator<T, GeometryDim>;
     fn accumulate_into_current_density_vector(
         &self,
         integrator: &Integrator,
@@ -234,36 +265,57 @@ where
         + Allocator<[T; 3], BandDim>,
 {
     /// Only for one band -> need to skip the iter
-    fn accumulate_into_charge_density_vector(
+    fn accumulate_into_charge_density_vector<GeometryDimB: SmallDim, Conn>(
         &self,
+        mesh: &Mesh<T, GeometryDimB, Conn>,
         spectral_space: &SpectralSpace<T, ()>,
-    ) -> color_eyre::Result<Charge<T, BandDim>> {
+    ) -> color_eyre::Result<Charge<T, BandDim>>
+    where
+        Conn: Connectivity<T, GeometryDimB>,
+        DefaultAllocator: Allocator<T, GeometryDimB>,
+    {
         let mut charges: Vec<DVector<T>> = Vec::with_capacity(BandDim::dim());
         let summed_diagonal = self
-            .retarded
+            .lesser
             .iter()
             .zip(spectral_space.energy.weights())
             .fold(
-                &self.retarded[0].matrix * Complex::from(T::zero()),
+                &self.lesser[0].matrix * Complex::from(T::zero()),
                 |sum, (value, &weight)| sum + &value.matrix * Complex::from(weight),
             )
-            .diagonal_as_csr();
-
-        dbg!(&self.retarded);
-        panic!();
-
-        dbg!(summed_diagonal.values());
+            .values()
+            .iter()
+            .map(|x| x.real())
+            .collect::<Vec<_>>();
 
         for band_number in 0..BandDim::dim() {
             charges.push(DVector::from(
                 summed_diagonal
-                    .values()
                     .iter()
                     .skip(band_number)
                     .step_by(BandDim::dim())
                     .map(|&x| x.real())
                     .collect::<Vec<_>>(),
             ));
+        }
+
+        for (n_band, charge) in charges.iter_mut().enumerate() {
+            for (charge_at_element, element) in charge.iter_mut().zip(mesh.elements()) {
+                let region = element.1;
+                let prefactor = T::from_f64(
+                    crate::constants::BOLTZMANN
+                        * crate::constants::ELECTRON_CHARGE
+                        * crate::constants::ELECTRON_MASS
+                        / 2.
+                        / std::f64::consts::PI.powi(2)
+                        / crate::constants::HBAR.powi(2),
+                )
+                .unwrap()
+                    * self.info_desk.temperature
+                    * self.info_desk.effective_masses[region][n_band][1]
+                    / element.0.diameter();
+                *charge_at_element *= -prefactor;
+            }
         }
 
         dbg!(&charges);
@@ -282,18 +334,19 @@ where
 }
 
 // TODO This is a single band implementation
-impl<'a, T, GeometryDim, BandDim>
-    AggregateGreensFunctions<'a, T, CsrMatrix<Complex<T>>, GeometryDim, BandDim>
+impl<'a, T, GeometryDim, BandDim, Matrix>
+    AggregateGreensFunctions<'a, T, Matrix, GeometryDim, BandDim>
 where
     T: RealField + Copy,
     GeometryDim: SmallDim,
     BandDim: SmallDim,
+    Matrix: GreensFunctionMethods<T>,
     DefaultAllocator: Allocator<T, BandDim> + Allocator<[T; 3], BandDim>,
 {
     pub(crate) fn update_greens_functions<Conn>(
         &mut self,
         hamiltonian: &Hamiltonian<T>,
-        self_energy: &SelfEnergy<T, GeometryDim, Conn, CsrMatrix<Complex<T>>>,
+        self_energy: &SelfEnergy<T, GeometryDim, Conn, Matrix>,
         spectral_space: &SpectralSpace<T, ()>,
     ) -> color_eyre::Result<()>
     where
@@ -309,7 +362,7 @@ where
     fn update_aggregate_retarded_greens_function<Conn>(
         &mut self,
         hamiltonian: &Hamiltonian<T>,
-        self_energy: &SelfEnergy<T, GeometryDim, Conn, CsrMatrix<Complex<T>>>,
+        self_energy: &SelfEnergy<T, GeometryDim, Conn, Matrix>,
         spectral_space: &SpectralSpace<T, ()>,
     ) -> color_eyre::Result<()>
     where
@@ -334,7 +387,7 @@ where
 
     fn update_aggregate_lesser_greens_function<Conn>(
         &mut self,
-        self_energy: &SelfEnergy<T, GeometryDim, Conn, CsrMatrix<Complex<T>>>,
+        self_energy: &SelfEnergy<T, GeometryDim, Conn, Matrix>,
         spectral_space: &SpectralSpace<T, ()>,
     ) -> color_eyre::Result<()>
     where
@@ -386,7 +439,12 @@ where
 {
     type SelfEnergy;
     fn generate_advanced_into(&mut self, retarded: &Self) -> color_eyre::Result<()>;
-    fn generate_greater_into(&mut self) -> color_eyre::Result<()>;
+    fn generate_greater_into(
+        &mut self,
+        lesser: &Self,
+        retarded: &Self,
+        advanced: &Self,
+    ) -> color_eyre::Result<()>;
     fn generate_lesser_into(
         &mut self,
         retarded_greens_function: &Self,
@@ -398,7 +456,7 @@ where
         energy: T,
         wavevector: T,
         hamiltonian: &Hamiltonian<T>,
-        self_energy: &Self::SelfEnergy,
+        self_energy: &Self,
     ) -> color_eyre::Result<()>;
 }
 
@@ -475,27 +533,23 @@ where
         // Get the Hamiltonian at this wavevector
         let hamiltonian = hamiltonian.calculate_total(wavevector);
         // Generate the diagonal component of the CSR matrix
-        let (retarded_diagonal, left_diagonal) =
-            diagonals(energy, &hamiltonian, &self_energy_values)?;
+        let g_ii = diagonal(energy, &hamiltonian, &self_energy_values)?;
         // Generate the top row
-        let retarded_left_column = left_column(
-            energy,
-            &hamiltonian,
-            &retarded_diagonal,
-            self_energy_values.1,
-        )?;
+        let g_i0 = build_out_column(energy, &hamiltonian, &g_ii, &self_energy_values, 0)?;
 
         // Generate the bottom row
-        let retarded_right_column = right_column(&retarded_diagonal, &left_diagonal, &hamiltonian)?;
+        let g_in = build_out_column(
+            energy,
+            &hamiltonian,
+            &g_ii,
+            &self_energy_values,
+            hamiltonian.nrows() - 1,
+        )?;
 
-        self.assemble_retarded_diagonal_and_columns_into_csr(
-            retarded_diagonal,
-            retarded_left_column,
-            retarded_right_column,
-        )
+        self.assemble_retarded_diagonal_and_columns_into_csr(g_ii, g_i0, g_in)
     }
 
-    fn generate_greater_into(&mut self) -> color_eyre::Result<()> {
+    fn generate_greater_into(&mut self, _: &Self, _: &Self, _: &Self) -> color_eyre::Result<()> {
         unreachable!()
     }
 
@@ -588,14 +642,14 @@ impl<T> GreensFunctionMethods<T> for DMatrix<Complex<T>>
 where
     T: RealField + Copy,
 {
-    type SelfEnergy = DMatrix<T>;
+    type SelfEnergy = DMatrix<Complex<T>>;
 
     fn generate_retarded_into(
         &mut self,
         energy: T,
         _wavevector: T,
         hamiltonian: &Hamiltonian<T>,
-        _self_energy: &Self::SelfEnergy,
+        self_energy: &Self::SelfEnergy,
     ) -> color_eyre::Result<()> {
         let mut output: nalgebra::DMatrixSliceMut<Complex<T>> = self.into();
 
@@ -613,11 +667,13 @@ where
         let ham = CsrMatrix::try_from_pattern_and_values(x.pattern().clone(), y).unwrap();
         // Avoid allocation: https://github.com/InteractiveComputerGraphics/fenris/blob/e4161887669acb366cad312cfa68d106e6cf576c/src/assembly/operators.rs
         // Look at lines 164-172
-        let matrix = DMatrix::identity(num_rows, num_rows) * Complex::from(energy)
-            - nalgebra_sparse::convert::serial::convert_csr_dense(&ham); //TODO Do we have to convert? Seems dumb. Should we store H in dense form too?&ham;
+        let mut matrix = DMatrix::identity(num_rows, num_rows) * Complex::from(energy)
+            - nalgebra_sparse::convert::serial::convert_csr_dense(&ham)
+            - self_energy; //TODO Do we have to convert? Seems dumb. Should we store H in dense form too?&ham;
 
-        if let Some(matrix) = matrix.try_inverse() {
+        if matrix.try_inverse_mut() {
             output.copy_from(&matrix);
+            return Ok(());
         }
 
         Err(color_eyre::eyre::eyre!(
@@ -625,8 +681,15 @@ where
         ))
     }
 
-    fn generate_greater_into(&mut self) -> color_eyre::Result<()> {
-        todo!()
+    fn generate_greater_into(
+        &mut self,
+        lesser: &DMatrix<Complex<T>>,
+        retarded: &DMatrix<Complex<T>>,
+        advanced: &DMatrix<Complex<T>>,
+    ) -> color_eyre::Result<()> {
+        let mut output: nalgebra::DMatrixSliceMut<Complex<T>> = self.into();
+        output.copy_from(&(retarded - advanced + lesser));
+        Ok(())
     }
 
     fn generate_advanced_into(&mut self, retarded: &DMatrix<Complex<T>>) -> color_eyre::Result<()> {
@@ -637,11 +700,32 @@ where
 
     fn generate_lesser_into(
         &mut self,
-        _retarded: &DMatrix<Complex<T>>,
-        _lesser: &DMatrix<Complex<T>>,
-        _fermi_functions: &[T],
+        retarded_greens_function: &DMatrix<Complex<T>>,
+        retarded_self_energy: &Self::SelfEnergy,
+        fermi_functions: &[T],
     ) -> color_eyre::Result<()> {
-        todo!()
+        let mut advanced_gf = retarded_greens_function.transpose();
+        advanced_gf.iter_mut().for_each(|x| *x = x.conjugate());
+
+        let mut gamma_source = retarded_self_energy.clone();
+        gamma_source[(advanced_gf.nrows() - 1, advanced_gf.nrows() - 1)] = Complex::from(T::zero());
+        gamma_source[(0, 0)] = Complex::new(T::zero(), T::one())
+            * (gamma_source[(0, 0)] - gamma_source[(0, 0)].conjugate());
+        let mut gamma_drain = retarded_self_energy.clone();
+        gamma_drain[(0, 0)] = Complex::from(T::zero());
+        gamma_drain[(advanced_gf.nrows() - 1, advanced_gf.nrows() - 1)] =
+            Complex::new(T::zero(), T::one())
+                * (gamma_source[(advanced_gf.nrows() - 1, advanced_gf.nrows() - 1)]
+                    - gamma_source[(advanced_gf.nrows() - 1, advanced_gf.nrows() - 1)].conjugate());
+        let sigma_lesser = gamma_source * Complex::new(T::zero(), fermi_functions[0])
+            + gamma_drain * Complex::new(T::zero(), fermi_functions[1]);
+
+        self.iter_mut()
+            .zip((retarded_greens_function * sigma_lesser * advanced_gf).iter())
+            .for_each(|(element, &value)| {
+                *element = value;
+            });
+        Ok(())
     }
 }
 
@@ -666,7 +750,6 @@ where
         let n = (T::one() + T::one())
             * (self.effective_masses[0][0][n_band]
                 * T::from_f64(crate::constants::ELECTRON_MASS).unwrap()
-                * T::from_f64(crate::constants::ELECTRON_CHARGE).unwrap()
                 * T::from_f64(crate::constants::BOLTZMANN).unwrap()
                 * self.temperature
                 / T::from_f64(crate::constants::HBAR).unwrap().powi(2)
@@ -681,7 +764,7 @@ where
                 / self.temperature,
             T::from_f64(std::f64::consts::PI.sqrt() / 2.).unwrap(),
         );
-        band_offset + crate::fermi::inverse_fermi_integral_p(gamma * doping_density / n) * factor
+        band_offset + crate::fermi::inverse_fermi_integral_p(gamma * doping_density / n) / factor
     }
 
     fn get_fermi_level_at_drain(&self) -> T {
@@ -693,6 +776,7 @@ where
         let argument = T::from_f64(crate::constants::ELECTRON_CHARGE).unwrap()
             * (fermi_level - energy)
             / (T::from_f64(crate::constants::BOLTZMANN).unwrap() * self.temperature);
+        dbg!(fermi_level, argument);
         (T::one() + argument.exp()).ln()
     }
 
@@ -701,6 +785,7 @@ where
         let argument = T::from_f64(crate::constants::ELECTRON_CHARGE).unwrap()
             * (fermi_level - energy)
             / (T::from_f64(crate::constants::BOLTZMANN).unwrap() * self.temperature);
+        dbg!(fermi_level, argument);
         (T::one() + argument.exp()).ln()
     }
 }
@@ -763,6 +848,103 @@ mod test {
 
         for (element, other) in dense_matrix.into_iter().zip(csr_to_dense.into_iter()) {
             assert_eq!(element, other);
+        }
+    }
+
+    use crate::app::{Configuration, TrackerBuilder};
+    use crate::device::{info_desk::BuildInfoDesk, Device};
+    use nalgebra::U1;
+
+    #[test]
+    fn csr_retarded_elements_are_in_dense_retarded() {
+        let path = std::path::PathBuf::try_from("../.config/structure.toml").unwrap();
+        let device: Device<f64, U1> = crate::device::Device::build(path).unwrap();
+        // TODO Info_desk is currently always U1 because it is informed by the device dimension right now, this is no good. We need n_bands to be in-play here.
+        let info_desk = device.build_device_info_desk().unwrap();
+
+        let config: Configuration<f64> = Configuration::build().unwrap();
+        let mesh: transporter_mesher::Mesh1d<f64> =
+            crate::app::build_mesh_with_config(&config, device).unwrap();
+        let tracker = TrackerBuilder::new()
+            .with_mesh(&mesh)
+            .with_info_desk(&info_desk)
+            .build()
+            .unwrap();
+
+        let hamiltonian = crate::hamiltonian::HamiltonianBuilder::new()
+            .with_mesh(&mesh)
+            .with_info_desk(&tracker)
+            .build()
+            .unwrap();
+
+        // Begin by building a coherent spectral space, regardless of calculation we begin with a coherent loop
+        let spectral_space_builder = crate::spectral::constructors::SpectralSpaceBuilder::new()
+            .with_number_of_energy_points(config.spectral.number_of_energy_points)
+            .with_energy_range(std::ops::Range {
+                start: config.spectral.minimum_energy,
+                end: config.spectral.maximum_energy,
+            })
+            .with_energy_integration_method(config.spectral.energy_integration_rule);
+
+        let spectral_space = spectral_space_builder.build_coherent();
+
+        let mut gf = super::GreensFunctionBuilder::new()
+            .with_info_desk(&info_desk)
+            .with_mesh(&mesh)
+            .with_spectral_discretisation(&spectral_space)
+            .build()
+            .unwrap();
+
+        let mut self_energy = crate::self_energy::SelfEnergyBuilder::new()
+            .with_mesh(&mesh)
+            .with_spectral_discretisation(&spectral_space)
+            .build()
+            .unwrap();
+        self_energy
+            .recalculate(&mesh, &hamiltonian, &spectral_space)
+            .unwrap();
+
+        gf.update_aggregate_retarded_greens_function(&hamiltonian, &self_energy, &spectral_space)
+            .unwrap();
+
+        let mut dense_gf = super::GreensFunctionBuilder::new()
+            .with_info_desk(&info_desk)
+            .with_mesh(&mesh)
+            .with_spectral_discretisation(&spectral_space)
+            .build_dense()
+            .unwrap();
+
+        let retarded_se_matrices = self_energy
+            .retarded
+            .clone()
+            .iter()
+            .map(|matrix_csr| nalgebra_sparse::convert::serial::convert_csr_dense(matrix_csr))
+            .collect::<Vec<_>>();
+        let dense_self_energy = crate::self_energy::SelfEnergy {
+            ma: self_energy.ma.clone(),
+            mc: self_energy.mc.clone(),
+            marker: self_energy.marker.clone(),
+            retarded: retarded_se_matrices,
+        };
+
+        dense_gf
+            .update_aggregate_retarded_greens_function(
+                &hamiltonian,
+                &dense_self_energy,
+                &spectral_space,
+            )
+            .unwrap();
+
+        for (sparse, dense) in gf.retarded.iter().zip(dense_gf.retarded.iter()) {
+            let sparse_diagonal = sparse.matrix.diagonal_as_csr();
+            let dense_diagonal = dense.matrix.diagonal();
+            for (sparse_value, dense_value) in sparse_diagonal
+                .values()
+                .iter()
+                .zip(dense_diagonal.into_iter())
+            {
+                println!("{sparse_value}, {dense_value}");
+            }
         }
     }
 }

@@ -70,7 +70,10 @@ impl<
         }
     }
 
-    fn with_number_of_wavevector_points(self, number_of_wavevector_points: usize) -> Self {
+    pub(crate) fn with_number_of_wavevector_points(
+        self,
+        number_of_wavevector_points: usize,
+    ) -> Self {
         Self {
             number_of_energy_points: self.number_of_energy_points,
             energy_range: self.energy_range,
@@ -83,7 +86,7 @@ impl<
         }
     }
 
-    fn with_maximum_wavevector(
+    pub(crate) fn with_maximum_wavevector(
         self,
         maximum_wavevector: T,
     ) -> SpectralSpaceBuilder<
@@ -147,6 +150,29 @@ impl<
             maximum_wavevector: self.maximum_wavevector,
             energy_integration_rule,
             wavevector_integration_rule: self.wavevector_integration_rule,
+            _marker: std::marker::PhantomData,
+            __marker: std::marker::PhantomData,
+        }
+    }
+
+    pub(crate) fn with_wavevector_integration_method<WavevectorIntegrationMethod>(
+        self,
+        wavevector_integration_rule: WavevectorIntegrationMethod,
+    ) -> SpectralSpaceBuilder<
+        T,
+        RefEnergyRange,
+        RefEnergyIntegrationMethod,
+        WavevectorIntegrationMethod,
+        GeometryDim,
+        Conn,
+    > {
+        SpectralSpaceBuilder {
+            number_of_energy_points: self.number_of_energy_points,
+            energy_range: self.energy_range,
+            number_of_wavevector_points: self.number_of_wavevector_points,
+            maximum_wavevector: self.maximum_wavevector,
+            energy_integration_rule: self.energy_integration_rule,
+            wavevector_integration_rule,
             _marker: std::marker::PhantomData,
             __marker: std::marker::PhantomData,
         }
