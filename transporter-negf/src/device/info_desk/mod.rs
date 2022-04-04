@@ -154,7 +154,7 @@ impl<T: RealField> LayerInfoDesk<T, U1> {
     fn gaas() -> Self {
         Self {
             effective_mass: nalgebra::Vector1::new([0.25, 0.25, 0.25]),
-            band_offset: Point1::new(0.5),
+            band_offset: Point1::new(0.1),
             dielectric_constant: [8.5, 8.5, 8.5],
         }
     }
@@ -163,7 +163,7 @@ impl<T: RealField> LayerInfoDesk<T, U1> {
     fn sic() -> Self {
         Self {
             effective_mass: nalgebra::Vector1::new([0.25, 0.25, 0.25]),
-            band_offset: Point1::new(0.5),
+            band_offset: Point1::new(0.1),
             dielectric_constant: [8.5, 8.5, 8.5],
         }
     }

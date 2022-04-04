@@ -60,8 +60,9 @@ impl<T, EnergyRange, IntegrationMethod> EnergySpaceBuilder<T, EnergyRange, Integ
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct EnergySpace<T: Copy + RealField> {
-    grid: Mesh1d<T>,
+    pub(crate) grid: Mesh1d<T>,
     weights: DVector<T>,
     integration_rule: super::IntegrationRule,
 }

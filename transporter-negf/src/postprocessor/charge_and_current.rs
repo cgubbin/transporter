@@ -92,6 +92,18 @@ where
     charge: OVector<DVector<T>, BandDim>,
 }
 
+impl<T: RealField, BandDim: SmallDim> AsRef<OVector<DVector<T>, BandDim>> for Charge<T, BandDim>
+where
+    DefaultAllocator: Allocator<
+        Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
+        BandDim,
+    >,
+{
+    fn as_ref(&self) -> &OVector<DVector<T>, BandDim> {
+        &self.charge
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct Current<T, BandDim: SmallDim>
 where

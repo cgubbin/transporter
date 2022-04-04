@@ -1,5 +1,5 @@
-temperature = 300.0
-voltage_offsets = [0.0, -0.5]
+temperature = 50.0
+voltage_offsets = [0.0, 0.0]
 
 [[layers]]
 thickness = [2.0]

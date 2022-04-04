@@ -432,16 +432,16 @@ fn construct_internal<T: Copy + RealField>(
     let mass_first_derivatives = mass_first_derivative(delta_m, delta_p, effective_masses);
 
     [
-        second_derivatives[0]
+        -(second_derivatives[0]
             + first_derivatives[0] * mass_first_derivatives
-                / T::from_f64(ELECTRON_MASS).expect("Electron mass must fit in T"),
-        second_derivatives[1]
+                / T::from_f64(ELECTRON_MASS).expect("Electron mass must fit in T")),
+        -(second_derivatives[1]
             + first_derivatives[1] * mass_first_derivatives
-                / T::from_f64(ELECTRON_MASS).expect("Electron mass must fit in T"),
+                / T::from_f64(ELECTRON_MASS).expect("Electron mass must fit in T")),
         if effective_masses.len() == 3 {
-            second_derivatives[2]
+            -(second_derivatives[2]
                 + first_derivatives[2] * mass_first_derivatives
-                    / T::from_f64(ELECTRON_MASS).expect("Electron mass must fit in T")
+                    / T::from_f64(ELECTRON_MASS).expect("Electron mass must fit in T"))
         } else {
             T::zero()
         },
