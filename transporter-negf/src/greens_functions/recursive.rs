@@ -525,7 +525,7 @@ mod test {
 
         let inverse = dense_matrix.try_inverse().unwrap();
 
-        let fully_connected_diagonal = super::diagonal(
+        let _fully_connected_diagonal = super::diagonal(
             energy,
             &hamiltonian.calculate_total(0.),
             &(right_self_energy, right_self_energy),
@@ -617,7 +617,7 @@ mod test {
 
         let inverse = dense_matrix.try_inverse().unwrap();
 
-        let fully_connected_diagonal = super::diagonal(
+        let _fully_connected_diagonal = super::diagonal(
             energy,
             &hamiltonian.calculate_total(0.),
             &(right_self_energy, right_self_energy),

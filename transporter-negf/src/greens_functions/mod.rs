@@ -980,7 +980,7 @@ mod test {
             .update_aggregate_retarded_greens_function(&hamiltonian, &dense_se, &spectral_space)
             .unwrap();
 
-        for ((sparse, dense), energy) in gf
+        for ((sparse, dense), _energy) in gf
             .retarded
             .iter()
             .zip(dense_gf.retarded.iter())
@@ -1064,7 +1064,7 @@ mod test {
             .update_aggregate_retarded_greens_function(&hamiltonian, &dense_se, &spectral_space)
             .unwrap();
 
-        for ((sparse, dense), energy) in gf
+        for ((sparse, dense), _energy) in gf
             .retarded
             .iter()
             .zip(dense_gf.retarded.iter())
@@ -1146,7 +1146,7 @@ mod test {
             .update_aggregate_retarded_greens_function(&hamiltonian, &dense_se, &spectral_space)
             .unwrap();
 
-        for ((sparse, dense), energy) in gf
+        for ((sparse, dense), _energy) in gf
             .retarded
             .iter()
             .zip(dense_gf.retarded.iter())
