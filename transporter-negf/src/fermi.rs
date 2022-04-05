@@ -10,7 +10,7 @@ use nalgebra::RealField;
 ///
 /// This is the inverse of the Fermi integral of order 0.5, given by
 /// `F\left(\mu\right) = \int_0^{infty} dx x^{0.5} / (\exp(x - \mu) +1)`
-#[allow(clippy::excessive_precision)]
+// #[allow(clippy::excessive_precision)]
 #[numeric_literals::replace_float_literals(T::from_f64(literal).unwrap())]
 pub(crate) fn inverse_fermi_integral_05<T: Copy + RealField>(u: T) -> T {
     // Computes the inverse fermi integral of order 0.5 using the minimax
@@ -105,7 +105,7 @@ mod test {
     ///
     /// This function is used for testing, allowing for benchmarking of the
     /// inverse fermi integral of order 0.5 in the upper module
-    #[allow(clippy::excessive_precision)]
+    // #[allow(clippy::excessive_precision)]
     #[numeric_literals::replace_float_literals(T::from_f64(literal).unwrap())]
     pub fn fermi_integral_05<T: Copy + RealField>(u: T) -> T {
         if u <= -2. {
