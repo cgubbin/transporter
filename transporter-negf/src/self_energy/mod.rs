@@ -141,26 +141,21 @@ where
                     let d = diagonal_element; // The hamiltonian is minus itself. Dumbo
                     let t = -boundary_element;
 
-                    dbg!(d, t);
                     //assert!(t > T::zero());
                     //assert!(d > T::zero());
                     //let ec_plus_u_plus_ek =
                     //    diagonal_element - (-boundary_element - boundary_element);
                     let connected_idx = mesh.element_connectivity()[idx];
                     assert_eq!(connected_idx.len(), 1);
-                    let a = (mesh.get_element_midpoint(idx)
-                        - mesh.get_element_midpoint(connected_idx[0]))
-                    .norm();
                     let imaginary_unit = Complex::new(T::zero(), T::one());
                     for (jdx, &energy) in spectral_space.iter_energy().enumerate() {
                         let z = Complex::from((d - energy) / (t + t));
-                        let k1 = Complex::from(T::one() / a) * z.acos();
                         if idx == 0 {
-                            self.retarded[jdx].values_mut()[0] = -Complex::from(t)
-                                * (imaginary_unit * k1 * Complex::from_real(a)).exp();
+                            self.retarded[jdx].values_mut()[0] =
+                                -Complex::from(t) * (imaginary_unit * z.acos()).exp();
                         } else {
-                            self.retarded[jdx].values_mut()[1] = -Complex::from(t)
-                                * (imaginary_unit * k1 * Complex::from_real(a)).exp();
+                            self.retarded[jdx].values_mut()[1] =
+                                -Complex::from(t) * (imaginary_unit * z.acos()).exp();
                         }
                     }
                 }

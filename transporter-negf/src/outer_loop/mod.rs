@@ -306,7 +306,7 @@ where
     potential: Potential<T>,
 }
 
-impl<T: RealField, BandDim: SmallDim> LoopTracker<T, BandDim>
+impl<T: Copy + RealField, BandDim: SmallDim> LoopTracker<T, BandDim>
 where
     DefaultAllocator: Allocator<
         Matrix<

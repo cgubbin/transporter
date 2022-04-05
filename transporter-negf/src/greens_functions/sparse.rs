@@ -151,11 +151,11 @@ where
     {
         let mut currents: Vec<DVector<T>> = Vec::with_capacity(BandDim::dim());
         // Multiply by the scalar prefactor to arrive at a physical quantity
-        for band_number in 0..BandDim::dim() {
+        for _band_number in 0..BandDim::dim() {
             currents.push(DVector::from(vec![T::zero(); mesh.elements().len()]));
         }
-        for (n_band, current) in currents.iter_mut().enumerate() {
-            for (current_at_element, element) in current.iter_mut().zip(mesh.elements()) {
+        for (_n_band, current) in currents.iter_mut().enumerate() {
+            for (current_at_element, _element) in current.iter_mut().zip(mesh.elements()) {
                 *current_at_element = T::zero();
             }
         }

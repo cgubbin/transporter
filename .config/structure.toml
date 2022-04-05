@@ -1,20 +1,20 @@
-temperature = 50.0
+temperature = 300.0
 voltage_offsets = [0.0, 0.0]
 
 [[layers]]
-thickness = [2.0]
+thickness = [20.0]
 material = "GaAs"
 acceptor_density = 0.0
-donor_density = 1e24
+donor_density = 1e23
 
 [[layers]]
-thickness = [1.0]
+thickness = [10.0]
 material = "SiC"
 acceptor_density = 0.0
-donor_density = 1e24
+donor_density = 1e23
 
 [[layers]]
-thickness = [2.0]
+thickness = [20.0]
 material = "GaAs"
 acceptor_density = 0.0
-donor_density = 1e24
+donor_density = 1e23

@@ -11,11 +11,11 @@ tolerance = 1e-7
 
 [mesh]
 unit_size = 1e-9
-elements_per_unit = 10
+elements_per_unit = 4
 maximum_growth_rate = 1.2
 
 [spectral]
-number_of_energy_points = 2000
-minimum_energy = 0.0
-maximum_energy = 0.3
-energy_integration_rule = "Trapezium"
+number_of_energy_points = 1000
+minimum_energy = 0.15
+maximum_energy = 0.6
+energy_integration_rule = "Romberg"

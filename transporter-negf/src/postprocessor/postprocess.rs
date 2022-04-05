@@ -50,8 +50,8 @@ where
         //todo Do we want to get the LDOS or are we ok with doing this inside the Greens funciton itself
         let charge = greens_functions
             .accumulate_into_charge_density_vector(self.mesh, spectral_discretisation)?;
-        let current =
-            greens_functions.accumulate_into_current_density_vector(spectral_discretisation)?;
+        let current = greens_functions
+            .accumulate_into_current_density_vector(self.mesh, spectral_discretisation)?;
         Ok(ChargeAndCurrent::from_charge_and_current(charge, current))
     }
 }

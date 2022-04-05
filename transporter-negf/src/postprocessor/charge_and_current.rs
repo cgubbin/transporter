@@ -18,7 +18,7 @@ where
 
 impl<T, BandDim> ChargeAndCurrent<T, BandDim>
 where
-    T: RealField,
+    T: Copy + RealField,
     BandDim: SmallDim,
     DefaultAllocator: Allocator<
         Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
@@ -49,20 +49,25 @@ where
     /// Returns a chained iterator over both charge and current densities
     fn charge_and_current_iter(
         &self,
-    ) -> std::iter::Chain<std::slice::Iter<'_, DVector<T>>, std::slice::Iter<'_, DVector<T>>> {
+    ) -> std::iter::Chain<impl Iterator<Item = DVector<T>>, impl Iterator<Item = DVector<T>>> {
         self.charge_iter().chain(self.current_iter())
     }
 
     /// Returns an iterator over the held charge densities
-    fn charge_iter(&self) -> std::slice::Iter<'_, DVector<T>> {
-        //self.charge.charge.iter()
-        todo!()
+    #[allow(clippy::needless_collect)]
+    fn charge_iter(&self) -> impl Iterator<Item = DVector<T>> {
+        let x: Vec<DVector<T>> = (0..BandDim::dim())
+            .map(|i| self.charge.charge[i].clone())
+            .collect::<Vec<_>>();
+        x.into_iter()
     }
 
-    /// Returns an iterator over the held current densities
-    fn current_iter(&self) -> std::slice::Iter<'_, DVector<T>> {
-        //self.current.current.iter()
-        todo!()
+    #[allow(clippy::needless_collect)] // Allowed so we can return a DVector over generic soup
+    fn current_iter(&self) -> impl Iterator<Item = DVector<T>> {
+        let x: Vec<DVector<T>> = (0..BandDim::dim())
+            .map(|i| self.current.current[i].clone())
+            .collect::<Vec<_>>();
+        x.into_iter()
     }
 
     /// Given a tolerance, and a previous value for the charge and current
@@ -75,8 +80,11 @@ where
         Ok(self
             .charge_and_current_iter()
             .zip(previous.charge_and_current_iter())
-            .map(|(new, previous)| (new - previous, new.norm()))
-            .map(|(difference, norm)| difference.norm() / norm)
+            .map(|(new, previous)| {
+                let norm = new.norm();
+                (new - previous, norm)
+            })
+            .map(|(difference, norm)| difference.norm() / (norm)) // This breaks when norm is zero, need to compute currents for a result
             .all(|difference| difference < tolerance))
     }
 }
