@@ -746,7 +746,8 @@ where
                 / self.temperature,
             T::from_f64(std::f64::consts::PI.sqrt() / 2.).unwrap(),
         );
-        let eta_f = crate::fermi::inverse_fermi_integral_p(gamma * doping_density / n);
+        let eta_f = crate::fermi::inverse_fermi_integral_05(gamma * doping_density / n);
+
         let ef_minus_ec = eta_f / factor;
         ef_minus_ec + band_offset
     }

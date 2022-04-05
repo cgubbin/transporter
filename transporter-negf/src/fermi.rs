@@ -1,8 +1,18 @@
+//! Module to compute Fermi integrals and their inverses
+//!
+//! To calculate the electronic density it is necessary to fix the chemical potential in the
+//! connecting leads, we do this by assuming that the edge elements are electricially neutral,
+//! having a net carrier charge density equal to the net doping density. The Fermi level is then
+//! computed from the inverse Fermi integral of order 0.5
 use nalgebra::RealField;
 
+/// The inverse Fermi integral of order 0.5.
+///
+/// This is the inverse of the Fermi integral of order 0.5, given by
+/// `F\left(\mu\right) = \int_0^{infty} dx x^{0.5} / (\exp(x - \mu) +1)`
 #[allow(clippy::excessive_precision)]
 #[numeric_literals::replace_float_literals(T::from_f64(literal).unwrap())]
-pub(crate) fn inverse_fermi_integral_p<T: Copy + RealField>(u: T) -> T {
+pub(crate) fn inverse_fermi_integral_05<T: Copy + RealField>(u: T) -> T {
     // Computes the inverse fermi integral of order 0.5 using the minimax
     // approximation outlined in DOI: 10.1016/j.amc.2015.03.015
     //assert!(u > 0.);
@@ -84,5 +94,150 @@ pub(crate) fn inverse_fermi_integral_p<T: Copy + RealField>(u: T) -> T {
             / (t * (1.2961677595919532465e4
                 + s * (3.2092883892793106635e2 + s * (0.7192193760323717351e0))));
         r.sqrt()
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use nalgebra::RealField;
+
+    /// A min-max approximation for the Fermi integral of order 0.5
+    ///
+    /// This function is used for testing, allowing for benchmarking of the
+    /// inverse fermi integral of order 0.5 in the upper module
+    #[allow(clippy::excessive_precision)]
+    #[numeric_literals::replace_float_literals(T::from_f64(literal).unwrap())]
+    pub fn fermi_integral_05<T: Copy + RealField>(u: T) -> T {
+        if u <= -2. {
+            let ex = u.exp();
+            let t = ex * 7.38905609893065023e0;
+            ex * (0.886226925452758014e0
+                - ex * (19894.4553386951666e0
+                    + t * (4509.64329955948557e0
+                        + t * (303.461789035142376e0
+                            + t * (5.7574879114754736e0 + t * 0.00275088986849762610e0))))
+                    / (63493.915041308052e0
+                        + t * (19070.1178243603945e0
+                            + t * (1962.19362141235102e0 + t * (79.250704958640158e0 + t)))))
+        } else if u <= 0. {
+            let s = -0.5 * u;
+            let t = 1. - s;
+            (149.462587768865243e0
+                + t * (22.8125889885050154e0
+                    + t * (-0.629256395534285422e0
+                        + t * (9.08120441515995244e0
+                            + t * (3.35357478401835299e0
+                                + t * (-0.473677696915555805e0
+                                    + t * (-0.467190913556185953e0
+                                        + t * (-0.0880610317272330793e0
+                                            - t * 0.00262208080491572673e0))))))))
+                / (269.94660938022644e0
+                    + s * (343.6419926336247e0
+                        + s * (323.9049470901941e0
+                            + s * (218.89170769294024e0
+                                + s * (102.31331350098315e0
+                                    + s * (36.319337289702664e0
+                                        + s * (8.3317401231389461e0 + s)))))))
+        } else if u <= 2. {
+            let t = 0.5 * u;
+            (71652.717119215557e0
+                + t * (134954.734070223743e0
+                    + t * (153693.833350315645e0
+                        + t * (123247.280745703400e0
+                            + t * (72886.293647930726e0
+                                + t * (32081.2499422362952e0
+                                    + t * (10210.9967337762918e0
+                                        + t * (2152.71110381320778e0
+                                            + t * 232.906588165205042e0))))))))
+                / (105667.839854298798e0
+                    + t * (31946.0752989314444e0
+                        + t * (71158.788776422211e0
+                            + t * (15650.8990138187414e0
+                                + t * (13521.8033657783433e0
+                                    + t * (1646.98258283527892e0
+                                        + t * (618.90691969249409e0
+                                            + t * (-3.36319591755394735e0 + t))))))))
+        } else if u <= 5. {
+            let t = (u - 2.) / 3.;
+            (23744.8706993314289e0
+                + t * (68257.8589855623002e0
+                    + t * (89327.4467683334597e0
+                        + t * (62766.3415600442563e0
+                            + t * (20093.6622609901994e0
+                                + t * (-2213.89084119777949e0
+                                    + t * (-3901.66057267577389e0 - t * 948.642895944858861e0)))))))
+                / (9488.61972919565851e0
+                    + t * (12514.8125526953073e0
+                        + t * (9903.44088207450946e0
+                            + t * (2138.15420910334305e0
+                                + t * (-528.394863730838233e0
+                                    + t * (-661.033633995449691e0
+                                        + t * (-51.4481470250962337e0 + t)))))))
+        } else if u <= 10. {
+            let t = 0.2 * u - 1.;
+            (311337.452661582536e0
+                + t * (1.11267074416648198e6
+                    + t * (1.75638628895671735e6
+                        + t * (1.59630855803772449e6
+                            + t * (910818.935456183774e0
+                                + t * (326492.733550701245e0
+                                    + t * (65507.2624972852908e0 + t * 4809.45649527286889e0)))))))
+                / (39721.6641625089685e0
+                    + t * (86424.7529107662431e0
+                        + t * (88163.7255252151780e0
+                            + t * (50615.7363511157353e0
+                                + t * (17334.9774805008209e0
+                                    + t * (2712.13170809042550e0
+                                        + t * (82.2205828354629102e0 - t)))))))
+                * 0.999999999999999877e0
+        } else if u <= 20. {
+            let t = 0.1 * u - 1.;
+            (7.26870063003059784e6
+                + t * (2.79049734854776025e7
+                    + t * (4.42791767759742390e7
+                        + t * (3.63735017512363365e7
+                            + t * (1.55766342463679795e7
+                                + t * (2.97469357085299505e6 + t * 154516.447031598403e0))))))
+                / (340542.544360209743e0
+                    + t * (805021.468647620047e0
+                        + t * (759088.235455002605e0
+                            + t * (304686.671371640343e0
+                                + t * (39289.4061400542309e0
+                                    + t * (582.426138126398363e0
+                                        + t * (11.2728194581586028e0 - t)))))))
+        } else if u <= 40. {
+            let t = 0.05 * u - 1.;
+            (4.81449797541963104e6
+                + t * (1.85162850713127602e7
+                    + t * (2.77630967522574435e7
+                        + t * (2.03275937688070624e7
+                            + t * (7.41578871589369361e6
+                                + t * (1.21193113596189034e6 + t * 63211.9545144644852e0))))))
+                / (80492.7765975237449e0
+                    + t * (189328.678152654840e0
+                        + t * (151155.890651482570e0
+                            + t * (48146.3242253837259e0
+                                + t * (5407.08878394180588e0 + t * (112.195044410775577e0 - t))))))
+        } else {
+            let w = u.powi(-2);
+            let s = 1. - 1600. * w;
+            u * u.sqrt()
+                * 0.666666666666666667e0
+                * (1.
+                    + w * (8109.79390744477921e0
+                        + s * (342.069867454704106e0 + s * 1.07141702293504595e0))
+                        / (6569.98472532829094e0 + s * (280.706465851683809e0 + s)))
+        }
+    }
+
+    #[test]
+    fn inverse_fermi_integral_of_order_05_returns_correct_result() {
+        let values = (0..100).map(|idx| idx as f64 / 100_f64);
+
+        for value in values {
+            let fermi_integral = fermi_integral_05(value);
+            let inverse_fermi_integral = super::inverse_fermi_integral_05(fermi_integral);
+            approx::assert_relative_eq!(inverse_fermi_integral, value, epsilon = 1e-10);
+        }
     }
 }
