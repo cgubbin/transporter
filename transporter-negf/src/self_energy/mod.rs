@@ -104,7 +104,7 @@ where
             ma: PhantomData,
             mc: PhantomData,
             marker: PhantomData,
-            retarded: vec![matrix.clone(); self.spectral.number_of_energies()],
+            retarded: vec![matrix; self.spectral.number_of_energies()],
             //lesser: vec![matrix.clone(); self.spectral.number_of_energies()],
             //greater: vec![matrix; self.spectral.number_of_energies()],
         })

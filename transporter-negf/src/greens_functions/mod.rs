@@ -729,7 +729,7 @@ where
 
         //TODO : A single band impl here.
         let n_band = 0;
-        let n = (T::one() + T::one())
+        let n3d = (T::one() + T::one())
             * (self.effective_masses[0][0][n_band]
                 * T::from_f64(crate::constants::ELECTRON_MASS).unwrap()
                 * T::from_f64(crate::constants::BOLTZMANN).unwrap()
@@ -746,7 +746,7 @@ where
                 / self.temperature,
             T::from_f64(std::f64::consts::PI.sqrt() / 2.).unwrap(),
         );
-        let eta_f = crate::fermi::inverse_fermi_integral_05(gamma * doping_density / n);
+        let eta_f = crate::fermi::inverse_fermi_integral_05(gamma * doping_density / n3d);
 
         let ef_minus_ec = eta_f / factor;
         ef_minus_ec + band_offset
@@ -911,7 +911,7 @@ mod test {
         }
     }
 
-    use crate::app::{Configuration, TrackerBuilder};
+    use crate::app::{tracker::TrackerBuilder, Configuration};
     use crate::device::{info_desk::BuildInfoDesk, Device};
     use nalgebra::U1;
 

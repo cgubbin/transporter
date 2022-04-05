@@ -327,7 +327,7 @@ where
         1,
         "There can only be a single element on a matrix diagonal"
     );
-    *&mut row_values[0] += local_row;
+    row_values[0] += local_row;
 }
 
 /// Adds a whole row to the CsrMatrix -> This assumes the new row `local_row` has the same ordering as

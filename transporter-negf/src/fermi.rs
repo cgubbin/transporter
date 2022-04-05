@@ -233,11 +233,23 @@ mod test {
     #[test]
     fn inverse_fermi_integral_of_order_05_returns_correct_result() {
         let values = (0..100).map(|idx| idx as f64 / 100_f64);
-
         for value in values {
             let fermi_integral = fermi_integral_05(value);
             let inverse_fermi_integral = super::inverse_fermi_integral_05(fermi_integral);
             approx::assert_relative_eq!(inverse_fermi_integral, value, epsilon = 1e-10);
+        }
+    }
+
+    use rand::Rng;
+    #[test]
+    fn calculated_fermi_level_gives_correct_electronic_density() {
+        let mut rng = rand::thread_rng();
+        for _ in 0..100 {
+            let ratio: f64 = rng.gen(); // The ratio of carrier concentration to intrinsic electron density
+            let gamma = std::f64::consts::PI.sqrt() / 2.;
+            let fermi_level = super::inverse_fermi_integral_05(gamma * ratio);
+            let value = fermi_integral_05(fermi_level) / gamma;
+            approx::assert_relative_eq!(value, ratio, epsilon = std::f64::EPSILON * 100_f64);
         }
     }
 }

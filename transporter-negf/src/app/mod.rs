@@ -1,8 +1,8 @@
 /// This module governs the high-level implementation of the simulation
 mod configuration;
-mod tracker;
+pub(crate) mod tracker;
 pub(crate) use configuration::Configuration;
-pub(crate) use tracker::{Tracker, TrackerBuilder};
+pub(crate) use tracker::Tracker;
 
 use crate::{
     device::{info_desk::BuildInfoDesk, reader::Device},

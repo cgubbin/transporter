@@ -284,10 +284,10 @@ where
 }
 
 pub(crate) fn left_column<T>(
-    energy: T::RealField,
-    hamiltonian: &CsrMatrix<T::RealField>,
-    diagonal: &DVector<T>,
-    right_self_energy: T,
+    _energy: T::RealField,
+    _hamiltonian: &CsrMatrix<T::RealField>,
+    _diagonal: &DVector<T>,
+    _right_self_energy: T,
 ) -> color_eyre::Result<DVector<T>>
 where
     T: ComplexField + Copy,
@@ -347,7 +347,7 @@ where
 
 #[cfg(test)]
 mod test {
-    use crate::app::{Configuration, TrackerBuilder};
+    use crate::app::{tracker::TrackerBuilder, Configuration};
     use crate::device::{info_desk::BuildInfoDesk, Device};
     use nalgebra::U1;
     use nalgebra_sparse::CsrMatrix;
