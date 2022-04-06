@@ -72,7 +72,7 @@ use transporter_mesher::Mesh1d;
 
 impl<'a, T> PoissonSourceb<'a, Mesh1d<T>, CscMatrix<T>, DVector<T>, CscMatrix<T>>
 where
-    T: RealField,
+    T: Copy + RealField,
 {
     pub fn operator(&'a self) -> &'a CscMatrix<T> {
         &self.operator
@@ -110,7 +110,7 @@ mod test {
         let source_vector = mesh
             .vertices()
             .iter()
-            .map(|x| source(x.x))
+            .map(|x| source(x.0.x))
             .collect::<Vec<f64>>();
         let n = source_vector.len();
         let mut source_ovector: nalgebra::DVector<f64> = nalgebra::DVector::<f64>::zeros(n);

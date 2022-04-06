@@ -70,8 +70,13 @@ where
         x.into_iter()
     }
 
+    pub(crate) fn charge_as_ref(&self) -> &Charge<T, BandDim> {
+        &self.charge
+    }
+
     /// Given a tolerance, and a previous value for the charge and current
     /// calculates whether the change in the norms is less than the tolerance.
+    #[allow(clippy::neg_cmp_op_on_partial_ord)]
     pub(crate) fn is_change_within_tolerance(
         &self,
         previous: &ChargeAndCurrent<T, BandDim>,
@@ -85,6 +90,9 @@ where
                 (new - previous, norm)
             })
             .map(|(difference, norm)| difference.norm() / (norm)) // This breaks when norm is zero, need to compute currents for a result
+            .filter(|&x| {
+                !((x != T::zero()) & !(x > T::zero())) // Hacky trick to filter NaN from the result
+            })
             .all(|difference| difference < tolerance))
     }
 }
@@ -112,6 +120,17 @@ where
     }
 }
 
+impl<T: RealField, BandDim: SmallDim> Charge<T, BandDim>
+where
+    DefaultAllocator: Allocator<
+        Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
+        BandDim,
+    >,
+{
+    pub(crate) fn net_charge(&self) -> DVector<T> {
+        self.charge.iter().sum()
+    }
+}
 #[derive(Clone)]
 pub(crate) struct Current<T, BandDim: SmallDim>
 where

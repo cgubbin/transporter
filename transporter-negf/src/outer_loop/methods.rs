@@ -26,6 +26,12 @@ impl<T: RealField> Potential<T> {
     }
 }
 
+impl<T: RealField> AsRef<DVector<T>> for Potential<T> {
+    fn as_ref(&self) -> &DVector<T> {
+        &self.0
+    }
+}
+
 impl<T: Copy + RealField> Potential<T> {
     pub(crate) fn get(&self, vertex_index: usize) -> T {
         self.0[vertex_index]
@@ -60,18 +66,14 @@ where
         > + Allocator<T, BandDim>
         + Allocator<[T; 3], BandDim>,
 {
-    fn is_loop_converged(
-        &self,
-        _previous_potential: &mut Potential<T>,
-    ) -> color_eyre::Result<bool> {
-        //let potential = self.update_potential()?;
-        //let result = potential.is_change_within_tolerance(
-        //    previous_potential,
-        //    self.convergence_settings.outer_tolerance(),
-        //);
-        //let _ = std::mem::replace(previous_potential, potential);
-        //Ok(result)
-        Ok(false)
+    fn is_loop_converged(&self, previous_potential: &mut Potential<T>) -> color_eyre::Result<bool> {
+        let potential = self.update_potential(previous_potential)?;
+        let result = potential.is_change_within_tolerance(
+            previous_potential,
+            self.convergence_settings.outer_tolerance(),
+        );
+        let _ = std::mem::replace(previous_potential, potential);
+        Ok(result)
     }
     /// Carry out a single iteration of the self-consistent outer loop
     fn single_iteration(&mut self) -> color_eyre::Result<()> {
@@ -185,7 +187,9 @@ where
     }
 }
 
-use crate::greens_functions::{AggregateGreensFunctions, GreensFunctionBuilder};
+use crate::greens_functions::{
+    AggregateGreensFunctions, GreensFunctionBuilder, GreensFunctionInfoDesk,
+};
 use crate::inner_loop::InnerLoopBuilder;
 
 impl<T, GeometryDim, Conn, BandDim, SpectralSpace>
@@ -202,7 +206,17 @@ where
         > + Allocator<T, BandDim>
         + Allocator<[T; 3], BandDim>,
 {
-    fn update_potential(&self) -> color_eyre::Result<Potential<T::RealField>> {
+    fn update_potential(
+        &self,
+        previous_potential: &Potential<T>,
+    ) -> color_eyre::Result<Potential<T::RealField>> {
+        // Calculate the Fermi level
+        let fermi_level = self.info_desk.determine_fermi_level(
+            self.mesh,
+            previous_potential,
+            self.tracker.charge_as_ref(),
+        );
+
         todo!()
     }
 }
@@ -292,5 +306,77 @@ where
             .with_greens_functions(greens_functions)
             .with_self_energies(self_energies)
             .build()
+    }
+}
+
+use crate::device::info_desk::DeviceInfoDesk;
+use crate::postprocessor::Charge;
+use transporter_mesher::Mesh;
+
+trait OuterLoopInfoDesk<T: Copy + RealField, GeometryDim: SmallDim, Conn, BandDim: SmallDim>
+where
+    Conn: Connectivity<T, GeometryDim>,
+    DefaultAllocator: Allocator<
+            Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
+            BandDim,
+        > + Allocator<T, GeometryDim>,
+{
+    fn determine_fermi_level(
+        &self,
+        mesh: &Mesh<T, GeometryDim, Conn>,
+        potential: &Potential<T>,
+        charge: &Charge<T, BandDim>,
+    ) -> Vec<T>;
+}
+
+impl<T: Copy + RealField, GeometryDim: SmallDim, Conn, BandDim: SmallDim>
+    OuterLoopInfoDesk<T, GeometryDim, Conn, BandDim> for DeviceInfoDesk<T, GeometryDim, BandDim>
+where
+    Conn: Connectivity<T, GeometryDim>,
+    DefaultAllocator: Allocator<
+            Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
+            BandDim,
+        > + Allocator<T, BandDim>
+        + Allocator<[T; 3], BandDim>
+        + Allocator<T, GeometryDim>,
+{
+    fn determine_fermi_level(
+        &self,
+        mesh: &Mesh<T, GeometryDim, Conn>,
+        potential: &Potential<T>,
+        charge: &Charge<T, BandDim>,
+    ) -> Vec<T> {
+        // Find the net charge in the multiband system
+        charge
+            .net_charge()
+            .into_iter()
+            .zip(potential.as_ref().iter())
+            .zip(mesh.elements().iter())
+            .map(|((&n, &phi), element)| {
+                let region = element.1;
+                let n3d = (T::one() + T::one()) // Currently always getting the x-component, is this dumb?
+                    * (self.effective_masses[region][0][0] // The conduction band is always supposed to be in position 0
+                        * T::from_f64(crate::constants::ELECTRON_MASS).unwrap()
+                        * T::from_f64(crate::constants::BOLTZMANN).unwrap()
+                        * self.temperature
+                        / T::from_f64(crate::constants::HBAR).unwrap().powi(2)
+                        / (T::one() + T::one())
+                        / T::from_f64(std::f64::consts::PI).unwrap())
+                    .powf(T::from_f64(1.5).unwrap());
+
+                let (factor, gamma) = (
+                    T::from_f64(crate::constants::ELECTRON_CHARGE / crate::constants::BOLTZMANN)
+                        .unwrap()
+                        / self.temperature,
+                    T::from_f64(std::f64::consts::PI.sqrt() / 2.).unwrap(),
+                );
+                let eta_f = crate::fermi::inverse_fermi_integral_05(gamma * n / n3d);
+
+                let ef_minus_ec = eta_f / factor;
+
+                let band_offset = self.band_offsets[region][0]; // Again we assume the band offset for the c-band is in position 0
+                ef_minus_ec + band_offset - phi // TODO should this be a plus phi or a minus phi??
+            })
+            .collect::<Vec<_>>()
     }
 }

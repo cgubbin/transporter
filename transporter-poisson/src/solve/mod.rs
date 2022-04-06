@@ -21,7 +21,7 @@ impl<T> NewtonSolver<T, nalgebra::U1>
         CscMatrix<T>,
     >
 where
-    T: RealField,
+    T: Copy + RealField,
 {
     fn solve_into(&self, mut solution: DVector<T>) -> color_eyre::Result<DVector<T>> {
         let mut residual: DVector<T> = self.source() - self.operator() * &solution;

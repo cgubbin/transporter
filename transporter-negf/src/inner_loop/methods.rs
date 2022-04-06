@@ -57,8 +57,12 @@ where
     ) -> color_eyre::Result<bool> {
         let postprocessor: PostProcessor<T, GeometryDim, Conn> =
             PostProcessorBuilder::new().with_mesh(self.mesh).build();
-        let charge_and_current: ChargeAndCurrent<T::RealField, BandDim> =
-            postprocessor.recompute_currents_and_densities(self.greens_functions, self.spectral)?;
+        let charge_and_current: ChargeAndCurrent<T::RealField, BandDim> = postprocessor
+            .recompute_currents_and_densities(
+                self.greens_functions,
+                self.self_energies,
+                self.spectral,
+            )?;
         let result = charge_and_current.is_change_within_tolerance(
             previous_charge_and_current,
             self.convergence_settings.inner_tolerance(),
@@ -86,6 +90,7 @@ where
         // In a coherent calculation there is no inner loop
         self.single_iteration()?;
         // Run the convergence check, this is solely to update the charge and current in the tracker
+        // as we do not track convergence in a coherent calculation
         let _ = self.is_loop_converged(previous_charge_and_current)?;
         Ok(())
     }

@@ -2,6 +2,7 @@ use crate::SmallDim;
 use itertools::izip;
 use nalgebra::{DefaultAllocator, DimName, OPoint, RealField, Scalar};
 use nalgebra_sparse::CsrMatrix;
+use transporter_mesher::Assignment;
 use transporter_mesher::FiniteDifferenceMesh;
 
 pub trait PoissonOperator<T, GeometryDim>
@@ -106,7 +107,7 @@ where
         self.mesh.number_of_nodes()
     }
 
-    fn get_vertices(&self) -> &[OPoint<T, Mesh::GeometryDim>] {
+    fn get_vertices(&self) -> &[(OPoint<T, Mesh::GeometryDim>, Assignment)] {
         self.mesh.get_vertices()
     }
 
@@ -114,6 +115,7 @@ where
         self.mesh.get_connectivity()
     }
 
+    #[allow(clippy::if_same_then_else)]
     pub fn assemble_matrix(&self, n: usize) -> color_eyre::Result<nalgebra_sparse::CscMatrix<T>> {
         let ndof = n * self.geometry_dim() * self.solution_dim();
         let mut row_offsets = Vec::with_capacity(ndof);
@@ -129,7 +131,7 @@ where
             let mut new_vals = vec![];
             let dx = connections
                 .iter()
-                .map(|&x| (vertex.coords[0] - self.get_vertices()[x].coords[0]).abs())
+                .map(|&x| (vertex.0.coords[0] - self.get_vertices()[x].0.coords[0]).abs())
                 .collect::<Vec<T>>(); // The first element is delta_- and the second is delta_+ for a 1D mesh
                                       // Ignore variation in epsilon
                                       // At the moment the matrix is minus what we want so that it can undergo cholesky decomp. This is fine, just remember later

@@ -4,8 +4,8 @@ use nalgebra::{
     DVector, DVectorSliceMut, DefaultAllocator, DimName, OPoint, OVector, RealField, Scalar,
 };
 use std::ops::AddAssign;
+use transporter_mesher::Assignment;
 use transporter_mesher::FiniteDifferenceMesh;
-use transporter_mesher::Mesh;
 
 pub trait SourceFunction<T, GeometryDim>: PoissonOperator<T, GeometryDim>
 where
@@ -14,7 +14,7 @@ where
     DefaultAllocator: BiDimAllocator<T, GeometryDim, Self::SolutionDim>,
 {
     /// Useful when the source is defined as a function
-    fn from_point(&self, point: &OPoint<T, GeometryDim>) -> Option<OVector<T, Self::SolutionDim>> {
+    fn from_point(&self, _point: &OPoint<T, GeometryDim>) -> Option<OVector<T, Self::SolutionDim>> {
         None
     }
     /// Useful when the source is precomputed on the mesh
@@ -113,7 +113,7 @@ where
         self.mesh.number_of_nodes()
     }
 
-    fn get_vertices(&self) -> &[OPoint<T, Mesh::GeometryDim>] {
+    fn get_vertices(&self) -> &[(OPoint<T, Mesh::GeometryDim>, Assignment)] {
         self.mesh.get_vertices()
     }
 
@@ -121,7 +121,7 @@ where
         assert_eq!(output.len(), self.num_nodes() * self.geometry_dim());
         let m = self.geometry_dim();
 
-        if let Some(source) = self.source.from_mesh(0) {
+        if let Some(_source) = self.source.from_mesh(0) {
             for i in 0..self.num_nodes() {
                 output
                     .index_mut((m * i..m * i + m, 0))
@@ -131,7 +131,7 @@ where
             for (i, point) in self.get_vertices().iter().enumerate() {
                 output
                     .index_mut((m * i..m * i + m, 0))
-                    .add_assign(self.source.from_point(point).unwrap());
+                    .add_assign(self.source.from_point(&point.0).unwrap());
             }
         }
         Ok(())

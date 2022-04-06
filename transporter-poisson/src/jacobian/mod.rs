@@ -5,7 +5,7 @@ use transporter_mesher::Mesh1d;
 
 pub trait Jacobian<T, D>
 where
-    T: RealField,
+    T: Copy + RealField,
     D: SmallDim,
 {
     fn update_jacobian(&mut self, solution: DVector<T>) -> color_eyre::Result<CsrMatrix<T>>;
@@ -20,7 +20,7 @@ impl<T, D> Jacobian<T, D>
         CsrMatrix<T>,
     >
 where
-    T: RealField,
+    T: Copy + RealField,
     D: SmallDim,
 {
     fn update_jacobian(&mut self, _solution: DVector<T>) -> color_eyre::Result<CsrMatrix<T>> {

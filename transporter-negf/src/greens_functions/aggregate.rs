@@ -203,36 +203,37 @@ where
     pub(crate) greater: Vec<GreensFunction<Matrix, T>>,
 }
 
-pub(crate) trait AggregateGreensFunctionMethods<T, BandDim, Integrator>
-where
+pub(crate) trait AggregateGreensFunctionMethods<
+    T,
+    BandDim,
+    GeometryDim,
+    Conn,
+    Integrator,
+    SelfEnergy,
+> where
     T: RealField,
     BandDim: SmallDim,
+    GeometryDim: SmallDim,
+    Conn: Connectivity<T, GeometryDim>,
     Integrator: SpectralDiscretisation<T>,
     DefaultAllocator: Allocator<
-        Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
-        BandDim,
-    >,
+            Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
+            BandDim,
+        > + Allocator<T, GeometryDim>,
 {
     /// Operates on the collected Green's functions to calculate the total charge in each of the bands
-    fn accumulate_into_charge_density_vector<GeometryDim, Conn>(
+    fn accumulate_into_charge_density_vector(
         &self,
         mesh: &Mesh<T, GeometryDim, Conn>,
         integrator: &Integrator,
-    ) -> color_eyre::Result<Charge<T, BandDim>>
-    where
-        GeometryDim: SmallDim,
-        Conn: Connectivity<T, GeometryDim>,
-        DefaultAllocator: Allocator<T, GeometryDim>;
+    ) -> color_eyre::Result<Charge<T, BandDim>>;
     /// Operates on the collected Green's functions to calculate the total current in each band
-    fn accumulate_into_current_density_vector<GeometryDim, Conn>(
+    fn accumulate_into_current_density_vector(
         &self,
         mesh: &Mesh<T, GeometryDim, Conn>,
+        self_energy: &SelfEnergy,
         integrator: &Integrator,
-    ) -> color_eyre::Result<Current<T, BandDim>>
-    where
-        GeometryDim: SmallDim,
-        Conn: Connectivity<T, GeometryDim>,
-        DefaultAllocator: Allocator<T, GeometryDim>;
+    ) -> color_eyre::Result<Current<T, BandDim>>;
 }
 
 /// A helper function to assemble the csr pattern for the retarded Green's function

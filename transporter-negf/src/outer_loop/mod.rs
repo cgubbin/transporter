@@ -5,8 +5,10 @@ pub(crate) use convergence::Convergence;
 pub(crate) use methods::{Outer, Potential};
 
 use crate::{
-    app::Tracker, device::info_desk::DeviceInfoDesk, hamiltonian::Hamiltonian,
-    postprocessor::ChargeAndCurrent,
+    app::Tracker,
+    device::info_desk::DeviceInfoDesk,
+    hamiltonian::Hamiltonian,
+    postprocessor::{Charge, ChargeAndCurrent},
 };
 use nalgebra::{allocator::Allocator, ComplexField, DefaultAllocator};
 use std::marker::PhantomData;
@@ -338,6 +340,10 @@ where
 
     pub(crate) fn charge_and_currents_mut(&mut self) -> &mut ChargeAndCurrent<T, BandDim> {
         &mut self.charge_and_currents
+    }
+
+    pub(crate) fn charge_as_ref(&self) -> &Charge<T, BandDim> {
+        self.charge_and_currents.charge_as_ref()
     }
 
     pub(crate) fn potential_mut(&mut self) -> &mut Potential<T> {

@@ -60,27 +60,32 @@ impl<T: Copy + RealField> CsrAssembly<T> for CsrMatrix<Complex<T>> {
 }
 
 /// Implementation of the accumulator methods for a sparse AggregateGreensFunction
-impl<T, BandDim, GeometryDim> AggregateGreensFunctionMethods<T, BandDim, SpectralSpace<T, ()>>
-    for AggregateGreensFunctions<'_, T, CsrMatrix<Complex<T>>, GeometryDim, BandDim>
+impl<T, BandDim, GeometryDim, Conn>
+    AggregateGreensFunctionMethods<
+        T,
+        BandDim,
+        GeometryDim,
+        Conn,
+        SpectralSpace<T, ()>,
+        SelfEnergy<T, GeometryDim, Conn, CsrMatrix<Complex<T>>>,
+    > for AggregateGreensFunctions<'_, T, CsrMatrix<Complex<T>>, GeometryDim, BandDim>
 where
     T: RealField + Copy,
     GeometryDim: SmallDim,
     BandDim: SmallDim,
+    Conn: Connectivity<T, GeometryDim>,
     DefaultAllocator: Allocator<
             Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
             BandDim,
         > + Allocator<T, BandDim>
-        + Allocator<[T; 3], BandDim>,
+        + Allocator<[T; 3], BandDim>
+        + Allocator<T, GeometryDim>,
 {
-    fn accumulate_into_charge_density_vector<GeometryDimB: SmallDim, Conn>(
+    fn accumulate_into_charge_density_vector(
         &self,
-        mesh: &Mesh<T, GeometryDimB, Conn>,
+        mesh: &Mesh<T, GeometryDim, Conn>,
         spectral_space: &SpectralSpace<T, ()>,
-    ) -> color_eyre::Result<Charge<T, BandDim>>
-    where
-        Conn: Connectivity<T, GeometryDimB>,
-        DefaultAllocator: Allocator<T, GeometryDimB>,
-    {
+    ) -> color_eyre::Result<Charge<T, BandDim>> {
         let mut charges: Vec<DVector<T>> = Vec::with_capacity(BandDim::dim());
         // Sum over the diagonal of the calculated spectral density
         let summed_diagonal = self
@@ -140,23 +145,82 @@ where
         ))
     }
 
-    fn accumulate_into_current_density_vector<GeometryDimB: SmallDim, Conn>(
+    fn accumulate_into_current_density_vector(
         &self,
-        mesh: &Mesh<T, GeometryDimB, Conn>,
-        _spectral_space: &SpectralSpace<T, ()>,
-    ) -> color_eyre::Result<Current<T, BandDim>>
-    where
-        Conn: Connectivity<T, GeometryDimB>,
-        DefaultAllocator: Allocator<T, GeometryDimB>,
-    {
+        mesh: &Mesh<T, GeometryDim, Conn>,
+        self_energy: &SelfEnergy<T, GeometryDim, Conn, CsrMatrix<Complex<T>>>,
+        spectral_space: &SpectralSpace<T, ()>,
+    ) -> color_eyre::Result<Current<T, BandDim>> {
         let mut currents: Vec<DVector<T>> = Vec::with_capacity(BandDim::dim());
-        // Multiply by the scalar prefactor to arrive at a physical quantity
-        for _band_number in 0..BandDim::dim() {
-            currents.push(DVector::from(vec![T::zero(); mesh.elements().len()]));
+
+        let summed_current = self
+            .retarded
+            .iter()
+            .zip(self_energy.retarded.iter())
+            .zip(spectral_space.energy.weights())
+            .zip(spectral_space.energy.grid.elements())
+            .fold(
+                vec![T::zero(); mesh.elements().len() * BandDim::dim()],
+                |sum, (((gf_r, se_r), &weight), element)| {
+                    // Gamma = i (\Sigma_r - \Sigma_a) -> in coherent transport \Sigma has only two non-zero elements
+                    let gamma_source = -(T::one() + T::one()) * se_r.values()[0].im;
+                    let gamma_drain = -(T::one() + T::one()) * se_r.values()[1].im;
+                    // Zero order Fermi integrals
+                    let fermi_source = self
+                        .info_desk
+                        .get_fermi_integral_at_source(element.0.midpoint().x);
+                    let fermi_drain = self
+                        .info_desk
+                        .get_fermi_integral_at_drain(element.0.midpoint().x);
+
+                    let values = gf_r
+                        .matrix
+                        .values()
+                        .iter()
+                        .take(mesh.elements().len() * BandDim::dim());
+                    values
+                        .map(|value| (value * value.conj()).re)
+                        .map(|grga| {
+                            grga * weight
+                                * element.0.diameter()
+                                * weight
+                                * gamma_source
+                                * gamma_drain
+                                * (fermi_source - fermi_drain)
+                                / T::from_f64(crate::constants::ELECTRON_CHARGE).unwrap()
+                        })
+                        .zip(sum.into_iter())
+                        .map(|(grga, sum)| sum + grga)
+                        .collect()
+                },
+            );
+        // Separate out the diagonals for each `BandDim` into their own charge vector
+        for band_number in 0..BandDim::dim() {
+            currents.push(DVector::from(
+                summed_current
+                    .iter()
+                    .skip(band_number)
+                    .step_by(BandDim::dim())
+                    .map(|&x| x.real())
+                    .collect::<Vec<_>>(),
+            ));
         }
-        for (_n_band, current) in currents.iter_mut().enumerate() {
-            for (current_at_element, _element) in current.iter_mut().zip(mesh.elements()) {
-                *current_at_element = T::zero();
+        // Multiply by the scalar prefactor to arrive at a physical quantity
+        for (n_band, current) in currents.iter_mut().enumerate() {
+            for (current_at_element, element) in current.iter_mut().zip(mesh.elements()) {
+                let region = element.1;
+                let prefactor = T::from_f64(
+                    crate::constants::BOLTZMANN
+                        * crate::constants::ELECTRON_CHARGE.powi(2)
+                        * crate::constants::ELECTRON_MASS
+                        / 2.
+                        / std::f64::consts::PI.powi(2)
+                        / crate::constants::HBAR.powi(3),
+                )
+                .unwrap()
+                    * self.info_desk.temperature
+                    * self.info_desk.effective_masses[region][n_band][1];
+                *current_at_element *= prefactor;
             }
         }
         Current::new(OVector::<DVector<T>, BandDim>::from_iterator(
