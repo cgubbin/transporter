@@ -188,7 +188,7 @@ where
 }
 
 use crate::greens_functions::{
-    AggregateGreensFunctions, GreensFunctionBuilder, GreensFunctionInfoDesk,
+    AggregateGreensFunctions, GreensFunctionBuilder,
 };
 use crate::inner_loop::InnerLoopBuilder;
 use transporter_poisson::PoissonSourceBuilder;
@@ -212,7 +212,7 @@ where
         previous_potential: &Potential<T>,
     ) -> color_eyre::Result<Potential<T::RealField>> {
         // Calculate the Fermi level
-        let fermi_level = self.info_desk.determine_fermi_level(
+        let _fermi_level = self.info_desk.determine_fermi_level(
             self.mesh,
             previous_potential,
             self.tracker.charge_as_ref(),
@@ -222,7 +222,7 @@ where
             .info_desk
             .calculate_source_vector(self.mesh, self.tracker.charge_as_ref());
 
-        let poisson_problem = PoissonSourceBuilder::new()
+        let _poisson_problem = PoissonSourceBuilder::new()
             .with_mesh(self.mesh)
             .with_source(&source_vector)
             .build();
