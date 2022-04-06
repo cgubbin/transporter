@@ -1,7 +1,7 @@
 use crate::PoissonMethods;
-use nalgebra::{DVector, RealField};
+use nalgebra::{DVector, RealField, U1};
 use nalgebra_sparse::CsrMatrix;
-use transporter_mesher::{Mesh1d, SmallDim};
+use transporter_mesher::{Mesh1d, Segment1dConnectivity, SmallDim};
 
 pub trait Jacobian<T, D>
 where
@@ -16,7 +16,7 @@ impl<T, D, InfoDesk> Jacobian<T, D>
 where
     T: Copy + RealField,
     D: SmallDim,
-    InfoDesk: PoissonMethods<T>,
+    InfoDesk: PoissonMethods<T, U1, Segment1dConnectivity>,
 {
     fn update_jacobian(&mut self, _solution: DVector<T>) -> color_eyre::Result<CsrMatrix<T>> {
         todo!()

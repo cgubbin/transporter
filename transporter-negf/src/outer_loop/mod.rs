@@ -10,7 +10,7 @@ use crate::{
     hamiltonian::Hamiltonian,
     postprocessor::{Charge, ChargeAndCurrent},
 };
-use nalgebra::{allocator::Allocator, ComplexField, DefaultAllocator};
+use nalgebra::{allocator::Allocator, ComplexField, DVector, DefaultAllocator};
 use std::marker::PhantomData;
 use transporter_mesher::{Connectivity, Mesh, SmallDim};
 
@@ -306,6 +306,7 @@ where
 {
     charge_and_currents: ChargeAndCurrent<T, BandDim>,
     potential: Potential<T>,
+    fermi_level: DVector<T>,
 }
 
 impl<T: Copy + RealField, BandDim: SmallDim> LoopTracker<T, BandDim>
@@ -335,6 +336,11 @@ where
                 global_tracker.charge().clone(),
                 global_tracker.current().clone(),
             ),
+            fermi_level: DVector::from(
+                (0..global_tracker.num_vertices())
+                    .map(|_| T::zero())
+                    .collect::<Vec<_>>(),
+            ),
         }
     }
 
@@ -348,5 +354,13 @@ where
 
     pub(crate) fn potential_mut(&mut self) -> &mut Potential<T> {
         &mut self.potential
+    }
+
+    pub(crate) fn fermi_level(&self) -> &DVector<T> {
+        &self.fermi_level
+    }
+
+    pub(crate) fn fermi_level_mut(&mut self) -> &mut DVector<T> {
+        &mut self.fermi_level
     }
 }

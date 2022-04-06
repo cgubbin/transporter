@@ -53,6 +53,10 @@ where
     pub(crate) fn current(&self) -> &Current<T, BandDim> {
         &self.current_densities
     }
+
+    pub(crate) fn num_vertices(&self) -> usize {
+        self.mesh.vertices().len()
+    }
 }
 
 impl<T: Copy + RealField, BandDim: SmallDim, GeometryDim: SmallDim, C> HamiltonianInfoDesk<T>

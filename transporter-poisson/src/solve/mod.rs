@@ -1,6 +1,6 @@
 use crate::PoissonMethods;
-use nalgebra::{DVector, RealField};
-use transporter_mesher::{Mesh1d, SmallDim};
+use nalgebra::{DVector, RealField, U1};
+use transporter_mesher::{Mesh1d, Segment1dConnectivity, SmallDim};
 
 pub trait NewtonSolver<'a, T, GeometryDim>
 where
@@ -11,6 +11,7 @@ where
         &'a self,
         solution: DVector<T>,
         charge_density: DVector<T>,
+        fermi_level: DVector<T>,
     ) -> color_eyre::Result<DVector<T>>;
 }
 
@@ -20,12 +21,13 @@ impl<'a, T, InfoDesk> NewtonSolver<'a, T, nalgebra::U1>
     for crate::poisson1dsource::PoissonSourceb<'a, InfoDesk, Mesh1d<T>, CscMatrix<T>, DVector<T>>
 where
     T: Copy + RealField,
-    InfoDesk: PoissonMethods<T>,
+    InfoDesk: PoissonMethods<T, U1, Segment1dConnectivity>,
 {
     fn solve_into(
         &'a self,
         mut solution: DVector<T>,
         charge_density: DVector<T>,
+        fermi_level: DVector<T>,
     ) -> color_eyre::Result<DVector<T>> {
         let mut iter = 0;
         let mut jacobian_diagonal: DVector<T> = self.source().clone() * T::zero();
@@ -36,10 +38,15 @@ where
             && iter < 100
         {
             // Update the diagonal of the Jacobian
-            self.update_jacobian_diagonal(&solution, &mut jacobian_diagonal)?;
+            self.update_jacobian_diagonal(
+                self.mesh,
+                &fermi_level,
+                &solution,
+                &mut jacobian_diagonal,
+            )?;
             // Update the charge density vector
             let old_charge_density = charge_density.clone();
-            self.update_charge_density(&solution, &mut charge_density)?;
+            self.update_charge_density(self.mesh, &fermi_level, &solution, &mut charge_density)?;
 
             let update = self
                 .factorised_jacobian(jacobian_diagonal.clone())?

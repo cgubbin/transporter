@@ -130,6 +130,10 @@ where
     pub(crate) fn net_charge(&self) -> DVector<T> {
         self.charge.iter().sum()
     }
+
+    pub(crate) fn as_ref_mut(&mut self) -> &mut OVector<DVector<T>, BandDim> {
+        &mut self.charge
+    }
 }
 #[derive(Clone)]
 pub(crate) struct Current<T, BandDim: SmallDim>

@@ -1,7 +1,7 @@
 use crate::operator::OperatorAssemblerBuilder;
 use nalgebra::{allocator::Allocator, DVector, DefaultAllocator, RealField};
 use nalgebra_sparse::{factorization::CscCholesky, CscMatrix};
-use transporter_mesher::{Connectivity, Mesh, Mesh1d, SmallDim};
+use transporter_mesher::{Connectivity, Mesh, SmallDim};
 
 pub struct PoissonSourceBuilder<RefInfoDesk, RefMesh, RefSource> {
     info_desk: RefInfoDesk,
@@ -56,7 +56,7 @@ impl<RefInfoDesk, RefMesh, RefSource> PoissonSourceBuilder<RefInfoDesk, RefMesh,
 
 pub struct PoissonSourceb<'a, InfoDesk, Mesh, Operator, Source> {
     info_desk: &'a InfoDesk,
-    mesh: &'a Mesh,
+    pub(crate) mesh: &'a Mesh,
     source: &'a Source,
     pub operator: Operator,
 }
@@ -66,7 +66,7 @@ impl<'a, T, GeometryDim: SmallDim, Conn, InfoDesk>
 where
     T: Copy + RealField,
     Conn: Connectivity<T, GeometryDim>,
-    InfoDesk: PoissonMethods<T>,
+    InfoDesk: PoissonMethods<T, GeometryDim, Conn>,
     DefaultAllocator: Allocator<T, GeometryDim>,
 {
     pub fn build(
@@ -90,10 +90,14 @@ where
     }
 }
 
-impl<'a, T, InfoDesk> PoissonSourceb<'a, InfoDesk, Mesh1d<T>, CscMatrix<T>, DVector<T>>
+impl<'a, T, GeometryDim, Conn, InfoDesk>
+    PoissonSourceb<'a, InfoDesk, Mesh<T, GeometryDim, Conn>, CscMatrix<T>, DVector<T>>
 where
     T: Copy + RealField,
-    InfoDesk: PoissonMethods<T>,
+    GeometryDim: SmallDim,
+    Conn: Connectivity<T, GeometryDim>,
+    InfoDesk: PoissonMethods<T, GeometryDim, Conn>,
+    DefaultAllocator: Allocator<T, GeometryDim>,
 {
     pub fn operator(&'a self) -> &'a CscMatrix<T> {
         &self.operator
@@ -140,32 +144,44 @@ where
     /// Update the Jacobian based on the current potential
     pub fn update_jacobian_diagonal(
         &'a self,
+        mesh: &Mesh<T, GeometryDim, Conn>,
+        fermi_level: &'a DVector<T>,
         solution: &'a DVector<T>,
         jacobian_diagonal: &'a mut DVector<T>,
     ) -> color_eyre::Result<()> {
         self.info_desk
-            .update_jacobian_diagonal(solution, jacobian_diagonal)
+            .update_jacobian_diagonal(mesh, fermi_level, solution, jacobian_diagonal)
     }
 
     /// Update the Jacobian based on the current potential
     pub fn update_charge_density(
         &'a self,
+        mesh: &Mesh<T, GeometryDim, Conn>,
+        fermi_level: &DVector<T>,
         solution: &'a DVector<T>,
         charge_density: &'a mut DVector<T>,
     ) -> color_eyre::Result<()> {
         self.info_desk
-            .update_charge_density(solution, charge_density)
+            .update_charge_density(mesh, fermi_level, solution, charge_density)
     }
 }
 
-pub trait PoissonMethods<T: Copy + RealField> {
+pub trait PoissonMethods<T: Copy + RealField, GeometryDim: SmallDim, Conn>
+where
+    Conn: Connectivity<T, GeometryDim>,
+    DefaultAllocator: Allocator<T, GeometryDim>,
+{
     fn update_jacobian_diagonal(
         &self,
+        mesh: &Mesh<T, GeometryDim, Conn>,
+        fermi_level: &DVector<T>,
         solution: &DVector<T>,
         output: &mut DVector<T>,
     ) -> color_eyre::Result<()>;
     fn update_charge_density(
         &self,
+        mesh: &Mesh<T, GeometryDim, Conn>,
+        fermi_level: &DVector<T>,
         solution: &DVector<T>,
         output: &mut DVector<T>,
     ) -> color_eyre::Result<()>;
