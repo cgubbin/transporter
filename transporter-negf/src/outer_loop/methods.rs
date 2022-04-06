@@ -187,9 +187,7 @@ where
     }
 }
 
-use crate::greens_functions::{
-    AggregateGreensFunctions, GreensFunctionBuilder,
-};
+use crate::greens_functions::{AggregateGreensFunctions, GreensFunctionBuilder};
 use crate::inner_loop::InnerLoopBuilder;
 use transporter_poisson::PoissonSourceBuilder;
 
@@ -222,10 +220,10 @@ where
             .info_desk
             .calculate_source_vector(self.mesh, self.tracker.charge_as_ref());
 
-        let _poisson_problem = PoissonSourceBuilder::new()
-            .with_mesh(self.mesh)
-            .with_source(&source_vector)
-            .build();
+        //let _poisson_problem = PoissonSourceBuilder::new()
+        //    .with_mesh(self.mesh)
+        //    .with_source(&source_vector)
+        //    .build();
 
         todo!()
     }
