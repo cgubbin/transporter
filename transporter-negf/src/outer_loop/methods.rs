@@ -6,7 +6,7 @@ use crate::{
 use nalgebra::{allocator::Allocator, DMatrix, DVector, DefaultAllocator, RealField};
 use nalgebra_sparse::CsrMatrix;
 use num_complex::Complex;
-use transporter_mesher::{Connectivity, SmallDim};
+use transporter_mesher::{Assignment, Connectivity, SmallDim};
 
 use nalgebra::{Const, Dynamic, Matrix, VecStorage};
 
@@ -191,6 +191,7 @@ use crate::greens_functions::{
     AggregateGreensFunctions, GreensFunctionBuilder, GreensFunctionInfoDesk,
 };
 use crate::inner_loop::InnerLoopBuilder;
+use transporter_poisson::PoissonSourceBuilder;
 
 impl<T, GeometryDim, Conn, BandDim, SpectralSpace>
     OuterLoop<'_, T, GeometryDim, Conn, BandDim, SpectralSpace>
@@ -216,6 +217,15 @@ where
             previous_potential,
             self.tracker.charge_as_ref(),
         );
+
+        let source_vector: DVector<T> = self
+            .info_desk
+            .calculate_source_vector(self.mesh, self.tracker.charge_as_ref());
+
+        let poisson_problem = PoissonSourceBuilder::new()
+            .with_mesh(self.mesh)
+            .with_source(&source_vector)
+            .build();
 
         todo!()
     }
@@ -327,6 +337,19 @@ where
         potential: &Potential<T>,
         charge: &Charge<T, BandDim>,
     ) -> Vec<T>;
+
+    fn calculate_source_vector(
+        &self,
+        mesh: &Mesh<T, GeometryDim, Conn>,
+        charge: &Charge<T, BandDim>,
+    ) -> DVector<T>;
+
+    fn compute_jacobian_diagonal(
+        &self,
+        fermi_level: &DVector<T>,
+        potential: &Potential<T>,
+        mesh: &Mesh<T, GeometryDim, Conn>,
+    ) -> DVector<T>;
 }
 
 impl<T: Copy + RealField, GeometryDim: SmallDim, Conn, BandDim: SmallDim>
@@ -340,6 +363,7 @@ where
         + Allocator<[T; 3], BandDim>
         + Allocator<T, GeometryDim>,
 {
+    // Rebasing from elements to vertices
     fn determine_fermi_level(
         &self,
         mesh: &Mesh<T, GeometryDim, Conn>,
@@ -347,7 +371,7 @@ where
         charge: &Charge<T, BandDim>,
     ) -> Vec<T> {
         // Find the net charge in the multiband system
-        charge
+        let fermi_at_elements = charge
             .net_charge()
             .into_iter()
             .zip(potential.as_ref().iter())
@@ -377,6 +401,101 @@ where
                 let band_offset = self.band_offsets[region][0]; // Again we assume the band offset for the c-band is in position 0
                 ef_minus_ec + band_offset - phi // TODO should this be a plus phi or a minus phi??
             })
-            .collect::<Vec<_>>()
+            .collect::<Vec<_>>();
+        // Move to a result evaluated at the vertices by averaging
+        let mut result = vec![fermi_at_elements[0]];
+        let mut core = fermi_at_elements
+            .windows(2)
+            .map(|x| (x[0] + x[1]) / (T::one() + T::one()))
+            .collect::<Vec<_>>();
+        result.append(&mut core);
+        result.push(fermi_at_elements[fermi_at_elements.len() - 1]);
+        result
+    }
+
+    fn calculate_source_vector(
+        &self,
+        mesh: &Mesh<T, GeometryDim, Conn>,
+        charge: &Charge<T, BandDim>,
+    ) -> DVector<T> {
+        let net_charge = charge.net_charge();
+
+        let net_charge = net_charge
+            .iter()
+            .zip(mesh.elements())
+            .map(|(&n, element)| {
+                let region = element.1;
+                let acceptor_density = self.acceptor_densities[region];
+                let donor_density = self.donor_densities[region];
+                n + acceptor_density - donor_density
+            })
+            .collect::<Vec<_>>();
+
+        // Move to a result evaluated at the vertices by averaging
+        let mut result = vec![net_charge[0]];
+        let mut core = net_charge
+            .windows(2)
+            .map(|x| (x[0] + x[1]) / (T::one() + T::one()))
+            .collect::<Vec<_>>();
+        result.append(&mut core);
+        result.push(net_charge[net_charge.len() - 1]);
+        DVector::from(result)
+    }
+
+    // A naive implementation of Eq C4 from Lake et al (1997)
+    // TODO can improve using Eq. B3 of guo (2014), constructing from the GFs
+    fn compute_jacobian_diagonal(
+        &self,
+        fermi_level: &DVector<T>,
+        potential: &Potential<T>,
+        mesh: &Mesh<T, GeometryDim, Conn>,
+    ) -> DVector<T>
+    where
+        DefaultAllocator: Allocator<[T; 3], BandDim>,
+    {
+        DVector::from(
+            mesh.vertices()
+                .iter()
+                .zip(fermi_level.iter())
+                .zip(potential.as_ref().iter())
+                .map(|((vertex, &fermi_level), &potential)| {
+                    let region = &vertex.1;
+                    let (band_offset, effective_mass) = match region {
+                        Assignment::Boundary(x) => (
+                            x.iter()
+                                .fold(T::zero(), |acc, &i| acc + self.band_offsets[i][0])
+                                / T::from_usize(x.len()).unwrap(),
+                            x.iter()
+                                .fold(T::zero(), |acc, &i| acc + self.effective_masses[i][0][0])
+                                / T::from_usize(x.len()).unwrap(),
+                        ),
+                        Assignment::Core(x) => {
+                            (self.band_offsets[*x][0], self.effective_masses[*x][0][0])
+                        }
+                    };
+
+                    let n3d = (T::one() + T::one())
+                        * (effective_mass
+                            * T::from_f64(crate::constants::ELECTRON_MASS).unwrap()
+                            * T::from_f64(crate::constants::BOLTZMANN).unwrap()
+                            * self.temperature
+                            / T::from_f64(crate::constants::HBAR).unwrap().powi(2)
+                            / (T::one() + T::one())
+                            / T::from_f64(std::f64::consts::PI).unwrap())
+                        .powf(T::from_f64(1.5).unwrap());
+
+                    T::from_f64(crate::constants::ELECTRON_CHARGE / crate::constants::BOLTZMANN)
+                        .unwrap()
+                        / self.temperature
+                        * n3d
+                        * crate::fermi::fermi_integral_m05(
+                            T::from_f64(crate::constants::ELECTRON_CHARGE).unwrap()
+                                * (fermi_level - band_offset + potential)
+                                / T::from_f64(crate::constants::BOLTZMANN).unwrap()
+                                / self.temperature,
+                        )
+                })
+                .collect::<Vec<_>>(),
+        )
     }
 }

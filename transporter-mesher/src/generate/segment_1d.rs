@@ -1,6 +1,6 @@
 use crate::connectivity::Segment1dConnectivity;
 use crate::mesh::Mesh1d;
-use nalgebra::{DefaultAllocator, OPoint, Point1, RealField, Vector1, U1};
+use nalgebra::{OPoint, Point1, RealField, Vector1, U1};
 use std::ops::Range;
 
 pub fn create_unit_line_segment_mesh_1d<T>(cells_per_dim: usize) -> Mesh1d<T>

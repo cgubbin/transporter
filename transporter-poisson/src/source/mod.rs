@@ -1,11 +1,9 @@
-use crate::SmallDim;
 use crate::{allocators::BiDimAllocator, operator::PoissonOperator};
 use nalgebra::{
     DVector, DVectorSliceMut, DefaultAllocator, DimName, OPoint, OVector, RealField, Scalar,
 };
 use std::ops::AddAssign;
-use transporter_mesher::Assignment;
-use transporter_mesher::FiniteDifferenceMesh;
+use transporter_mesher::{Assignment, FiniteDifferenceMesh, SmallDim};
 
 pub trait SourceFunction<T, GeometryDim>: PoissonOperator<T, GeometryDim>
 where

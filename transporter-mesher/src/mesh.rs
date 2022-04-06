@@ -1,5 +1,5 @@
 use crate::{primitives::ElementMethods, Connectivity, Segment1dConnectivity, SmallDim};
-use nalgebra::{allocator::Allocator, DefaultAllocator, DimName, OPoint, RealField, U1};
+use nalgebra::{allocator::Allocator, DefaultAllocator, OPoint, RealField, U1};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Assignment {

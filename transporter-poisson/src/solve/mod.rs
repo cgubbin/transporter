@@ -1,6 +1,5 @@
-use crate::SmallDim;
 use nalgebra::{DVector, RealField};
-use transporter_mesher::Mesh1d;
+use transporter_mesher::{Mesh1d, SmallDim};
 
 pub trait NewtonSolver<T, GeometryDim>
 where

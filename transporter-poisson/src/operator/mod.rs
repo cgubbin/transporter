@@ -1,9 +1,7 @@
-use crate::SmallDim;
 use itertools::izip;
-use nalgebra::{DefaultAllocator, DimName, OPoint, RealField, Scalar};
+use nalgebra::{allocator::Allocator, DefaultAllocator, DimName, OPoint, RealField, Scalar};
 use nalgebra_sparse::CsrMatrix;
-use transporter_mesher::Assignment;
-use transporter_mesher::FiniteDifferenceMesh;
+use transporter_mesher::{Assignment, FiniteDifferenceMesh, SmallDim};
 
 pub trait PoissonOperator<T, GeometryDim>
 where
@@ -93,7 +91,7 @@ where
     T: Copy + RealField,
     Mesh: FiniteDifferenceMesh<T>,
     //  Operator: PoissonOperator<T, Mesh::GeometryDim>,
-    DefaultAllocator: crate::allocators::DimAllocator<T, Mesh::GeometryDim>,
+    DefaultAllocator: Allocator<T, Mesh::GeometryDim>,
 {
     fn solution_dim(&self) -> usize {
         Mesh::GeometryDim::dim()

@@ -16,6 +16,7 @@ num-traits = "0.2.14"
 numeric_literals = "0.2.0"
 serde = { version = "1.0.136", features = ["derive"] }
 transporter-mesher = { path = "../transporter-mesher" }
+transporter-poisson = { path = "../transporter-poisson" }
 
 [dev-dependencies]
 approx = "0.5.1"

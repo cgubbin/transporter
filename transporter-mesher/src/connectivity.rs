@@ -1,5 +1,5 @@
 use crate::{primitives::ElementMethods, SmallDim};
-use nalgebra::{allocator::Allocator, DefaultAllocator, OPoint, Point1, RealField, Vector2, U1};
+use nalgebra::{allocator::Allocator, DefaultAllocator, OPoint, Point1, RealField, U1};
 
 #[derive(Debug)]
 pub enum Segment1dConnectivity {

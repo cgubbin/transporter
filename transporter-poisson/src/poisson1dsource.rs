@@ -1,7 +1,7 @@
-use crate::allocators::DimAllocator;
 use crate::operator::OperatorAssemblerBuilder;
-use nalgebra::DVector;
-use nalgebra::{DefaultAllocator, RealField};
+use nalgebra::{allocator::Allocator, DVector, DefaultAllocator, RealField};
+use nalgebra_sparse::{factorization::CscCholesky, CscMatrix};
+use transporter_mesher::{Connectivity, Mesh, Mesh1d, SmallDim};
 
 pub struct PoissonSourceBuilder<RefMesh, RefSource> {
     mesh: RefMesh,
@@ -9,7 +9,7 @@ pub struct PoissonSourceBuilder<RefMesh, RefSource> {
 }
 
 impl PoissonSourceBuilder<(), ()> {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             mesh: (),
             source: (),
@@ -40,16 +40,18 @@ pub struct PoissonSourceb<'a, Mesh, Operator, Source, Jacobian> {
     inverse_jacobian: Jacobian,
 }
 
-impl<'a, T> PoissonSourceBuilder<&'a transporter_mesher::Mesh1d<T>, &'a DVector<T>>
+impl<'a, T, GeometryDim: SmallDim, Conn>
+    PoissonSourceBuilder<&'a Mesh<T, GeometryDim, Conn>, &'a DVector<T>>
 where
     T: Copy + RealField,
-    DefaultAllocator: DimAllocator<T, nalgebra::U1>,
+    Conn: Connectivity<T, GeometryDim>,
+    DefaultAllocator: Allocator<T, GeometryDim>,
 {
     pub fn build(
         self,
     ) -> PoissonSourceb<
         'a,
-        transporter_mesher::Mesh1d<T>,
+        Mesh<T, GeometryDim, Conn>,
         nalgebra_sparse::CscMatrix<T>,
         DVector<T>,
         nalgebra_sparse::CscMatrix<T>,
@@ -65,10 +67,6 @@ where
         }
     }
 }
-
-use nalgebra_sparse::factorization::CscCholesky;
-use nalgebra_sparse::CscMatrix;
-use transporter_mesher::Mesh1d;
 
 impl<'a, T> PoissonSourceb<'a, Mesh1d<T>, CscMatrix<T>, DVector<T>, CscMatrix<T>>
 where
