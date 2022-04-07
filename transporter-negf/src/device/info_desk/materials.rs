@@ -4,6 +4,7 @@
 pub(crate) enum Material {
     SiC,
     GaAs,
+    AlGaAs,
 }
 
 impl std::fmt::Display for Material {
@@ -14,6 +15,9 @@ impl std::fmt::Display for Material {
             }
             Material::GaAs => {
                 write!(f, "GaAs")
+            }
+            Material::AlGaAs => {
+                write!(f, "AlGaAs")
             } // _ => {
               //     write!(f, "Display unimplemented")
               // }

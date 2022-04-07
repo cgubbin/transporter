@@ -134,11 +134,14 @@ where
     pub fn factorised_jacobian(
         &'a self,
         jacobian_diagonal: DVector<T>,
-    ) -> color_eyre::Result<CscCholesky<T>> {
-        Ok(
-            nalgebra_sparse::factorization::CscCholesky::factor(&self.jacobian(jacobian_diagonal)?)
-                .unwrap(),
-        )
+    ) -> color_eyre::Result<nalgebra::DMatrix<T>> {
+        Ok(nalgebra_sparse::convert::serial::convert_csc_dense(
+            &self.jacobian(jacobian_diagonal)?,
+        ))
+        //Ok(
+        //    nalgebra_sparse::factorization::CscCholesky::factor(&self.jacobian(jacobian_diagonal)?)
+        //        .unwrap(),
+        //)
     }
 
     /// Update the Jacobian based on the current potential

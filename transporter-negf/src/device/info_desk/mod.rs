@@ -140,6 +140,7 @@ impl Material {
     {
         match self {
             Material::GaAs => Ok(LayerInfoDesk::gaas()),
+            Material::AlGaAs => Ok(LayerInfoDesk::algaas()),
             Material::SiC => Ok(LayerInfoDesk::sic()),
             // _ => Err(eyre!(
             //     "The material {} does not have a `get_info` implementation",
@@ -153,9 +154,18 @@ impl<T: RealField> LayerInfoDesk<T, U1> {
     #[numeric_literals::replace_float_literals(T::from_f64(literal).unwrap())]
     fn gaas() -> Self {
         Self {
-            effective_mass: nalgebra::Vector1::new([0.25, 0.25, 0.25]),
-            band_offset: Point1::new(0.2),
-            dielectric_constant: [8.5, 8.5, 8.5],
+            effective_mass: nalgebra::Vector1::new([0.067, 0.067, 0.067]),
+            band_offset: Point1::new(0.0),
+            dielectric_constant: [11.5, 11.5, 11.5],
+        }
+    }
+
+    #[numeric_literals::replace_float_literals(T::from_f64(literal).unwrap())]
+    fn algaas() -> Self {
+        Self {
+            effective_mass: nalgebra::Vector1::new([0.067, 0.067, 0.067]),
+            band_offset: Point1::new(0.3),
+            dielectric_constant: [11.5, 11.5, 11.5],
         }
     }
 

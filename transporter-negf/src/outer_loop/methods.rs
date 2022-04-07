@@ -21,8 +21,11 @@ impl<T: RealField> Potential<T> {
     /// Check whether the change in the normalised potential is within the requested tolerance
     fn is_change_within_tolerance(&self, other: &Potential<T>, tolerance: T) -> bool {
         let norm = self.0.norm();
-        let difference = (&self.0 - &other.0).norm() / norm;
-        difference < tolerance
+        let difference = (&self.0 - &other.0).norm();
+        if norm == T::zero() {
+            return true;
+        }
+        difference / norm < tolerance
     }
 }
 
@@ -67,14 +70,13 @@ where
         + Allocator<[T; 3], BandDim>,
 {
     fn is_loop_converged(&self, previous_potential: &mut Potential<T>) -> color_eyre::Result<bool> {
-        // let potential = self.update_potential(previous_potential)?;
-        // let result = potential.is_change_within_tolerance(
-        //     previous_potential,
-        //     self.convergence_settings.outer_tolerance(),
-        // );
-        // let _ = std::mem::replace(previous_potential, potential);
-        //Ok(result)
-        Ok(false)
+        let potential = self.update_potential(previous_potential)?;
+        let result = potential.is_change_within_tolerance(
+            previous_potential,
+            self.convergence_settings.outer_tolerance(),
+        );
+        let _ = std::mem::replace(previous_potential, potential);
+        Ok(result)
     }
     /// Carry out a single iteration of the self-consistent outer loop
     fn single_iteration(&mut self) -> color_eyre::Result<()> {
@@ -100,17 +102,19 @@ where
     }
 
     fn run_loop(&mut self, mut potential: Potential<T>) -> color_eyre::Result<()> {
-        let mut iteration = 0;
+        // A single iteration before the loop to avoid updating the potential with an empty charge vector
+        self.single_iteration()?;
+        let mut iteration = 1;
         while !self.is_loop_converged(&mut potential)? {
-            // Do the inner loop
-            self.single_iteration()?;
             // Update the Fermi level using the new charge density
             self.tracker.fermi_level = DVector::from(self.info_desk.determine_fermi_level(
                 self.mesh,
                 &potential,
                 self.tracker.charge_as_ref(),
             ));
-            dbg!(&self.tracker.fermi_level);
+            // Do the inner loop
+            self.single_iteration()?;
+
             iteration += 1;
             if iteration >= self.convergence_settings.maximum_outer_iterations() {
                 return Err(color_eyre::eyre::eyre!(
@@ -198,7 +202,7 @@ where
 
 use crate::greens_functions::{AggregateGreensFunctions, GreensFunctionBuilder};
 use crate::inner_loop::InnerLoopBuilder;
-use transporter_poisson::{PoissonMethods, PoissonSourceBuilder};
+use transporter_poisson::{NewtonSolver, PoissonMethods, PoissonSourceBuilder};
 
 impl<T, GeometryDim, Conn, BandDim, SpectralSpace>
     OuterLoop<'_, T, GeometryDim, Conn, BandDim, SpectralSpace>
@@ -219,23 +223,43 @@ where
         previous_potential: &Potential<T>,
     ) -> color_eyre::Result<Potential<T::RealField>> {
         // Calculate the Fermi level
-        let fermi_level = self.info_desk.determine_fermi_level(
+        let fermi_level = DVector::from(self.info_desk.determine_fermi_level(
             self.mesh,
             previous_potential,
             self.tracker.charge_as_ref(),
-        );
+        ));
 
         let source_vector: DVector<T> = self
             .info_desk
             .calculate_source_vector(self.mesh, self.tracker.charge_as_ref());
 
-        let _poisson_problem = PoissonSourceBuilder::new()
+        let poisson_problem = PoissonSourceBuilder::new()
             .with_info_desk(self.info_desk)
             .with_mesh(self.mesh)
             .with_source(&source_vector)
             .build();
 
-        todo!()
+        let mut output = previous_potential.as_ref().clone();
+        //let charge_density = self
+        //    .tracker
+        //    .charge_as_ref()
+        //    .net_charge()
+        //    .iter()
+        //    .map(|x| *x)
+        //    .collect::<Vec<_>>();
+        // Move charge density to one over vertices duh
+        // let mut charge_density_vec = vec![charge_density[0]];
+        // let mut core_cd = charge_density
+        //     .windows(2)
+        //     .map(|x| (x[0] + x[1]) / (T::one() + T::one()))
+        //     .collect::<Vec<_>>();
+        // charge_density_vec.append(&mut core_cd);
+        // charge_density_vec.push(charge_density[charge_density.len() - 1]);
+        //let charge_density_vec = vec![T::zero(); source_vector.shape().0];
+        //let source_vector = DVector::from(charge_density_vec);
+        output = poisson_problem.solve_into(output, &source_vector, &fermi_level)?;
+
+        Ok(Potential::from_vector(output))
     }
 }
 
@@ -424,17 +448,17 @@ where
     fn determine_fermi_level(
         &self,
         mesh: &Mesh<T, GeometryDim, Conn>,
-        potential: &Potential<T>,
-        charge: &Charge<T, BandDim>,
+        potential: &Potential<T>, // The potential which is evaluated at each mesh vertex
+        charge: &Charge<T, BandDim>, // The charge density which is evaluated at each mesh element
     ) -> Vec<T> {
-        // Find the net charge in the multiband system
-        let fermi_at_elements = charge
+        // Evaluate the Fermi level over the elements of the mesh
+        let fermi_plus_potential_at_elements = charge
             .net_charge()
             .into_iter()
-            .zip(potential.as_ref().iter())
             .zip(mesh.elements().iter())
-            .map(|((&n, &phi), element)| {
+            .map(|(&n, element)| {
                 let region = element.1;
+                // Calculate the density of states in the conduction band
                 let n3d = (T::one() + T::one()) // Currently always getting the x-component, is this dumb?
                     * (self.effective_masses[region][0][0] // The conduction band is always supposed to be in position 0
                         * T::from_f64(crate::constants::ELECTRON_MASS).unwrap()
@@ -445,28 +469,36 @@ where
                         / T::from_f64(std::f64::consts::PI).unwrap())
                     .powf(T::from_f64(1.5).unwrap());
 
+                // Find the inverse thermal energy quantum, and the Gamma function needed to convert
+                // the Fermi integral to its curly F equivalent.
                 let (factor, gamma) = (
                     T::from_f64(crate::constants::ELECTRON_CHARGE / crate::constants::BOLTZMANN)
                         .unwrap()
                         / self.temperature,
                     T::from_f64(std::f64::consts::PI.sqrt() / 2.).unwrap(),
                 );
-                let eta_f = crate::fermi::inverse_fermi_integral_05(gamma * n / n3d);
-
-                let ef_minus_ec = eta_f / factor;
+                // Find the full energy argument \eta_f - E_C + \phi
+                let eta_f_minus_ec_plus_phi =
+                    crate::fermi::inverse_fermi_integral_05(gamma * n / n3d) / factor;
 
                 let band_offset = self.band_offsets[region][0]; // Again we assume the band offset for the c-band is in position 0
-                ef_minus_ec + band_offset - phi // TODO should this be a plus phi or a minus phi??
+                                                                // Get eta_f_plus_phi
+                eta_f_minus_ec_plus_phi + band_offset //- phi // TODO should this be a plus phi or a minus phi??
             })
             .collect::<Vec<_>>();
         // Move to a result evaluated at the vertices by averaging
-        let mut result = vec![fermi_at_elements[0]];
-        let mut core = fermi_at_elements
+        // Use the potential Here as it is defined over the vertices, not the elements
+        let mut result = vec![fermi_plus_potential_at_elements[0] - potential.as_ref()[0]];
+        let mut core = fermi_plus_potential_at_elements
             .windows(2)
-            .map(|x| (x[0] + x[1]) / (T::one() + T::one()))
+            .zip(potential.as_ref().iter().skip(1))
+            .map(|(x, &phi)| (x[0] + x[1]) / (T::one() + T::one()) - phi)
             .collect::<Vec<_>>();
         result.append(&mut core);
-        result.push(fermi_at_elements[fermi_at_elements.len() - 1]);
+        result.push(
+            fermi_plus_potential_at_elements[fermi_plus_potential_at_elements.len() - 1]
+                - potential.as_ref()[potential.as_ref().len() - 1],
+        );
         result
     }
 
@@ -484,7 +516,8 @@ where
                 let region = element.1;
                 let acceptor_density = self.acceptor_densities[region];
                 let donor_density = self.donor_densities[region];
-                n + acceptor_density - donor_density
+                (n + acceptor_density - donor_density)
+                    * T::from_f64(crate::constants::ELECTRON_CHARGE).unwrap()
             })
             .collect::<Vec<_>>();
 
@@ -502,9 +535,10 @@ where
     fn update_source_vector(
         &self,
         mesh: &Mesh<T, GeometryDim, Conn>,
-        fermi_level: &DVector<T>,
-        potential: &DVector<T>,
+        fermi_level: &DVector<T>, // The fermi level defined on the mesh vertices
+        potential: &DVector<T>,   // The potential defined on the mesh vertices
     ) -> DVector<T> {
+        let gamma = T::from_f64(std::f64::consts::PI.sqrt() / 2.).unwrap();
         DVector::from(
             mesh.vertices()
                 .iter()
@@ -546,13 +580,13 @@ where
                             / T::from_f64(std::f64::consts::PI).unwrap())
                         .powf(T::from_f64(1.5).unwrap());
 
-                    let n_free = n3d
-                        * crate::fermi::fermi_integral_05(
+                    let n_free =
+                        n3d * crate::fermi::fermi_integral_05(
                             T::from_f64(crate::constants::ELECTRON_CHARGE).unwrap()
                                 * (fermi_level - band_offset + potential)
                                 / T::from_f64(crate::constants::BOLTZMANN).unwrap()
                                 / self.temperature,
-                        );
+                        ) / gamma;
 
                     T::from_f64(crate::constants::ELECTRON_CHARGE).unwrap()
                         * (n_free + acceptor_density - donor_density)
@@ -572,6 +606,7 @@ where
     where
         DefaultAllocator: Allocator<[T; 3], BandDim>,
     {
+        let gamma = T::from_f64(std::f64::consts::PI.sqrt()).unwrap();
         DVector::from(
             mesh.vertices()
                 .iter()
@@ -613,6 +648,8 @@ where
                                 / T::from_f64(crate::constants::BOLTZMANN).unwrap()
                                 / self.temperature,
                         )
+                        / gamma
+                        * T::from_f64(crate::constants::ELECTRON_CHARGE).unwrap()
                 })
                 .collect::<Vec<_>>(),
         )
@@ -626,8 +663,12 @@ mod test {
         app::{tracker::TrackerBuilder, Configuration},
         device::{info_desk::BuildInfoDesk, Device},
     };
-    use nalgebra::U1;
+    use nalgebra::{DVector, U1};
+    use rand::Rng;
 
+    /// Test the calculation of the Fermi level, and the electron density from the Fermi level
+    /// for an arbitrary potential. If successful the calculated electron density after the two
+    /// step calculation should coincide with the initial charge density.
     #[test]
     fn fermi_level_in_a_homogeneous_structure_reproduces_charge_density() {
         let path = std::path::PathBuf::try_from("../.config/structure.toml").unwrap();
@@ -644,23 +685,13 @@ mod test {
             .build()
             .unwrap();
 
-        let hamiltonian = crate::hamiltonian::HamiltonianBuilder::new()
-            .with_mesh(&mesh)
-            .with_info_desk(&tracker)
-            .build()
-            .unwrap();
+        let mut rng = rand::thread_rng();
 
-        // Begin by building a coherent spectral space, regardless of calculation we begin with a coherent loop
-        let spectral_space_builder = crate::spectral::constructors::SpectralSpaceBuilder::new()
-            .with_number_of_energy_points(config.spectral.number_of_energy_points)
-            .with_energy_range(std::ops::Range {
-                start: config.spectral.minimum_energy,
-                end: config.spectral.maximum_energy,
-            })
-            .with_energy_integration_method(config.spectral.energy_integration_rule);
-
-        let potential =
-            Potential::from_vector(nalgebra::DVector::from(vec![0_f64; mesh.vertices().len()]));
+        let potential = Potential::from_vector(nalgebra::DVector::from(
+            (0..mesh.vertices().len())
+                .map(|_| rng.gen::<f64>())
+                .collect::<Vec<_>>(),
+        ));
 
         let mut charge = tracker.charge().clone();
         // Set the charge to neutral??
@@ -675,26 +706,159 @@ mod test {
                 })
         });
 
+        // Find the Fermi level in the device
         let fermi = info_desk.determine_fermi_level(&mesh, &potential, &charge);
-
-        let effective_mass = info_desk.effective_masses[0][0][0];
-        let n3d = 2_f64
-            * (effective_mass
-                * crate::constants::ELECTRON_MASS
-                * crate::constants::BOLTZMANN
-                * info_desk.temperature
-                / crate::constants::HBAR.powi(2)
-                / 2_f64
-                / std::f64::consts::PI)
-                .powf(1.5);
-        let gamma = std::f64::consts::PI.sqrt() / 2.;
-        let guess_density = n3d / gamma
-            * crate::fermi::fermi_integral_05(
-                crate::constants::ELECTRON_CHARGE * (fermi[0] - info_desk.band_offsets[0][0])
-                    / crate::constants::BOLTZMANN
-                    / info_desk.temperature,
+        // Recalculate the source vector using the Fermi level
+        let source_vector = info_desk.update_source_vector(
+            &mesh,
+            &nalgebra::DVector::from(fermi),
+            potential.as_ref(),
+        );
+        // Assert each element in the source vector is near to zero
+        for &element in source_vector.into_iter() {
+            approx::assert_relative_eq!(
+                element / crate::constants::ELECTRON_CHARGE / info_desk.donor_densities[0],
+                0_f64,
+                epsilon = std::f64::EPSILON * 100_f64
             );
+        }
+    }
 
-        println!("{}, {}", fermi[0], guess_density / 1e23);
+    /// Compare results from initialisation and updates of source vector
+    #[test]
+    fn initialised_and_updated_sources_are_equal_at_zero_potential() {
+        let path = std::path::PathBuf::try_from("../.config/structure.toml").unwrap();
+        let device: Device<f64, U1> = crate::device::Device::build(path).unwrap();
+        // TODO Info_desk is currently always U1 because it is informed by the device dimension right now, this is no good. We need n_bands to be in-play here.
+        let info_desk = device.build_device_info_desk().unwrap();
+
+        let config: Configuration<f64> = Configuration::build().unwrap();
+        let mesh: transporter_mesher::Mesh1d<f64> =
+            crate::app::build_mesh_with_config(&config, device).unwrap();
+        let tracker = TrackerBuilder::new()
+            .with_mesh(&mesh)
+            .with_info_desk(&info_desk)
+            .build()
+            .unwrap();
+
+        let mut rng = rand::thread_rng();
+
+        let potential = Potential::from_vector(nalgebra::DVector::from(
+            (0..mesh.vertices().len())
+                .map(|_| rng.gen::<f64>())
+                .collect::<Vec<_>>(),
+        ));
+
+        let mut charge = tracker.charge().clone();
+        // Set the charge to neutral
+        charge.as_ref_mut().iter_mut().for_each(|charge_in_band| {
+            charge_in_band
+                .iter_mut()
+                .zip(mesh.elements())
+                .for_each(|(x, element)| {
+                    let region = element.1;
+                    let doping_density = info_desk.donor_densities[region];
+                    *x = doping_density * 0.95;
+                })
+        });
+
+        // Get the initial source
+        let initial_source = info_desk.calculate_source_vector(&mesh, &charge);
+
+        // Find the Fermi level in the device
+        let fermi = info_desk.determine_fermi_level(&mesh, &potential, &charge);
+        // Recalculate the source vector using the Fermi level
+        let source_vector = info_desk.update_source_vector(
+            &mesh,
+            &nalgebra::DVector::from(fermi),
+            potential.as_ref(),
+        );
+        // Assert each element in the source vector is near to zero
+        for (&element, &initial) in source_vector.into_iter().zip(initial_source.into_iter()) {
+            dbg!(element, initial);
+            //  approx::assert_relative_eq!(
+            //      element / crate::constants::ELECTRON_CHARGE / info_desk.donor_densities[0],
+            //      0_f64,
+            //      epsilon = std::f64::EPSILON * 100_f64
+            //  );
+        }
+    }
+
+    #[test]
+    fn jacobian_diagonal_agrees_with_numerical_derivative() {
+        let path = std::path::PathBuf::try_from("../.config/structure.toml").unwrap();
+        let device: Device<f64, U1> = crate::device::Device::build(path).unwrap();
+        // TODO Info_desk is currently always U1 because it is informed by the device dimension right now, this is no good. We need n_bands to be in-play here.
+        let info_desk = device.build_device_info_desk().unwrap();
+
+        let config: Configuration<f64> = Configuration::build().unwrap();
+        let mesh: transporter_mesher::Mesh1d<f64> =
+            crate::app::build_mesh_with_config(&config, device).unwrap();
+        let tracker = TrackerBuilder::new()
+            .with_mesh(&mesh)
+            .with_info_desk(&info_desk)
+            .build()
+            .unwrap();
+
+        let mut rng = rand::thread_rng();
+
+        let potential = Potential::from_vector(nalgebra::DVector::from(
+            (0..mesh.vertices().len())
+                .map(|_| rng.gen::<f64>())
+                .collect::<Vec<_>>(),
+        ));
+
+        let dphi = 1e-8;
+        let potential_plus_dphi = Potential::from_vector(nalgebra::DVector::from(
+            potential
+                .as_ref()
+                .iter()
+                .map(|phi| phi + dphi)
+                .collect::<Vec<_>>(),
+        ));
+        let potential_minus_dphi = Potential::from_vector(nalgebra::DVector::from(
+            potential
+                .as_ref()
+                .iter()
+                .map(|phi| phi - dphi)
+                .collect::<Vec<_>>(),
+        ));
+
+        let mut charge = tracker.charge().clone();
+        // Set the charge to neutral??
+        charge.as_ref_mut().iter_mut().for_each(|charge_in_band| {
+            charge_in_band
+                .iter_mut()
+                .zip(mesh.elements())
+                .for_each(|(x, element)| {
+                    let region = element.1;
+                    let doping_density = info_desk.donor_densities[region];
+                    *x = doping_density;
+                })
+        });
+
+        // Find the Fermi level in the device
+        let fermi_level =
+            DVector::from(info_desk.determine_fermi_level(&mesh, &potential, &charge));
+        // Compute the numerical derivative at phi_plus_dphi, phi_minus_dphi
+        let source_vector_at_phi_plus =
+            info_desk.update_source_vector(&mesh, &fermi_level, potential_plus_dphi.as_ref());
+        let source_vector_at_phi_minus =
+            info_desk.update_source_vector(&mesh, &fermi_level, potential_minus_dphi.as_ref());
+        let numerical_derivative = source_vector_at_phi_plus
+            .into_iter()
+            .zip(source_vector_at_phi_minus.into_iter())
+            .map(|(plus, minus)| (plus - minus) / 2. / dphi)
+            .collect::<Vec<_>>();
+
+        let analytical_derivative =
+            info_desk.compute_jacobian_diagonal(&fermi_level, potential.as_ref(), &mesh);
+
+        for (num, ana) in numerical_derivative
+            .iter()
+            .zip(analytical_derivative.iter())
+        {
+            println!("{num}, {}", ana * crate::constants::ELECTRON_CHARGE);
+        }
     }
 }

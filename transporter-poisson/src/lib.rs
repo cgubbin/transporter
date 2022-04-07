@@ -12,3 +12,4 @@ mod solve;
 mod source;
 
 pub use poisson1dsource::*;
+pub use solve::NewtonSolver;

@@ -1,4 +1,5 @@
 pub const BOLTZMANN: f64 = 1.38064852e-23;
-pub const ELECTRON_CHARGE: f64 = 1.6e-19;
-pub const ELECTRON_MASS: f64 = 9.31e-31;
-pub const HBAR: f64 = 6.654e-34;
+pub const ELECTRON_CHARGE: f64 = 1.60217662e-19;
+pub const ELECTRON_MASS: f64 = 9.10938356e-31;
+pub const EPSILON_0: f64 = 8.85418782e-12;
+pub const HBAR: f64 = 1.0545718e-34;

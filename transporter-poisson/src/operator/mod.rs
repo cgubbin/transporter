@@ -3,6 +3,9 @@ use nalgebra::{allocator::Allocator, DefaultAllocator, DimName, OPoint, RealFiel
 use nalgebra_sparse::CsrMatrix;
 use transporter_mesher::{Assignment, FiniteDifferenceMesh, SmallDim};
 
+const EPSILON_0: f64 = 8.85418782e-12;
+const ELECTRON_CHARGE: f64 = 1.60217662e-19;
+
 pub trait PoissonOperator<T, GeometryDim>
 where
     T: Scalar,
@@ -115,6 +118,7 @@ where
 
     #[allow(clippy::if_same_then_else)]
     pub fn assemble_matrix(&self, n: usize) -> color_eyre::Result<nalgebra_sparse::CscMatrix<T>> {
+        let scaling = T::from_f64(EPSILON_0).unwrap();
         let ndof = n * self.geometry_dim() * self.solution_dim();
         let mut row_offsets = Vec::with_capacity(ndof);
         let mut col_indices = Vec::with_capacity(ndof * 3 - 2);
@@ -136,21 +140,23 @@ where
             if idx == 0 {
                 let delta = dx[0]; // Both are equal at the mesh edge
                 new_cols.push(idx);
-                new_vals.push((T::one() + T::one()) / delta.powi(2));
-                // Change for the bc
-                //new_cols.push(idx + 1);
-                //new_vals.push(T::one() / delta.powi(2));
-                //row_tick += 2;
-                row_tick += 1;
+                new_vals.push(scaling * (T::one() + T::one()) / delta.powi(2));
+                // Change for the bc, this is a Neumann one
+                new_cols.push(idx + 1);
+                new_vals.push(-scaling * (T::one() + T::one()) / delta.powi(2));
+                row_tick += 2;
+                // row_tick += 1;
             } else if idx == n - 1 {
                 let delta = dx[0]; // Both are equal at the mesh edge
                                    // new_cols.push(idx - 1);
                                    // new_vals.push(T::one() / delta.powi(2));
                                    // Change for the bc
+                new_cols.push(idx - 1);
+                new_vals.push(-scaling * (T::one() + T::one()) / delta.powi(2));
                 new_cols.push(idx);
-                new_vals.push((T::one() + T::one()) / delta.powi(2));
-                // row_tick += 2;
-                row_tick += 1;
+                new_vals.push(scaling * (T::one() + T::one()) / delta.powi(2));
+                row_tick += 2;
+                //row_tick += 1;
             } else {
                 let delta_minus = dx[0];
                 let delta_plus = dx[1];
@@ -161,7 +167,7 @@ where
                         * ((delta_plus.powi(2) - delta_minus.powi(2)) * first_derivative_h
                             + delta_plus.powi(2) / delta_minus);
                 new_cols.push(idx - 1);
-                new_vals.push(-second_derivative_h);
+                new_vals.push(-scaling * second_derivative_h);
                 let first_derivative_i = (delta_plus.powi(2) - delta_minus.powi(2))
                     / (delta_plus + delta_minus)
                     / delta_plus
@@ -172,7 +178,7 @@ where
                             - delta_plus.powi(2) / delta_minus
                             - delta_minus.powi(2) / delta_plus);
                 new_cols.push(idx);
-                new_vals.push(-second_derivative_i);
+                new_vals.push(-scaling * second_derivative_i);
                 let first_derivative_j =
                     delta_minus.powi(2) / (delta_plus + delta_minus) / delta_plus / delta_minus;
                 let second_derivative_j =
@@ -180,7 +186,7 @@ where
                         * ((delta_plus.powi(2) - delta_minus.powi(2)) * first_derivative_j
                             + delta_minus.powi(2) / delta_plus);
                 new_cols.push(idx + 1);
-                new_vals.push(-second_derivative_j);
+                new_vals.push(-scaling * second_derivative_j);
 
                 row_tick += 3;
             }
