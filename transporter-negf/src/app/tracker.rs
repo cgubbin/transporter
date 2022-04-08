@@ -31,7 +31,7 @@ where
     __marker: PhantomData<GeometryDim>,
 }
 
-impl<'a, T: RealField, GeometryDim: SmallDim, BandDim: SmallDim, C>
+impl<'a, T: Copy + RealField, GeometryDim: SmallDim, BandDim: SmallDim, C>
     Tracker<'a, T, GeometryDim, BandDim, C>
 where
     C: Connectivity<T, GeometryDim>,
@@ -121,7 +121,7 @@ impl<RefInfoDesk, RefMesh> TrackerBuilder<RefInfoDesk, RefMesh> {
     }
 }
 
-impl<'a, T: RealField, GeometryDim: SmallDim, Conn, BandDim: SmallDim>
+impl<'a, T: Copy + RealField, GeometryDim: SmallDim, Conn, BandDim: SmallDim>
     TrackerBuilder<&'a DeviceInfoDesk<T, GeometryDim, BandDim>, &'a Mesh<T, GeometryDim, Conn>>
 where
     Conn: Connectivity<T, GeometryDim>,

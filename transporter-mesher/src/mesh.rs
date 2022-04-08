@@ -49,7 +49,7 @@ pub type Mesh1d<T> = Mesh<T, U1, Segment1dConnectivity>;
 
 impl<T, D, C> Mesh<T, D, C>
 where
-    T: RealField,
+    T: Copy + RealField,
     C: Connectivity<T, D>,
     D: SmallDim,
     DefaultAllocator: Allocator<T, D>,
@@ -105,6 +105,10 @@ where
         self.element_connectivity[element_index].over_dimensions()
     }
 
+    pub fn vertex_connectivity_by_dimension(&self, vertex_index: usize) -> Vec<&[usize]> {
+        self.connectivity[vertex_index].over_dimensions()
+    }
+
     pub fn deltas_by_dimension(&self, element_index: usize) -> Vec<Vec<T>> {
         let connections = self.get_element_connectivity(element_index);
         let this_element = &self.elements[element_index].0;
@@ -114,6 +118,25 @@ where
             .collect::<Vec<_>>();
         self.element_connectivity[element_index]
             .deltas_by_dimension(this_element, &connected_elements)
+    }
+
+    pub fn vertex_deltas_by_dimension(&self, vertex_index: usize) -> Vec<Vec<T>> {
+        let connections = self.connectivity()[vertex_index];
+        let this_vertex = &self.vertices[vertex_index].0;
+        let connected_vertices = connections
+            .iter()
+            .map(|&idx| &self.vertices[idx].0)
+            .collect::<Vec<_>>();
+        this_vertex
+            .iter()
+            .enumerate()
+            .map(|(i, &x)| {
+                connected_vertices
+                    .iter()
+                    .map(|other| (other[i] - x).abs())
+                    .collect::<Vec<_>>()
+            })
+            .collect()
     }
 
     pub fn get_element_midpoint(&self, element_index: usize) -> OPoint<T, D> {

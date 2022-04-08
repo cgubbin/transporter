@@ -1,5 +1,6 @@
 mod convergence;
 mod methods;
+mod poisson;
 
 pub(crate) use convergence::Convergence;
 pub(crate) use methods::{Outer, Potential};

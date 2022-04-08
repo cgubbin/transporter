@@ -20,7 +20,7 @@ where
     /// Each layer in the stack has `BandDim` band offsets, which are the band levels at zero momentum
     pub(crate) band_offsets: Vec<OPoint<T, BandDim>>,
     /// Each layer in the stack has a static dielectric constant with a component for each Cartesian axis
-    dielectric_constants: Vec<[T; 3]>,
+    pub(crate) dielectric_constants: Vec<[T; 3]>,
     /// Each layer in the stack has an effective doping density -> This should probably be a Point2<> for both doping types..
     pub(crate) donor_densities: Vec<T>,
     pub(crate) acceptor_densities: Vec<T>,

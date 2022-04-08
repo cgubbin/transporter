@@ -38,7 +38,7 @@ where
 
 impl<T, D, C> FiniteDifferenceMesh<T> for Mesh<T, D, C>
 where
-    T: RealField,
+    T: Copy + RealField,
     C: Connectivity<T, D>,
     D: SmallDim,
     DefaultAllocator: Allocator<T, D>,

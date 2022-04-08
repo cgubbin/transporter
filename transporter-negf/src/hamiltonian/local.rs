@@ -29,7 +29,7 @@ pub trait ElementConnectivityAssembler {
 /// Implement `ElementConnectivityAssembler` for the generic `Mesh`
 impl<T, GeometryDim, C> ElementConnectivityAssembler for Mesh<T, GeometryDim, C>
 where
-    T: RealField,
+    T: Copy + RealField,
     GeometryDim: SmallDim,
     C: Connectivity<T, GeometryDim>,
     DefaultAllocator: Allocator<T, GeometryDim>,
