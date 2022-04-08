@@ -11,6 +11,7 @@ use crate::{
     hamiltonian::Hamiltonian,
     postprocessor::{Charge, ChargeAndCurrent},
 };
+use argmin::core::ArgminFloat;
 use nalgebra::{allocator::Allocator, ComplexField, DVector, DefaultAllocator};
 use std::marker::PhantomData;
 use transporter_mesher::{Connectivity, Mesh, SmallDim};
@@ -217,7 +218,7 @@ impl<
 pub(crate) struct OuterLoop<'a, T, GeometryDim, Conn, BandDim, SpectralSpace>
 where
     T: ComplexField,
-    <T as ComplexField>::RealField: Copy,
+    <T as ComplexField>::RealField: ArgminFloat + Copy,
     BandDim: SmallDim,
     GeometryDim: SmallDim,
     Conn: Connectivity<T::RealField, GeometryDim>,
@@ -258,7 +259,7 @@ impl<'a, T, GeometryDim, Conn, BandDim, SpectralSpace>
     >
 where
     T: ComplexField + Copy,
-    <T as ComplexField>::RealField: Copy,
+    <T as ComplexField>::RealField: ArgminFloat + Copy,
     GeometryDim: SmallDim,
     BandDim: SmallDim,
     Conn: Connectivity<T::RealField, GeometryDim>,

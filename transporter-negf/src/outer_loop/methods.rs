@@ -58,7 +58,7 @@ where
 impl<T, GeometryDim, Conn, BandDim> Outer<T>
     for OuterLoop<'_, T, GeometryDim, Conn, BandDim, SpectralSpace<T, ()>>
 where
-    T: RealField + Copy,
+    T: ArgminFloat + RealField + Copy,
     Conn: Connectivity<T, GeometryDim>,
     GeometryDim: SmallDim,
     BandDim: SmallDim,
@@ -138,7 +138,7 @@ impl<T, GeometryDim, Conn, BandDim> Outer<T>
         SpectralSpace<T, WavevectorSpace<T, GeometryDim, Conn>>,
     >
 where
-    T: RealField + Copy,
+    T: ArgminFloat + RealField + Copy,
     Conn: Connectivity<T, GeometryDim>,
     GeometryDim: SmallDim,
     BandDim: SmallDim,
@@ -202,12 +202,16 @@ where
 
 use crate::greens_functions::{AggregateGreensFunctions, GreensFunctionBuilder};
 use crate::inner_loop::InnerLoopBuilder;
+use argmin::core::observers::ObserverMode;
+use argmin::core::observers::SlogLogger;
+use argmin::core::ArgminFloat;
+use argmin::core::Executor;
 use transporter_poisson::{NewtonSolver, PoissonMethods, PoissonSourceBuilder};
 
 impl<T, GeometryDim, Conn, BandDim, SpectralSpace>
     OuterLoop<'_, T, GeometryDim, Conn, BandDim, SpectralSpace>
 where
-    T: RealField + Copy,
+    T: ArgminFloat + RealField + Copy,
     Conn: Connectivity<T, GeometryDim>,
     GeometryDim: SmallDim,
     BandDim: SmallDim,
@@ -229,17 +233,45 @@ where
             self.tracker.charge_as_ref(),
         ));
 
-        let source_vector: DVector<T> = self
-            .info_desk
-            .calculate_source_vector(self.mesh, self.tracker.charge_as_ref());
+        //let source_vector: DVector<T> = self
+        //    .info_desk
+        //    .calculate_source_vector(self.mesh, self.tracker.charge_as_ref());
 
-        let poisson_problem = PoissonSourceBuilder::new()
+        //let poisson_problem = PoissonSourceBuilder::new()
+        //    .with_info_desk(self.info_desk)
+        //    .with_mesh(self.mesh)
+        //    .with_source(&source_vector)
+        //    .build();
+
+        let cost = super::poisson::PoissonProblemBuilder::default()
+            .with_charge(self.tracker.charge_as_ref())
             .with_info_desk(self.info_desk)
             .with_mesh(self.mesh)
-            .with_source(&source_vector)
-            .build();
+            .build()?;
 
-        let mut output = previous_potential.as_ref().clone();
+        // Define initial parameter vector
+        let init_param: DVector<T> = DVector::from_vec(vec![T::zero(); self.mesh.vertices().len()]);
+
+        let linesearch = argmin::solver::linesearch::MoreThuenteLineSearch::new()
+            .alpha(T::zero(), T::one())
+            .map_err(|e| color_eyre::eyre::eyre!("Failed to initialize linesearch {:?}", e))?;
+        // Set up solver
+        let solver = argmin::solver::gaussnewton::GaussNewtonLS::new(linesearch);
+
+        // Run solver
+        let res = Executor::new(cost, solver)
+            .configure(|state| state.param(init_param).max_iters(100))
+            .add_observer(SlogLogger::term(), ObserverMode::Always)
+            .run()
+            .map_err(|e| color_eyre::eyre::eyre!("Failed to optimize poisson system {:?}", e))?;
+
+        // Wait a second (lets the logger flush everything before printing again)
+        std::thread::sleep(std::time::Duration::from_secs(1));
+
+        // Print result
+        println!("{}", res);
+        todo!()
+        // let mut output = previous_potential.as_ref().clone();
         //let charge_density = self
         //    .tracker
         //    .charge_as_ref()
@@ -257,9 +289,9 @@ where
         // charge_density_vec.push(charge_density[charge_density.len() - 1]);
         //let charge_density_vec = vec![T::zero(); source_vector.shape().0];
         //let source_vector = DVector::from(charge_density_vec);
-        output = poisson_problem.solve_into(output, &source_vector, &fermi_level)?;
+        // output = poisson_problem.solve_into(output, &source_vector, &fermi_level)?;
 
-        Ok(Potential::from_vector(output))
+        // Ok(Potential::from_vector(output))
     }
 }
 
@@ -308,7 +340,7 @@ where
 impl<T, GeometryDim, Conn, BandDim>
     OuterLoop<'_, T, GeometryDim, Conn, BandDim, SpectralSpace<T, ()>>
 where
-    T: RealField + Copy,
+    T: ArgminFloat + RealField + Copy,
     Conn: Connectivity<T, GeometryDim>,
     GeometryDim: SmallDim,
     BandDim: SmallDim,
@@ -352,7 +384,7 @@ impl<T, GeometryDim, Conn, BandDim>
         SpectralSpace<T, WavevectorSpace<T, GeometryDim, Conn>>,
     >
 where
-    T: RealField + Copy,
+    T: ArgminFloat + RealField + Copy,
     Conn: Connectivity<T, GeometryDim>,
     GeometryDim: SmallDim,
     BandDim: SmallDim,
@@ -397,8 +429,12 @@ use crate::device::info_desk::DeviceInfoDesk;
 use crate::postprocessor::Charge;
 use transporter_mesher::Mesh;
 
-trait OuterLoopInfoDesk<T: Copy + RealField, GeometryDim: SmallDim, Conn, BandDim: SmallDim>
-where
+pub(crate) trait OuterLoopInfoDesk<
+    T: Copy + RealField,
+    GeometryDim: SmallDim,
+    Conn,
+    BandDim: SmallDim,
+> where
     Conn: Connectivity<T, GeometryDim>,
     DefaultAllocator: Allocator<
             Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
@@ -588,8 +624,8 @@ where
                                 / self.temperature,
                         ) / gamma;
 
-                    T::from_f64(crate::constants::ELECTRON_CHARGE).unwrap()
-                        * (n_free + acceptor_density - donor_density)
+                    T::from_f64(crate::constants::ELECTRON_CHARGE).unwrap() * (n_free)
+                    // + acceptor_density - donor_density)
                 })
                 .collect::<Vec<_>>(),
         )

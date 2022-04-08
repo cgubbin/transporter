@@ -8,6 +8,7 @@ use crate::{
     device::{info_desk::BuildInfoDesk, reader::Device},
     outer_loop::{Outer, Potential},
 };
+use argmin::core::ArgminFloat;
 use clap::{ArgEnum, Parser};
 use color_eyre::eyre::eyre;
 use nalgebra::{
@@ -52,7 +53,7 @@ enum Dimension {
 
 pub fn run<T>() -> color_eyre::Result<()>
 where
-    T: Copy + DeserializeOwned + NumCast + RealField + ToPrimitive,
+    T: ArgminFloat + Copy + DeserializeOwned + NumCast + RealField + ToPrimitive,
 {
     let cli = App::parse();
 
@@ -125,7 +126,7 @@ fn build_and_run<T, GeometryDim: SmallDim, Conn, BandDim: SmallDim>(
     _marker: std::marker::PhantomData<T>,
 ) -> color_eyre::Result<()>
 where
-    T: Copy + num_traits::NumCast + RealField,
+    T: ArgminFloat + Copy + num_traits::NumCast + RealField,
     Conn: Connectivity<T, GeometryDim>,
     //Tracker: crate::HamiltonianInfoDesk<T::RealField>,
     DefaultAllocator: Allocator<T, GeometryDim>
