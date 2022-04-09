@@ -112,6 +112,11 @@ where
                 &potential,
                 self.tracker.charge_as_ref(),
             ));
+            // Put the new potential into the tracker so the GF can see it.
+            self.tracker.update_potential(potential.clone());
+            // Todo Get the new potential into the new hamiltonian...
+            self.hamiltonian
+                .update_potential(&self.tracker, self.mesh)?;
             // Do the inner loop
             self.single_iteration()?;
 
@@ -226,34 +231,18 @@ where
         &self,
         previous_potential: &Potential<T>,
     ) -> color_eyre::Result<Potential<T::RealField>> {
-        // Calculate the Fermi level
-        let fermi_level = DVector::from(self.info_desk.determine_fermi_level(
-            self.mesh,
-            previous_potential,
-            self.tracker.charge_as_ref(),
-        ));
-
-        //let source_vector: DVector<T> = self
-        //    .info_desk
-        //    .calculate_source_vector(self.mesh, self.tracker.charge_as_ref());
-
-        //let poisson_problem = PoissonSourceBuilder::new()
-        //    .with_info_desk(self.info_desk)
-        //    .with_mesh(self.mesh)
-        //    .with_source(&source_vector)
-        //    .build();
-
         let cost = super::poisson::PoissonProblemBuilder::default()
             .with_charge(self.tracker.charge_as_ref())
             .with_info_desk(self.info_desk)
             .with_mesh(self.mesh)
+            .with_initial_potential(previous_potential)
             .build()?;
 
         // Define initial parameter vector
         let init_param: DVector<T> = DVector::from_vec(vec![T::zero(); self.mesh.vertices().len()]);
 
         let linesearch = argmin::solver::linesearch::MoreThuenteLineSearch::new()
-            .alpha(T::zero(), T::one())
+            .alpha(T::zero(), T::from_f64(0.25).unwrap())
             .map_err(|e| color_eyre::eyre::eyre!("Failed to initialize linesearch {:?}", e))?;
         // Set up solver
         let solver = argmin::solver::gaussnewton::GaussNewtonLS::new(linesearch);
@@ -265,33 +254,16 @@ where
             .run()
             .map_err(|e| color_eyre::eyre::eyre!("Failed to optimize poisson system {:?}", e))?;
 
-        // Wait a second (lets the logger flush everything before printing again)
-        std::thread::sleep(std::time::Duration::from_secs(1));
+        let output = res.state.best_param.unwrap();
+        let output = &output - DVector::from(vec![output[0]; output.len()]);
 
-        // Print result
-        println!("{}", res);
-        todo!()
-        // let mut output = previous_potential.as_ref().clone();
-        //let charge_density = self
-        //    .tracker
-        //    .charge_as_ref()
-        //    .net_charge()
-        //    .iter()
-        //    .map(|x| *x)
-        //    .collect::<Vec<_>>();
-        // Move charge density to one over vertices duh
-        // let mut charge_density_vec = vec![charge_density[0]];
-        // let mut core_cd = charge_density
-        //     .windows(2)
-        //     .map(|x| (x[0] + x[1]) / (T::one() + T::one()))
-        //     .collect::<Vec<_>>();
-        // charge_density_vec.append(&mut core_cd);
-        // charge_density_vec.push(charge_density[charge_density.len() - 1]);
-        //let charge_density_vec = vec![T::zero(); source_vector.shape().0];
-        //let source_vector = DVector::from(charge_density_vec);
-        // output = poisson_problem.solve_into(output, &source_vector, &fermi_level)?;
+        let beta = T::from_f64(0.25).unwrap();
+        let output = previous_potential.as_ref() * (T::one() - beta) + output * beta;
 
-        // Ok(Potential::from_vector(output))
+        //println!("{}", output);
+        //println!("{:?}", self.tracker.charge_as_ref());
+
+        Ok(Potential::from_vector(output))
     }
 }
 
@@ -582,29 +554,19 @@ where
                 .zip(potential.iter())
                 .map(|((vertex, &fermi_level), &potential)| {
                     let region = &vertex.1;
-                    let (band_offset, effective_mass, donor_density, acceptor_density) =
-                        match region {
-                            Assignment::Boundary(x) => (
-                                x.iter()
-                                    .fold(T::zero(), |acc, &i| acc + self.band_offsets[i][0])
-                                    / T::from_usize(x.len()).unwrap(),
-                                x.iter().fold(T::zero(), |acc, &i| {
-                                    acc + self.effective_masses[i][0][0]
-                                }) / T::from_usize(x.len()).unwrap(),
-                                x.iter()
-                                    .fold(T::zero(), |acc, &i| acc + self.donor_densities[i])
-                                    / T::from_usize(x.len()).unwrap(),
-                                x.iter()
-                                    .fold(T::zero(), |acc, &i| acc + self.acceptor_densities[i])
-                                    / T::from_usize(x.len()).unwrap(),
-                            ),
-                            Assignment::Core(x) => (
-                                self.band_offsets[*x][0],
-                                self.effective_masses[*x][0][0],
-                                self.donor_densities[*x],
-                                self.acceptor_densities[*x],
-                            ),
-                        };
+                    let (band_offset, effective_mass) = match region {
+                        Assignment::Boundary(x) => (
+                            x.iter()
+                                .fold(T::zero(), |acc, &i| acc + self.band_offsets[i][0])
+                                / T::from_usize(x.len()).unwrap(),
+                            x.iter()
+                                .fold(T::zero(), |acc, &i| acc + self.effective_masses[i][0][0])
+                                / T::from_usize(x.len()).unwrap(),
+                        ),
+                        Assignment::Core(x) => {
+                            (self.band_offsets[*x][0], self.effective_masses[*x][0][0])
+                        }
+                    };
 
                     let n3d = (T::one() + T::one())
                         * (effective_mass

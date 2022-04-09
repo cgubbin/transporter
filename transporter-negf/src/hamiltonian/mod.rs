@@ -45,25 +45,34 @@ pub(crate) struct Hamiltonian<T: Copy + RealField> {
 }
 
 /// An InfoDesk trait providing all the necessary external information required to construct the Hamiltonian
-pub(crate) trait HamiltonianInfoDesk<T: RealField>
+pub(crate) trait HamiltonianInfoDesk<T: RealField>: PotentialInfoDesk<T>
 where
-    DefaultAllocator: Allocator<T, Self::BandDim> + Allocator<T, Self::GeometryDim>,
+    DefaultAllocator: Allocator<T, Self::BandDim>,
 {
     /// Type alias for the number of carrier bands in the problem
-    type BandDim: SmallDim;
+    // type BandDim: SmallDim;
     /// Type alias for the geometry of the problem (1D, 2D,...)
     type GeometryDim: SmallDim;
     /// Find the level of all the bands considered in the system in region `region_index`
     fn get_band_levels(&self, region_index: usize) -> &OPoint<T, Self::BandDim>;
     /// Find the effective mass along the three Cartesian axis
     fn get_effective_mass(&self, region_index: usize, band_index: usize) -> &[T; 3];
-    /// Return the potential at mesh element `element` index by averaging over the values at each vertex
-    fn potential(&self, element_index: usize) -> T;
+    /// Return the potential at mesh element `element` index by averaging over the values at each vertex providec
+    // fn potential(&self, vertex_indices: &[usize]) -> T;
     /// Return the geometrical dimension as a `usize`
     fn geometry_dim(&self) -> usize {
         Self::GeometryDim::dim()
     }
-    /// Return the number of bands as a `usize`
+    // Return the number of bands as a `usize`
+    // fn number_of_bands(&self) -> usize {
+    // Self::BandDim::dim()
+    // }
+}
+
+pub(crate) trait PotentialInfoDesk<T: RealField> {
+    type BandDim: SmallDim;
+    /// Return the potential at mesh element `element` index by averaging over the values at each vertex providec
+    fn potential(&self, vertex_indices: &[usize]) -> T;
     fn number_of_bands(&self) -> usize {
         Self::BandDim::dim()
     }
@@ -71,15 +80,15 @@ where
 
 impl<T: Copy + RealField> Hamiltonian<T> {
     /// Updates the `potential` component from an impl of the trait `HamiltonianInfoDesk`
-    pub(crate) fn update_potential<InfoDesk, C>(
+    pub(crate) fn update_potential<GeometryDim: SmallDim, C, InfoDesk>(
         &mut self,
         info_desk: &InfoDesk,
-        mesh: &Mesh<T, InfoDesk::GeometryDim, C>,
+        mesh: &Mesh<T, GeometryDim, C>,
     ) -> color_eyre::Result<()>
     where
-        InfoDesk: super::HamiltonianInfoDesk<T>,
-        C: Connectivity<T, InfoDesk::GeometryDim>,
-        DefaultAllocator: Allocator<T, InfoDesk::BandDim> + Allocator<T, InfoDesk::GeometryDim>,
+        InfoDesk: PotentialInfoDesk<T>,
+        C: Connectivity<T, GeometryDim>,
+        DefaultAllocator: Allocator<T, InfoDesk::BandDim> + Allocator<T, GeometryDim>,
     {
         let element_assembler = ElementHamiltonianAssemblerBuilder::new()
             .with_info_desk(info_desk)
@@ -90,7 +99,8 @@ impl<T: Copy + RealField> Hamiltonian<T> {
 
     /// Finds the total Hamiltonian at fixed `wavevector`
     pub(crate) fn calculate_total(&self, wavevector: T) -> CsrMatrix<T> {
-        &self.fixed + &self.potential + &self.wavevector * wavevector.powi(2)
+        // TODO Positive or negative? Let's make a decision
+        &self.fixed - &self.potential + &self.wavevector * wavevector.powi(2)
     }
 }
 
@@ -167,7 +177,7 @@ where
         mesh: &Mesh<T, InfoDesk::GeometryDim, C>,
     ) -> color_eyre::Result<Self>
     where
-        InfoDesk: HamiltonianInfoDesk<T>,
+        InfoDesk: HamiltonianInfoDesk<T> + PotentialInfoDesk<T>,
         C: Connectivity<T, InfoDesk::GeometryDim>,
         DefaultAllocator: Allocator<T, InfoDesk::GeometryDim> + Allocator<T, InfoDesk::BandDim>,
     {

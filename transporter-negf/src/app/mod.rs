@@ -121,7 +121,7 @@ where
 fn build_and_run<T, GeometryDim: SmallDim, Conn, BandDim: SmallDim>(
     config: Configuration<T>,
     mesh: &Mesh<T, GeometryDim, Conn>,
-    tracker: &Tracker<'_, T, GeometryDim, BandDim, Conn>,
+    tracker: &Tracker<'_, T, GeometryDim, BandDim>,
     _calculation_type: Calculation,
     _marker: std::marker::PhantomData<T>,
 ) -> color_eyre::Result<()>
@@ -137,7 +137,7 @@ where
             BandDim,
         >,
 {
-    let hamiltonian = crate::hamiltonian::HamiltonianBuilder::new()
+    let mut hamiltonian = crate::hamiltonian::HamiltonianBuilder::new()
         .with_mesh(mesh)
         .with_info_desk(tracker)
         .build()?;
@@ -168,7 +168,7 @@ where
         crate::spectral::SpectralSpace<T::RealField, ()>,
     > = crate::outer_loop::OuterLoopBuilder::new()
         .with_mesh(mesh)
-        .with_hamiltonian(&hamiltonian)
+        .with_hamiltonian(&mut hamiltonian)
         .with_spectral_space(&spectral_space)
         .with_convergence_settings(&outer_config)
         .with_tracker(tracker)

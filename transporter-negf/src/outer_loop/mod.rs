@@ -120,13 +120,13 @@ impl<
     /// Attach the constructed `Hamiltonian` associated with the problem
     pub(crate) fn with_hamiltonian<Hamiltonian>(
         self,
-        hamiltonian: &Hamiltonian,
+        hamiltonian: &mut Hamiltonian,
     ) -> OuterLoopBuilder<
         T,
         RefConvergenceSettings,
         RefMesh,
         RefSpectral,
-        &Hamiltonian,
+        &mut Hamiltonian,
         RefTracker,
         RefInfoDesk,
     > {
@@ -241,7 +241,7 @@ where
     /// The spectral mesh and integration weights associated with the problem
     spectral: &'a SpectralSpace,
     /// The Hamiltonian associated with the problem
-    hamiltonian: &'a Hamiltonian<T::RealField>,
+    hamiltonian: &'a mut Hamiltonian<T::RealField>,
     // TODO A solution tracker, think about this IMPL. We already have a top-level tracker
     tracker: LoopTracker<T::RealField, BandDim>,
     info_desk: &'a DeviceInfoDesk<T::RealField, GeometryDim, BandDim>,
@@ -253,8 +253,8 @@ impl<'a, T, GeometryDim, Conn, BandDim, SpectralSpace>
         &'a Convergence<T::RealField>,
         &'a Mesh<T::RealField, GeometryDim, Conn>,
         &'a SpectralSpace,
-        &'a Hamiltonian<T::RealField>,
-        &'a Tracker<'a, T::RealField, GeometryDim, BandDim, Conn>,
+        &'a mut Hamiltonian<T::RealField>,
+        &'a Tracker<'a, T::RealField, GeometryDim, BandDim>,
         &'a DeviceInfoDesk<T::RealField, GeometryDim, BandDim>,
     >
 where
@@ -323,8 +323,8 @@ where
         BandDim,
     >,
 {
-    pub(crate) fn from_global_tracker<GeometryDim: SmallDim, Conn: Connectivity<T, GeometryDim>>(
-        global_tracker: &Tracker<'_, T, GeometryDim, BandDim, Conn>,
+    pub(crate) fn from_global_tracker<GeometryDim: SmallDim>(
+        global_tracker: &Tracker<'_, T, GeometryDim, BandDim>,
     ) -> Self
     where
         DefaultAllocator: Allocator<T::RealField, GeometryDim>
@@ -362,7 +362,33 @@ where
         &self.fermi_level
     }
 
+    pub(crate) fn update_potential(&mut self, potential: Potential<T>) {
+        self.potential = potential;
+    }
+
     pub(crate) fn fermi_level_mut(&mut self) -> &mut DVector<T> {
         &mut self.fermi_level
+    }
+}
+
+use crate::hamiltonian::PotentialInfoDesk;
+
+impl<T: Copy + RealField, BandDim: SmallDim> PotentialInfoDesk<T> for LoopTracker<T, BandDim>
+where
+    DefaultAllocator: Allocator<
+        Matrix<
+            T::RealField,
+            Dynamic,
+            Const<1_usize>,
+            VecStorage<T::RealField, Dynamic, Const<1_usize>>,
+        >,
+        BandDim,
+    >,
+{
+    type BandDim = BandDim;
+    fn potential(&self, vertex_indices: &[usize]) -> T {
+        vertex_indices.iter().fold(T::zero(), |acc, &vertex_index| {
+            acc + self.potential.get(vertex_index)
+        }) / T::from_usize(vertex_indices.len()).unwrap()
     }
 }

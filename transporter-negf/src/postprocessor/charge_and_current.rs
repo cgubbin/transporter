@@ -97,7 +97,7 @@ where
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct Charge<T, BandDim: SmallDim>
 where
     DefaultAllocator: Allocator<

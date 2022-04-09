@@ -21,9 +21,12 @@ pub trait ElementConnectivityAssembler {
     fn num_nodes(&self) -> usize;
     /// The number of elements connected to the element at `element_index`
     fn element_connection_count(&self, elelment_index: usize) -> usize;
+    fn element_vertex_count(&self, element_index: usize) -> usize;
     /// Populates the indices of elements connected to the element at `element_index` into the slice `output`. The passed slice
     /// must have length `self.element_connection_count(element_index)`
     fn populate_element_connections(&self, output: &mut [usize], element_index: usize);
+    /// Populates the output with the vertices contained in the element
+    fn populate_element_vertices(&self, output: &mut [usize], element_index: usize);
 }
 
 /// Implement `ElementConnectivityAssembler` for the generic `Mesh`
@@ -48,8 +51,15 @@ where
         self.get_element_connectivity(element_index).len()
     }
 
+    fn element_vertex_count(&self, element_index: usize) -> usize {
+        self.get_vertex_indices_in_element(element_index).len()
+    }
+
     fn populate_element_connections(&self, output: &mut [usize], element_index: usize) {
         output.copy_from_slice(self.get_element_connectivity(element_index))
+    }
+    fn populate_element_vertices(&self, output: &mut [usize], element_index: usize) {
+        output.copy_from_slice(self.get_vertex_indices_in_element(element_index))
     }
 }
 
@@ -165,7 +175,7 @@ where
     InfoDesk: HamiltonianInfoDesk<T>,
     DefaultAllocator: Allocator<T, InfoDesk::GeometryDim> + Allocator<T, InfoDesk::BandDim>,
 {
-    type BandDim = InfoDesk::BandDim;
+    // type BandDim = InfoDesk::BandDim;
     type GeometryDim = InfoDesk::GeometryDim;
     fn get_band_levels(&self, region_index: usize) -> &OPoint<T, Self::BandDim> {
         self.info_desk.get_band_levels(region_index)
@@ -173,8 +183,19 @@ where
     fn get_effective_mass(&self, region_index: usize, band_index: usize) -> &[T; 3] {
         self.info_desk.get_effective_mass(region_index, band_index)
     }
-    fn potential(&self, element_index: usize) -> T {
-        self.info_desk.potential(element_index)
+}
+
+impl<T, GeometryDim: SmallDim, Conn, InfoDesk> super::PotentialInfoDesk<T>
+    for ElementHamiltonianAssembler<'_, T, InfoDesk, Mesh<T, GeometryDim, Conn>>
+where
+    T: RealField,
+    Conn: Connectivity<T, GeometryDim>,
+    InfoDesk: super::PotentialInfoDesk<T>,
+    DefaultAllocator: Allocator<T, GeometryDim> + Allocator<T, InfoDesk::BandDim>,
+{
+    type BandDim = InfoDesk::BandDim;
+    fn potential(&self, vertex_indices: &[usize]) -> T {
+        self.info_desk.potential(vertex_indices)
     }
 }
 
@@ -182,9 +203,9 @@ where
 impl<'a, T: RealField, InfoDesk, Mesh> ElementConnectivityAssembler
     for ElementHamiltonianAssembler<'a, T, InfoDesk, Mesh>
 where
-    InfoDesk: HamiltonianInfoDesk<T>,
+    InfoDesk: super::PotentialInfoDesk<T>,
     Mesh: ElementConnectivityAssembler,
-    DefaultAllocator: Allocator<T, InfoDesk::GeometryDim> + Allocator<T, InfoDesk::BandDim>,
+    DefaultAllocator: Allocator<T, InfoDesk::BandDim>,
 {
     fn solution_dim(&self) -> usize {
         1
@@ -201,9 +222,17 @@ where
         self.mesh.element_connection_count(element_index)
     }
 
+    fn element_vertex_count(&self, element_index: usize) -> usize {
+        self.mesh.element_vertex_count(element_index)
+    }
+
     fn populate_element_connections(&self, output: &mut [usize], element_index: usize) {
         self.mesh
             .populate_element_connections(output, element_index)
+    }
+
+    fn populate_element_vertices(&self, output: &mut [usize], element_index: usize) {
+        self.mesh.populate_element_vertices(output, element_index)
     }
 }
 
@@ -600,10 +629,22 @@ where
         assembler.element_connection_count(aggregate_element_index - cell_offset)
     }
 
+    fn element_vertex_count(&self, aggregate_element_index: usize) -> usize {
+        let (assembler, cell_offset) =
+            self.find_assembler_and_offset_for_element_index(aggregate_element_index);
+        assembler.element_vertex_count(aggregate_element_index - cell_offset)
+    }
+
     fn populate_element_connections(&self, output: &mut [usize], aggregate_element_index: usize) {
         let (assembler, element_offset) =
             self.find_assembler_and_offset_for_element_index(aggregate_element_index);
         assembler.populate_element_connections(output, aggregate_element_index - element_offset)
+    }
+
+    fn populate_element_vertices(&self, output: &mut [usize], aggregate_element_index: usize) {
+        let (assembler, element_offset) =
+            self.find_assembler_and_offset_for_element_index(aggregate_element_index);
+        assembler.populate_element_vertices(output, aggregate_element_index - element_offset)
     }
 }
 

@@ -12,18 +12,18 @@ use std::marker::PhantomData;
 use transporter_mesher::{Connectivity, Mesh, SmallDim};
 
 /// A tracker struct, holds the state of the solution. We `impl` all InfoDesk methods on the tracker
-pub(crate) struct Tracker<'a, T: RealField, GeometryDim: SmallDim, BandDim: SmallDim, C>
+pub(crate) struct Tracker<'a, T: RealField, GeometryDim: SmallDim, BandDim: SmallDim>
 where
-    C: Connectivity<T, GeometryDim>,
+    // C: Connectivity<T, GeometryDim>,
     DefaultAllocator: Allocator<T, BandDim>
         + Allocator<[T; 3], BandDim>
-        + Allocator<T, GeometryDim>
+        // + Allocator<T, GeometryDim>
         + Allocator<
             Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
             BandDim,
         >,
 {
-    mesh: &'a Mesh<T, GeometryDim, C>,
+    // mesh: &'a Mesh<T, GeometryDim, C>,
     pub(crate) info_desk: &'a DeviceInfoDesk<T, GeometryDim, BandDim>,
     charge_densities: Charge<T, BandDim>,
     current_densities: Current<T, BandDim>,
@@ -31,10 +31,9 @@ where
     __marker: PhantomData<GeometryDim>,
 }
 
-impl<'a, T: Copy + RealField, GeometryDim: SmallDim, BandDim: SmallDim, C>
-    Tracker<'a, T, GeometryDim, BandDim, C>
+impl<'a, T: Copy + RealField, GeometryDim: SmallDim, BandDim: SmallDim>
+    Tracker<'a, T, GeometryDim, BandDim>
 where
-    C: Connectivity<T, GeometryDim>,
     DefaultAllocator: Allocator<T, BandDim>
         + Allocator<[T; 3], BandDim>
         + Allocator<T, GeometryDim>
@@ -55,23 +54,25 @@ where
     }
 
     pub(crate) fn num_vertices(&self) -> usize {
-        self.mesh.vertices().len()
+        self.potential.as_ref().len()
+    }
+
+    pub(crate) fn update_potential(&mut self, potential: Potential<T>) {
+        self.potential = potential;
     }
 }
 
-impl<T: Copy + RealField, BandDim: SmallDim, GeometryDim: SmallDim, C> HamiltonianInfoDesk<T>
-    for Tracker<'_, T, GeometryDim, BandDim, C>
+impl<T: Copy + RealField, BandDim: SmallDim, GeometryDim: SmallDim> HamiltonianInfoDesk<T>
+    for Tracker<'_, T, GeometryDim, BandDim>
 where
-    C: Connectivity<T, GeometryDim>,
     DefaultAllocator: Allocator<T, BandDim>
-        + Allocator<T, GeometryDim>
         + Allocator<[T; 3], BandDim>
         + Allocator<
             Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
             BandDim,
         >,
 {
-    type BandDim = BandDim;
+    // type BandDim = BandDim;
     type GeometryDim = GeometryDim;
 
     fn get_band_levels(&self, region_index: usize) -> &OPoint<T, Self::BandDim> {
@@ -81,11 +82,23 @@ where
     fn get_effective_mass(&self, region_index: usize, band_index: usize) -> &[T; 3] {
         &self.info_desk.effective_masses[region_index][(band_index, 0)]
     }
+}
 
-    fn potential(&self, element_index: usize) -> T {
-        let vertex_indices = self.mesh.get_vertex_indices_in_element(element_index);
-        (self.potential.get(vertex_indices[0]) + self.potential.get(vertex_indices[1]))
-            / (T::one() + T::one())
+impl<T: Copy + RealField, BandDim: SmallDim, GeometryDim: SmallDim>
+    crate::hamiltonian::PotentialInfoDesk<T> for Tracker<'_, T, GeometryDim, BandDim>
+where
+    DefaultAllocator: Allocator<T, BandDim>
+        + Allocator<[T; 3], BandDim>
+        + Allocator<
+            Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
+            BandDim,
+        >,
+{
+    type BandDim = BandDim;
+    fn potential(&self, vertex_indices: &[usize]) -> T {
+        vertex_indices.iter().fold(T::zero(), |acc, &vertex_index| {
+            acc + self.potential.get(vertex_index)
+        }) / T::from_usize(vertex_indices.len()).unwrap()
     }
 }
 
@@ -121,7 +134,7 @@ impl<RefInfoDesk, RefMesh> TrackerBuilder<RefInfoDesk, RefMesh> {
     }
 }
 
-impl<'a, T: Copy + RealField, GeometryDim: SmallDim, Conn, BandDim: SmallDim>
+impl<'a, T: Copy + RealField, GeometryDim: SmallDim, BandDim: SmallDim, Conn>
     TrackerBuilder<&'a DeviceInfoDesk<T, GeometryDim, BandDim>, &'a Mesh<T, GeometryDim, Conn>>
 where
     Conn: Connectivity<T, GeometryDim>,
@@ -133,7 +146,7 @@ where
             BandDim,
         >,
 {
-    pub(crate) fn build(self) -> color_eyre::Result<Tracker<'a, T, GeometryDim, BandDim, Conn>> {
+    pub(crate) fn build(self) -> color_eyre::Result<Tracker<'a, T, GeometryDim, BandDim>> {
         let potential = Potential::from_vector(DVector::zeros(self.mesh.vertices().len()));
         let empty_vector: DVector<T> = DVector::zeros(self.mesh.elements().len());
         let charge_densities: Charge<T, BandDim> = Charge::new(
@@ -143,7 +156,7 @@ where
             Current::new(OVector::<DVector<T>, BandDim>::from_element(empty_vector))?;
         Ok(Tracker {
             info_desk: self.info_desk,
-            mesh: self.mesh,
+            // mesh: self.mesh,
             potential,
             charge_densities,
             current_densities,

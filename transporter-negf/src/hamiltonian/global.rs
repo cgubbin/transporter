@@ -5,7 +5,7 @@
 
 use super::{
     local::{AssembleElementDiagonal, AssembleElementMatrix, ElementConnectivityAssembler},
-    HamiltonianInfoDesk,
+    HamiltonianInfoDesk, PotentialInfoDesk,
 };
 use color_eyre::eyre::eyre;
 use nalgebra::{
@@ -192,8 +192,8 @@ impl<T: Copy + RealField> CsrAssembler<T> {
         element_assembler: &Assembler,
     ) -> color_eyre::Result<CsrMatrix<T>>
     where
-        Assembler: AssembleElementMatrix<T> + HamiltonianInfoDesk<T>,
-        DefaultAllocator: Allocator<T, Assembler::GeometryDim> + Allocator<T, Assembler::BandDim>,
+        Assembler: ElementConnectivityAssembler + PotentialInfoDesk<T>,
+        DefaultAllocator: Allocator<T, Assembler::BandDim>,
     {
         let pattern = self.workspace.borrow().diagonal_sparsity_pattern.clone();
         let initial_matrix_values = vec![T::zero(); pattern.nnz()];
@@ -209,8 +209,8 @@ impl<T: Copy + RealField> CsrAssembler<T> {
         potential: &mut CsrMatrix<T>,
     ) -> color_eyre::Result<()>
     where
-        Assembler: AssembleElementMatrix<T> + HamiltonianInfoDesk<T>,
-        DefaultAllocator: Allocator<T, Assembler::GeometryDim> + Allocator<T, Assembler::BandDim>,
+        Assembler: ElementConnectivityAssembler + PotentialInfoDesk<T>,
+        DefaultAllocator: Allocator<T, Assembler::BandDim>,
     {
         CsrAssembler::assemble_potential_into_csr_diagonal(potential, element_assembler)?;
         Ok(())
@@ -292,15 +292,17 @@ impl<T: Copy + RealField> CsrAssembler<T> {
         element_assembler: &Assembler,
     ) -> color_eyre::Result<()>
     where
-        Assembler: AssembleElementMatrix<T> + HamiltonianInfoDesk<T>,
-        DefaultAllocator: Allocator<T, Assembler::GeometryDim> + Allocator<T, Assembler::BandDim>,
+        Assembler: ElementConnectivityAssembler + PotentialInfoDesk<T>,
+        DefaultAllocator: Allocator<T, Assembler::BandDim>,
     {
         let sdim = element_assembler.solution_dim();
         let num_single_band_rows = sdim * element_assembler.num_elements(); // We have an issue with cells and nodes, this needs to be pinned down
+        let mut scratch = vec![0_usize; element_assembler.element_vertex_count(1)]; // Hacky, add a method;
 
         // Assemble the potential into a diagonal
         for n_row in 0..num_single_band_rows {
-            let potential = element_assembler.potential(n_row);
+            let element_vertices = element_assembler.populate_element_vertices(&mut scratch, n_row);
+            let potential = element_assembler.potential(&scratch);
             for n_band in 0..element_assembler.number_of_bands() {
                 let mut csr_row = csr.row_mut(n_row + n_row * n_band);
                 let diagonal_entry = csr_row
