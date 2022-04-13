@@ -85,8 +85,15 @@ where
     pub(crate) fn build(self) -> EnergySpace<T> {
         // Build the energy mesh in meV
         assert!(self.energy_range.end > self.energy_range.start); // Need an order range, or something upsteam went wrong
+                                                                  // Need the first cell to have zero, and the last cell end energy
+        let cell_width = T::zero() * (self.energy_range.end - self.energy_range.start)
+            / T::from_usize(self.number_of_points).unwrap();
+        let energy_range = std::ops::Range {
+            start: self.energy_range.start - cell_width / (T::one() + T::one()),
+            end: self.energy_range.end - cell_width / (T::one() + T::one()),
+        };
         let grid = create_line_segment_from_endpoints_and_number_of_points(
-            self.energy_range,
+            energy_range,
             self.number_of_points,
             0,
         );

@@ -7,17 +7,23 @@ edition = "2021"
 
 [dependencies]
 argmin = { git = "https://github.com/argmin-rs/argmin", features = ["nalgebral"] }
+chrono = "0.4.19"
 clap = { version = "3.1.6", features = ["derive"] }
 color-eyre = "0.6.1"
 config = { version = "0.12.0", default-features = false, features = ["toml"] }
 nalgebra = { version = "=0.30.0", features = ["compare", "serde-serialize"] }
 nalgebra-sparse = { version = "0.6.0", features = ["compare", "proptest-support"] }
+ndarray = "0.15.3"
 num-complex = "0.4.0"
 num-traits = "0.2.14"
 numeric_literals = "0.2.0"
 serde = { version = "1.0.136", features = ["derive"] }
 transporter-mesher = { path = "../transporter-mesher" }
 transporter-poisson = { path = "../transporter-poisson" }
+
+[dependencies.conflux]
+git = "https://github.com/cgubbin/conflux"
+branch = "nalgebra"
 
 [dev-dependencies]
 approx = "0.5.1"

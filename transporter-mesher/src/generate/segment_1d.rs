@@ -120,7 +120,7 @@ where
             cell_count,
             idx,
         );
-        // The last element will be repeated
+        // The last vertex will be repeated
         if idx != widths.len() - 1 {
             mesh.drop_last();
         }
@@ -133,7 +133,6 @@ where
         left = right;
         meshes.push(mesh);
     }
-
     Mesh1d::dedup(meshes)
 }
 

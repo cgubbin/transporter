@@ -245,9 +245,6 @@ impl<T: Copy + RealField> CsrAssembler<T> {
         Assembler: AssembleVertexDiagonal<T> + PoissonInfoDesk<T>,
         DefaultAllocator: Allocator<T, Assembler::GeometryDim> + Allocator<T, Assembler::BandDim>,
     {
-        let sdim = vertex_assembler.solution_dim();
-        let num_single_band_rows = sdim * vertex_assembler.num_vertices(); // We have an issue with cells and nodes, this needs to be pinned down
-
         // Assemble the differential operator for the Hamiltonian
         for (n_row, val) in csr.iter_mut().enumerate() {
             let value = vertex_assembler.assemble_vertex_diagonal(n_row)?;

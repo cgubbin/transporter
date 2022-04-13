@@ -204,7 +204,7 @@ where
             .windows(2)
             .enumerate()
             .map(|(idx, vertices)| {
-                let index = match &vertices[0].1 {
+                let index = match &vertices[1].1 {
                     Assignment::Core(idx) => idx,
                     Assignment::Boundary(x) => &x[0],
                 };

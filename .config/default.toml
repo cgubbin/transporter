@@ -3,11 +3,11 @@ number_of_bands = 1
 
 [inner_loop]
 maximum_iterations = 100
-tolerance = 1e-7
+tolerance = 1e-5
 
 [outer_loop]
-maximum_iterations = 20
-tolerance = 1e-7
+maximum_iterations = 2000
+tolerance = 1e-5
 
 [mesh]
 unit_size = 1e-9
@@ -15,7 +15,7 @@ elements_per_unit = 4
 maximum_growth_rate = 1.2
 
 [spectral]
-number_of_energy_points = 5000
+number_of_energy_points = 2000
 minimum_energy = 0.0
-maximum_energy = 0.6
-energy_integration_rule = "Romberg"
+maximum_energy = 0.25
+energy_integration_rule = "ThreePoint"

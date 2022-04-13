@@ -1,3 +1,9 @@
+use argmin::core::Operator;
+use conflux::core::FixedPointSolver;
+use conflux::solvers::anderson::Type1AndersonMixer;
+use conflux::solvers::linear::LinearMixer;
+use std::io::Write;
+
 use super::OuterLoop;
 use crate::{
     inner_loop::{Inner, InnerLoop},
@@ -50,7 +56,7 @@ where
     /// previous loop iteration
     fn is_loop_converged(&self, previous_potential: &mut Potential<T>) -> color_eyre::Result<bool>;
     /// Carry out a single iteration of the self-consistent inner loop
-    fn single_iteration(&mut self) -> color_eyre::Result<()>;
+    fn single_iteration(&mut self, potential: &DVector<T>) -> color_eyre::Result<DVector<T>>;
     /// Run the self-consistent inner loop to convergence
     fn run_loop(&mut self, potential: Potential<T>) -> color_eyre::Result<()>;
 }
@@ -79,54 +85,112 @@ where
         Ok(result)
     }
     /// Carry out a single iteration of the self-consistent outer loop
-    fn single_iteration(&mut self) -> color_eyre::Result<()> {
+    fn single_iteration(
+        &mut self,
+        previous_potential: &DVector<T>,
+    ) -> color_eyre::Result<DVector<T>> {
         // Build the inner loop, if we are running a ballistic calculation or have not arrived
         // at an initial converged ballistic solution then we create a
         // coherent inner loop, with sparse matrices, else we create a dense one.
+        // Update the Fermi level in the device
+        // self.tracker.fermi_level = DVector::from(self.info_desk.determine_fermi_level(
+        //     self.mesh,
+        //     &Potential::from_vector(previous_potential.clone()),
+        //     self.tracker.charge_as_ref(),
+        // ));
+        // Put the new potential into the tracker so the GF can see it.
+        self.tracker
+            .update_potential(Potential::from_vector(previous_potential.clone()));
+        // Todo Get the new potential into the new hamiltonian...
+        self.hamiltonian
+            .update_potential(&self.tracker, self.mesh)
+            .expect("Ham update failed");
+
         // TODO Building the gfs and SE here is a bad idea, we should do this else where so it is not redone on every iteration
         let mut greens_functions = GreensFunctionBuilder::new()
             .with_info_desk(self.info_desk)
             .with_mesh(self.mesh)
             .with_spectral_discretisation(self.spectral)
-            .build()?;
+            .build()
+            .expect("Gf build failed");
         let mut self_energies = SelfEnergyBuilder::new()
             .with_mesh(self.mesh)
             .with_spectral_discretisation(self.spectral)
-            .build()?;
+            .build()
+            .expect("Self energy build failed");
         let mut inner_loop =
             self.build_coherent_inner_loop(&mut greens_functions, &mut self_energies);
         let mut charge_and_currents = self.tracker.charge_and_currents.clone();
-        inner_loop.run_loop(&mut charge_and_currents)?;
+        inner_loop
+            .run_loop(&mut charge_and_currents)
+            .expect("Inner loop failed");
         let _ = std::mem::replace(self.tracker.charge_and_currents_mut(), charge_and_currents);
-        Ok(())
+
+        // Update the Fermi level in the device
+        self.tracker.fermi_level = DVector::from(self.info_desk.determine_fermi_level(
+            self.mesh,
+            &Potential::from_vector(previous_potential.clone()),
+            self.tracker.charge_as_ref(),
+        ));
+        let potential = self
+            .update_potential(&Potential::from_vector(previous_potential.clone()))
+            .expect("Potential update failed");
+        Ok(potential.as_ref().clone())
     }
 
     fn run_loop(&mut self, mut potential: Potential<T>) -> color_eyre::Result<()> {
-        // A single iteration before the loop to avoid updating the potential with an empty charge vector
-        self.single_iteration()?;
-        let mut iteration = 1;
-        while !self.is_loop_converged(&mut potential)? {
-            // Update the Fermi level using the new charge density
-            self.tracker.fermi_level = DVector::from(self.info_desk.determine_fermi_level(
-                self.mesh,
-                &potential,
-                self.tracker.charge_as_ref(),
-            ));
-            // Put the new potential into the tracker so the GF can see it.
-            self.tracker.update_potential(potential.clone());
-            // Todo Get the new potential into the new hamiltonian...
-            self.hamiltonian
-                .update_potential(&self.tracker, self.mesh)?;
-            // Do the inner loop
-            self.single_iteration()?;
+        // let mixer = Type1AndersonMixer::new(
+        //     potential.as_ref().len(),
+        //     self.convergence_settings.outer_tolerance(),
+        //     self.convergence_settings.maximum_outer_iterations() as u64,
+        // );
+        let mixer = LinearMixer::new(
+            T::from_f64(0.5).unwrap(),
+            self.convergence_settings.outer_tolerance(),
+            self.convergence_settings.maximum_outer_iterations() as u64,
+        );
+        let mut solver = FixedPointSolver::new(mixer, potential.as_ref().clone());
+        let solution = solver.run(self).map_err(|e| {
+            color_eyre::eyre::eyre!("Failed to optimise the outer iteration: {:?}", e)
+        })?;
 
-            iteration += 1;
-            if iteration >= self.convergence_settings.maximum_outer_iterations() {
-                return Err(color_eyre::eyre::eyre!(
-                    "Reached maximum iteration count in the outer loop"
-                ));
-            }
-        }
+        dbg!(solution.get_param());
+
+        potential = Potential::from_vector(solution.get_param());
+        //// A single iteration before the loop to avoid updating the potential with an empty charge vector
+        //self.single_iteration(&potential)?;
+        //let mut iteration = 1;
+
+        //// Update the Fermi level using the new charge density
+        //self.tracker.fermi_level = DVector::from(self.info_desk.determine_fermi_level(
+        //    self.mesh,
+        //    &potential,
+        //    self.tracker.charge_as_ref(),
+        //));
+
+        //while !self.is_loop_converged(&mut potential)? {
+        //    // Update the Fermi level using the new charge density
+        //    self.tracker.fermi_level = DVector::from(self.info_desk.determine_fermi_level(
+        //        self.mesh,
+        //        &potential,
+        //        self.tracker.charge_as_ref(),
+        //    ));
+
+        //    // Put the new potential into the tracker so the GF can see it.
+        //    self.tracker.update_potential(potential.clone());
+        //    // Todo Get the new potential into the new hamiltonian...
+        //    self.hamiltonian
+        //        .update_potential(&self.tracker, self.mesh)?;
+        //    // Do the inner loop
+        //    self.single_iteration(&potential)?;
+
+        //    iteration += 1;
+        //    if iteration >= self.convergence_settings.maximum_outer_iterations() {
+        //        return Err(color_eyre::eyre::eyre!(
+        //            "Reached maximum iteration count in the outer loop"
+        //        ));
+        //    }
+        //}
         Ok(())
     }
 }
@@ -168,39 +232,40 @@ where
         Ok(false)
     }
     /// Carry out a single iteration of the self-consistent outer loop
-    fn single_iteration(&mut self) -> color_eyre::Result<()> {
+    fn single_iteration(&mut self, potential: &DVector<T>) -> color_eyre::Result<DVector<T>> {
         // Build the inner loop, if we are running a ballistic calculation or have not arrived
         // at an initial converged ballistic solution then we create a
         // coherent inner loop, with sparse matrices, else we create a dense one.
         // TODO Builder the gfs and SE here is a bad idea, we should do this else where so it is not redone on every iteration
-        let mut greens_functions = GreensFunctionBuilder::new()
-            .with_info_desk(self.info_desk)
-            .with_mesh(self.mesh)
-            .with_spectral_discretisation(self.spectral)
-            .build();
-        let mut self_energies = SelfEnergyBuilder::new()
-            .with_mesh(self.mesh)
-            .with_spectral_discretisation(self.spectral)
-            .build();
-        let mut inner_loop =
-            self.build_incoherent_inner_loop(&mut greens_functions, &mut self_energies);
-        let mut charge_and_currents = self.tracker.charge_and_currents.clone();
-        inner_loop.run_loop(&mut charge_and_currents)?;
-        let _ = std::mem::replace(self.tracker.charge_and_currents_mut(), charge_and_currents);
-        Ok(())
+        //let mut greens_functions = GreensFunctionBuilder::new()
+        //    .with_info_desk(self.info_desk)
+        //    .with_mesh(self.mesh)
+        //    .with_spectral_discretisation(self.spectral)
+        //    .build();
+        //let mut self_energies = SelfEnergyBuilder::new()
+        //    .with_mesh(self.mesh)
+        //    .with_spectral_discretisation(self.spectral)
+        //    .build();
+        //let mut inner_loop =
+        //    self.build_incoherent_inner_loop(&mut greens_functions, &mut self_energies);
+        //let mut charge_and_currents = self.tracker.charge_and_currents.clone();
+        //inner_loop.run_loop(&mut charge_and_currents)?;
+        //let _ = std::mem::replace(self.tracker.charge_and_currents_mut(), charge_and_currents);
+        //Ok(())
+        todo!()
     }
 
     fn run_loop(&mut self, mut potential: Potential<T>) -> color_eyre::Result<()> {
-        let mut iteration = 0;
-        while !self.is_loop_converged(&mut potential)? {
-            self.single_iteration()?;
-            iteration += 1;
-            if iteration >= self.convergence_settings.maximum_outer_iterations() {
-                return Err(color_eyre::eyre::eyre!(
-                    "Reached maximum iteration count in the inner loop"
-                ));
-            }
-        }
+        // let mut iteration = 0;
+        // while !self.is_loop_converged(&mut potential)? {
+        //     self.single_iteration(&potential)?;
+        //     iteration += 1;
+        //     if iteration >= self.convergence_settings.maximum_outer_iterations() {
+        //         return Err(color_eyre::eyre::eyre!(
+        //             "Reached maximum iteration count in the inner loop"
+        //         ));
+        //     }
+        // }
         Ok(())
     }
 }
@@ -241,24 +306,56 @@ where
         // Define initial parameter vector
         let init_param: DVector<T> = DVector::from_vec(vec![T::zero(); self.mesh.vertices().len()]);
 
+        // If the initial residual is below the tolerance return early
+        let residual = cost
+            .apply(&init_param)
+            .map_err(|e| color_eyre::eyre::eyre!("Failed to evaluate residual {:?}", e))?
+            .norm()
+            / T::from_usize(previous_potential.as_ref().len()).unwrap();
+        let target = self.convergence_settings.outer_tolerance()
+            * self.info_desk.donor_densities[0]
+            * T::from_f64(crate::constants::ELECTRON_CHARGE).unwrap();
+        println!("residual: {}, target: {}", residual, target);
+        if residual < target {
+            return Ok(previous_potential.clone());
+        }
+
         let linesearch = argmin::solver::linesearch::MoreThuenteLineSearch::new()
-            .alpha(T::zero(), T::from_f64(0.25).unwrap())
+            .alpha(T::zero(), T::from_f64(0.1).unwrap())
             .map_err(|e| color_eyre::eyre::eyre!("Failed to initialize linesearch {:?}", e))?;
         // Set up solver
         let solver = argmin::solver::gaussnewton::GaussNewtonLS::new(linesearch);
 
         // Run solver
         let res = Executor::new(cost, solver)
-            .configure(|state| state.param(init_param).max_iters(100))
+            .configure(|state| state.param(init_param).max_iters(20))
             .add_observer(SlogLogger::term(), ObserverMode::Always)
             .run()
             .map_err(|e| color_eyre::eyre::eyre!("Failed to optimize poisson system {:?}", e))?;
 
         let output = res.state.best_param.unwrap();
-        let output = &output - DVector::from(vec![output[0]; output.len()]);
+        // We found the change in potential, so add the full solution back on to find the net result...
+        let output =
+            previous_potential.as_ref() + &output - DVector::from(vec![output[2]; output.len()]);
 
-        let beta = T::from_f64(0.25).unwrap();
-        let output = previous_potential.as_ref() * (T::one() - beta) + output * beta;
+        // Writing to file
+        let system_time = std::time::SystemTime::now();
+        let datetime: chrono::DateTime<chrono::Utc> = system_time.into();
+        let mut file = std::fs::File::create(format!("../results/potential_{}.txt", datetime))?;
+        for value in previous_potential.as_ref().row_iter() {
+            let value = value[0].to_f64().unwrap().to_string();
+            writeln!(file, "{}", value)?;
+        }
+        let mut file = std::fs::File::create(format!("../results/charge_{}.txt", datetime))?;
+        for value in self.tracker.charge_as_ref().net_charge().row_iter() {
+            let value = value[0].to_f64().unwrap().to_string();
+            writeln!(file, "{}", value)?;
+        }
+
+        //
+
+        // let beta = T::from_f64(0.05).unwrap();
+        // let output = previous_potential.as_ref() * (T::one() - beta) + output * beta;
 
         //println!("{}", output);
         //println!("{:?}", self.tracker.charge_as_ref());
@@ -289,7 +386,8 @@ where
         output: &mut DVector<T>,
     ) -> color_eyre::Result<()> {
         // TODO actually swap in place, rather than allocating then swapping
-        let updated = self.compute_jacobian_diagonal(fermi_level, solution, mesh);
+        let mut updated = self.compute_jacobian_diagonal(fermi_level, solution, mesh);
+        // Neumann
         let _ = std::mem::replace(output, updated);
         Ok(())
     }
@@ -441,6 +539,7 @@ pub(crate) trait OuterLoopInfoDesk<
     ) -> DVector<T>;
 }
 
+use crate::greens_functions::GreensFunctionInfoDesk;
 impl<T: Copy + RealField, GeometryDim: SmallDim, Conn, BandDim: SmallDim>
     OuterLoopInfoDesk<T, GeometryDim, Conn, BandDim> for DeviceInfoDesk<T, GeometryDim, BandDim>
 where
@@ -507,6 +606,8 @@ where
             fermi_plus_potential_at_elements[fermi_plus_potential_at_elements.len() - 1]
                 - potential.as_ref()[potential.as_ref().len() - 1],
         );
+        dbg!(result[0]);
+        dbg!(self.get_fermi_level_at_drain());
         result
     }
 
@@ -547,6 +648,16 @@ where
         potential: &DVector<T>,   // The potential defined on the mesh vertices
     ) -> DVector<T> {
         let gamma = T::from_f64(std::f64::consts::PI.sqrt() / 2.).unwrap();
+        assert_eq!(
+            potential.len(),
+            mesh.vertices().len(),
+            "potential must be evaluated on vertices"
+        );
+        assert_eq!(
+            fermi_level.len(),
+            mesh.vertices().len(),
+            "Fermi level must be evaluated on vertices"
+        );
         DVector::from(
             mesh.vertices()
                 .iter()
@@ -651,6 +762,37 @@ where
                 })
                 .collect::<Vec<_>>(),
         )
+    }
+}
+
+impl<T, GeometryDim, Conn, BandDim> conflux::core::FixedPointProblem
+    for OuterLoop<'_, T, GeometryDim, Conn, BandDim, SpectralSpace<T, ()>>
+where
+    T: RealField + Copy + ArgminFloat, // + conflux::core::FPFloat,
+    GeometryDim: SmallDim,
+    BandDim: SmallDim,
+    Conn: Connectivity<T, GeometryDim>,
+    DefaultAllocator: Allocator<T, GeometryDim>
+        + Allocator<T, BandDim>
+        + Allocator<[T; 3], BandDim>
+        + Allocator<
+            Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
+            BandDim,
+        >,
+{
+    type Output = DVector<T>;
+    type Param = DVector<T>;
+    type Float = T;
+    type Square = DMatrix<T>;
+
+    fn update(
+        &mut self,
+        potential: &Self::Param,
+    ) -> Result<Self::Param, conflux::core::FixedPointError<T>> {
+        let new_potential = self.single_iteration(potential).expect("It should work");
+        let change = (&new_potential - potential).norm() / T::from_usize(potential.len()).unwrap();
+        println!("Change in potential per element: {change}");
+        Ok(new_potential)
     }
 }
 

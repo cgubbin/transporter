@@ -11,6 +11,8 @@ use nalgebra_sparse::CsrMatrix;
 use std::marker::PhantomData;
 use transporter_mesher::{Connectivity, Mesh, SmallDim};
 
+use std::io::Write;
+
 pub(crate) struct PoissonProblemBuilder<
     T: Copy + RealField,
     RefCharge,
@@ -164,7 +166,7 @@ use nalgebra::{Const, Dynamic, Matrix, VecStorage};
 
 impl<T, GeometryDim, Conn, BandDim> Operator for PoissonProblem<'_, T, GeometryDim, Conn, BandDim>
 where
-    T: Copy + RealField,
+    T: Copy + RealField + argmin::core::ArgminFloat,
     GeometryDim: SmallDim,
     BandDim: SmallDim,
     Conn: Connectivity<T, GeometryDim>,
@@ -180,14 +182,34 @@ where
     type Output = DVector<T>;
 
     fn apply(&self, p: &Self::Param) -> Result<Self::Output, Error> {
-        let p = p - DVector::from(vec![p[0]; p.len()]);
+        // let p = p - DVector::from(vec![p[0]; p.len()]);
         // n * e
+        let p = p - DVector::from(vec![p[2]; p.len()]);
+        // TODO Should we be updating the charge density using the recalculated electronic potential
         let free_charge = self.info_desk.update_source_vector(
             self.mesh,
             &self.fermi_level,
-            self.initial_values.as_ref(),
+            &(&p + self.initial_values.as_ref()), // Currently updating with the current potential. Is this spart
         );
-        Ok(&self.operator * (p + self.initial_values.as_ref()) + &self.source + &free_charge)
+
+        let mut source = &self.source + &free_charge;
+        // Neumann condition -> half source at the system boundary
+        source[0] /= T::one() + T::one();
+        source[self.source.len() - 1] /= T::one() + T::one();
+
+        // Set the third element to zero...
+        let mut operator = self.operator.clone();
+        //operator.values_mut()[5] = T::zero();
+        //operator.values_mut()[6] = T::one();
+        //operator.values_mut()[7] = T::zero();
+
+        //source[2] = T::zero();
+
+        // println!("{source}");
+        // println!("{:?}", self.operator);
+        // panic!();
+
+        Ok(&operator * (p + self.initial_values.as_ref()) + &source)
     }
 }
 
@@ -209,10 +231,12 @@ where
     type Jacobian = DMatrix<T>;
 
     fn jacobian(&self, p: &Self::Param) -> Result<Self::Jacobian, Error> {
-        let p = p - DVector::from(vec![p[0]; p.len()]);
-        let jacobian_diagonal =
-            self.info_desk
-                .compute_jacobian_diagonal(&self.fermi_level, &p, self.mesh);
+        let p = p - DVector::from(vec![p[2]; p.len()]);
+        let jacobian_diagonal = self.info_desk.compute_jacobian_diagonal(
+            &self.fermi_level,
+            &(&p + self.initial_values.as_ref()),
+            self.mesh,
+        );
         let mut jacobian_csr = self.operator.diagonal_as_csr();
         for (val, &value) in jacobian_csr
             .values_mut()
@@ -221,7 +245,17 @@ where
         {
             *val = value;
         }
-        let jacobian = &self.operator + jacobian_csr;
+        jacobian_csr.values_mut()[0] /= T::one() + T::one();
+        jacobian_csr.values_mut()[jacobian_diagonal.len() - 1] /= T::one() + T::one();
+
+        // Set the third element to zero...
+        let mut operator = self.operator.clone();
+        // operator.values_mut()[5] = T::zero();
+        // operator.values_mut()[6] = T::one();
+        // operator.values_mut()[7] = T::zero();
+        // jacobian_csr.values_mut()[2] = T::zero();
+
+        let jacobian = &operator + jacobian_csr;
         Ok(nalgebra_sparse::convert::serial::convert_csr_dense(
             &jacobian,
         ))

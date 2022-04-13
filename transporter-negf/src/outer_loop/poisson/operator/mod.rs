@@ -8,7 +8,7 @@ use super::PoissonProblemBuilder;
 use crate::device::info_desk::DeviceInfoDesk;
 use crate::outer_loop::Potential;
 use crate::postprocessor::Charge;
-use nalgebra::{allocator::Allocator, DMatrix, DVector, DefaultAllocator, RealField};
+use nalgebra::{allocator::Allocator, DVector, DefaultAllocator, RealField};
 use nalgebra::{Const, Dynamic, Matrix, VecStorage};
 use nalgebra_sparse::CsrMatrix;
 use transporter_mesher::{Connectivity, Mesh, SmallDim};
