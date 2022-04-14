@@ -8,7 +8,7 @@ use crate::postprocessor::Charge;
 use argmin::core::{Error, Jacobian, Operator};
 use nalgebra::{allocator::Allocator, DMatrix, DVector, DefaultAllocator, RealField};
 use nalgebra_sparse::CsrMatrix;
-use std::marker::PhantomData;
+use std::{marker::PhantomData, ops::SubAssign};
 use transporter_mesher::{Connectivity, Mesh, SmallDim};
 
 use std::io::Write;
@@ -184,7 +184,8 @@ where
     fn apply(&self, p: &Self::Param) -> Result<Self::Output, Error> {
         // let p = p - DVector::from(vec![p[0]; p.len()]);
         // n * e
-        let p = p - DVector::from(vec![p[2]; p.len()]);
+        // let p = p - DVector::from(vec![p[2]; p.len()]);
+        let p = p - DVector::from(vec![p.mean(); p.len()]);
         // TODO Should we be updating the charge density using the recalculated electronic potential
         let free_charge = self.info_desk.update_source_vector(
             self.mesh,
@@ -196,6 +197,10 @@ where
         // Neumann condition -> half source at the system boundary
         source[0] /= T::one() + T::one();
         source[self.source.len() - 1] /= T::one() + T::one();
+        let mean_source = source.mean();
+        for element in source.iter_mut() {
+            *element -= mean_source;
+        }
 
         // Set the third element to zero...
         let mut operator = self.operator.clone();
@@ -231,7 +236,8 @@ where
     type Jacobian = DMatrix<T>;
 
     fn jacobian(&self, p: &Self::Param) -> Result<Self::Jacobian, Error> {
-        let p = p - DVector::from(vec![p[2]; p.len()]);
+        // let p = p - DVector::from(vec![p[2]; p.len()]);
+        let p = p - DVector::from(vec![p.mean(); p.len()]);
         let jacobian_diagonal = self.info_desk.compute_jacobian_diagonal(
             &self.fermi_level,
             &(&p + self.initial_values.as_ref()),

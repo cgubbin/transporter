@@ -1,7 +1,11 @@
 mod contact;
-
-use crate::{greens_functions::GreensFunctionMethods, hamiltonian::Hamiltonian};
+use crate::{
+    greens_functions::GreensFunctionMethods,
+    spectral::{SpectralDiscretisation, SpectralSpace, WavevectorSpace},
+};
+use color_eyre::eyre::eyre;
 use nalgebra::{allocator::Allocator, ComplexField, DefaultAllocator, RealField};
+use nalgebra_sparse::{pattern::SparsityPattern, CsrMatrix};
 use num_complex::Complex;
 use std::marker::PhantomData;
 use transporter_mesher::{Connectivity, Mesh, SmallDim};
@@ -60,11 +64,7 @@ impl<T, RefSpectral, RefMesh> SelfEnergyBuilder<T, RefSpectral, RefMesh> {
     }
 }
 
-use crate::spectral::{SpectralSpace, WavevectorSpace};
-use nalgebra::DMatrix;
-use nalgebra_sparse::CsrMatrix;
-
-/// Coherent impl
+/// Coherent builder
 impl<'a, T, GeometryDim, Conn>
     SelfEnergyBuilder<T, &'a SpectralSpace<T, ()>, &'a Mesh<T, GeometryDim, Conn>>
 where
@@ -111,63 +111,6 @@ where
     }
 }
 
-impl<T, GeometryDim, Conn> SelfEnergy<T, GeometryDim, Conn, CsrMatrix<Complex<T>>>
-where
-    T: RealField + Copy,
-    GeometryDim: SmallDim,
-    Conn: Connectivity<T, GeometryDim>,
-    DefaultAllocator: Allocator<T, GeometryDim>,
-{
-    // Updates the coherent Self Energy at the contacts into the scratch matrix held in `self`
-    pub(crate) fn recalculate(
-        &mut self,
-        mesh: &Mesh<T, GeometryDim, Conn>,
-        hamiltonian: &Hamiltonian<T>,
-        spectral_space: &SpectralSpace<T, ()>,
-    ) -> color_eyre::Result<()> {
-        match GeometryDim::dim() {
-            1 => {
-                // We have 2 elements in 1D, with positions first and last in the mesh
-                let n_elements = mesh.elements().len();
-                let hamiltonian = hamiltonian.calculate_total(T::zero().real()); // We are at 0 wavevector for this spectral_space
-                for (boundary_element, diagonal_element, idx) in [
-                    (hamiltonian.values()[1], hamiltonian.values()[0], 0),
-                    (
-                        hamiltonian.values()[hamiltonian.values().len() - 2],
-                        hamiltonian.values()[hamiltonian.values().len() - 1],
-                        n_elements - 1,
-                    ),
-                ] {
-                    let d = diagonal_element; // The hamiltonian is minus itself. Dumbo
-                    let t = -boundary_element;
-
-                    //assert!(t > T::zero());
-                    //assert!(d > T::zero());
-                    //let ec_plus_u_plus_ek =
-                    //    diagonal_element - (-boundary_element - boundary_element);
-                    let connected_idx = mesh.element_connectivity()[idx];
-                    assert_eq!(connected_idx.len(), 1);
-                    let imaginary_unit = Complex::new(T::zero(), T::one());
-                    for (jdx, &energy) in spectral_space.iter_energy().enumerate() {
-                        let z = Complex::from((d - energy) / (t + t));
-                        if idx == 0 {
-                            self.retarded[jdx].values_mut()[0] =
-                                -Complex::from(t) * (imaginary_unit * z.acos()).exp();
-                        } else {
-                            self.retarded[jdx].values_mut()[1] =
-                                -Complex::from(t) * (imaginary_unit * z.acos()).exp();
-                        }
-                    }
-                }
-                Ok(())
-            }
-            _ => unimplemented!("No self-energy implementation for 2D geometries"),
-        }
-    }
-}
-
-use color_eyre::eyre::eyre;
-use nalgebra_sparse::pattern::SparsityPattern;
 fn construct_csr_pattern_from_elements(
     boundary_elements: &[usize],
     total_number_of_elements: usize,
@@ -191,7 +134,7 @@ fn construct_csr_pattern_from_elements(
     .map_err(|e| eyre!("Failed to create sparsity pattern {:?}", e))
 }
 
-/// Incoherent impl
+/// Coherent impl with wavevector dispersion
 impl<'a, T, GeometryDim, Conn>
     SelfEnergyBuilder<
         T,
@@ -204,17 +147,44 @@ where
     Conn: Connectivity<T::RealField, GeometryDim>,
     DefaultAllocator: Allocator<T::RealField, GeometryDim>,
 {
-    pub(crate) fn build(self) -> SelfEnergy<T, GeometryDim, Conn, DMatrix<Complex<T>>> {
+    pub(crate) fn build(
+        self,
+    ) -> color_eyre::Result<SelfEnergy<T, GeometryDim, Conn, CsrMatrix<Complex<T>>>> {
         // TODO Should take a Vec<DMatrix<T>> -> which corresponds to the spectral space
-        // In the incoherent case the inner loop iterates between updating the Green's functions and self-energies
-        // so we need to retain the full stack
-        //SelfEnergy {
-        //ma: PhantomData,
-        //mc: PhantomData,
-        //marker: PhantomData,
-        //matrix: todo!(),
-        //}
-        todo!()
+        // Collect the indices of all elements at the boundaries
+        let elements_at_boundary: Vec<usize> = self
+            .mesh
+            .iter_element_connectivity()
+            .enumerate()
+            .filter_map(|(element_index, element_connectivity)| {
+                if element_connectivity.is_at_boundary() {
+                    Some(element_index)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        let pattern =
+            construct_csr_pattern_from_elements(&elements_at_boundary, self.mesh.elements().len())?;
+        let initial_values = elements_at_boundary
+            .iter()
+            .map(|_| Complex::from(T::zero()))
+            .collect::<Vec<_>>();
+        let matrix = CsrMatrix::try_from_pattern_and_values(pattern, initial_values)
+            .map_err(|e| eyre!("Failed to initialise sparse self energy matrix {}", e))?;
+
+        Ok(SelfEnergy {
+            ma: PhantomData,
+            mc: PhantomData,
+            marker: PhantomData,
+            retarded: vec![
+                matrix;
+                self.spectral.number_of_wavevector_points()
+                    * self.spectral.number_of_energy_points()
+            ],
+            //lesser: vec![matrix.clone(); self.spectral.number_of_energies()],
+            //greater: vec![matrix; self.spectral.number_of_energies()],
+        })
     }
 }
 

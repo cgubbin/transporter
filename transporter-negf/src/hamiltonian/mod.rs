@@ -149,6 +149,7 @@ where
     DefaultAllocator: Allocator<T, InfoDesk::GeometryDim> + Allocator<T, InfoDesk::BandDim>,
 {
     /// Builds an instance of `Hamiltonian` from a `HamiltonianBuilder`
+    #[tracing::instrument(name = "Hamiltonian Builder", level = "info", skip(self))]
     pub(crate) fn build(self) -> color_eyre::Result<Hamiltonian<T>> {
         Hamiltonian::build_operator(self.info_desk, self.mesh)
     }
@@ -190,10 +191,13 @@ where
             CsrAssembler::from_element_assembler(&element_assembler)?;
 
         // Build the fixed component: the differential operator and band offsets
+        tracing::trace!("Assembling hamiltonian differential operator");
         let fixed = hamiltonian_constructor.assemble_fixed(&element_assembler)?;
         // Assemble the potential into a diagonal CsrMatrix
+        tracing::trace!("Initialising the potential diagonal");
         let potential = hamiltonian_constructor.assemble_potential(&element_assembler)?;
         // Assemble the dispersive component
+        tracing::trace!("Assembling the dispersive diagonal");
         let wavevector = hamiltonian_constructor.assemble_wavevector(&element_assembler)?;
 
         assert_eq!(

@@ -8,9 +8,10 @@ pub(crate) use wavevector::WavevectorSpace;
 
 use energy::EnergySpace;
 use nalgebra::{allocator::Allocator, DVector, DefaultAllocator, RealField, U1};
-use transporter_mesher::{Connectivity, Mesh, Segment1dConnectivity, SmallDim};
+use transporter_mesher::{Connectivity, ElementMethods, Mesh, Segment1dConnectivity, SmallDim};
 
 pub(crate) trait SpectralDiscretisation<T: RealField> {
+    type Iter: Iterator<Item = T>;
     fn total_number_of_points(&self) -> usize {
         self.number_of_energy_points() * self.number_of_wavevector_points()
     }
@@ -19,6 +20,12 @@ pub(crate) trait SpectralDiscretisation<T: RealField> {
     fn integrate(&self, integrand: &[T]) -> T;
     fn integrate_over_wavevector(&self, integrand: &[T]) -> T;
     fn integrate_over_energy(&self, integrand: &[T]) -> T;
+    fn iter_energies(&self) -> Self::Iter;
+    fn iter_wavevectors(&self) -> Option<Self::Iter>;
+    fn iter_energy_weights(&self) -> Self::Iter;
+    fn iter_wavevector_weights(&self) -> Option<Self::Iter>;
+    fn iter_energy_widths(&self) -> Self::Iter;
+    fn iter_wavevector_widths(&self) -> Option<Self::Iter>;
 }
 
 /// A general `SpectralSpace` which contains the wavevector and energy discretisation and associated integration rules
@@ -45,6 +52,7 @@ where
     Conn: Connectivity<T, GeometryDim>,
     DefaultAllocator: Allocator<T, GeometryDim>,
 {
+    type Iter = std::vec::IntoIter<T>;
     fn number_of_energy_points(&self) -> usize {
         self.energy.num_points()
     }
@@ -93,9 +101,49 @@ where
             .zip(self.energy.weights())
             .fold(T::zero(), |sum, (&point, &weight)| sum + point * weight)
     }
+
+    fn iter_energies(&self) -> Self::Iter {
+        let x = self.energy.points().map(|x| *x).collect::<Vec<_>>();
+        x.into_iter()
+    }
+    fn iter_wavevectors(&self) -> Option<Self::Iter> {
+        let x = self.wavevector.points().map(|x| x[0]).collect::<Vec<_>>();
+        Some(x.into_iter())
+    }
+
+    fn iter_energy_widths(&self) -> Self::Iter {
+        let x = self
+            .energy
+            .grid
+            .elements()
+            .iter()
+            .map(|x| x.0.diameterb())
+            .collect::<Vec<_>>();
+        x.into_iter()
+    }
+    fn iter_wavevector_widths(&self) -> Option<Self::Iter> {
+        let x = self
+            .wavevector
+            .grid
+            .elements()
+            .iter()
+            .map(|x| x.0.diameter())
+            .collect::<Vec<_>>();
+        Some(x.into_iter())
+    }
+
+    fn iter_energy_weights(&self) -> Self::Iter {
+        let x = self.energy.weights().map(|x| *x).collect::<Vec<_>>();
+        x.into_iter()
+    }
+    fn iter_wavevector_weights(&self) -> Option<Self::Iter> {
+        let x = self.wavevector.weights().map(|x| *x).collect::<Vec<_>>();
+        Some(x.into_iter())
+    }
 }
 
 impl<T: RealField + Copy> SpectralDiscretisation<T> for SpectralSpace<T, ()> {
+    type Iter = std::vec::IntoIter<T>;
     fn number_of_energy_points(&self) -> usize {
         self.energy.num_points()
     }
@@ -122,6 +170,36 @@ impl<T: RealField + Copy> SpectralDiscretisation<T> for SpectralSpace<T, ()> {
 
     fn integrate_over_wavevector(&self, _: &[T]) -> T {
         unreachable!()
+    }
+
+    fn iter_energies(&self) -> Self::Iter {
+        let x = self.energy.points().map(|x| *x).collect::<Vec<_>>();
+        x.into_iter()
+    }
+    fn iter_wavevectors(&self) -> Option<Self::Iter> {
+        None
+    }
+
+    fn iter_energy_widths(&self) -> Self::Iter {
+        let x = self
+            .energy
+            .grid
+            .elements()
+            .iter()
+            .map(|x| x.0.diameterb())
+            .collect::<Vec<_>>();
+        x.into_iter()
+    }
+    fn iter_wavevector_widths(&self) -> Option<Self::Iter> {
+        None
+    }
+
+    fn iter_energy_weights(&self) -> Self::Iter {
+        let x = self.energy.weights().map(|x| *x).collect::<Vec<_>>();
+        x.into_iter()
+    }
+    fn iter_wavevector_weights(&self) -> Option<Self::Iter> {
+        None
     }
 }
 

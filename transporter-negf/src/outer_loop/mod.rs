@@ -309,6 +309,7 @@ where
     charge_and_currents: ChargeAndCurrent<T, BandDim>,
     potential: Potential<T>,
     fermi_level: DVector<T>,
+    iteration: usize,
 }
 
 impl<T: Copy + RealField, BandDim: SmallDim> LoopTracker<T, BandDim>
@@ -343,6 +344,7 @@ where
                     .map(|_| T::zero())
                     .collect::<Vec<_>>(),
             ),
+            iteration: 0,
         }
     }
 

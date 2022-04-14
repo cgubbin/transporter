@@ -65,7 +65,7 @@ where
     Conn: Connectivity<T, GeometryDim>,
     DefaultAllocator: Allocator<T, GeometryDim>,
 {
-    grid: Mesh<T, GeometryDim, Conn>,
+    pub(crate) grid: Mesh<T, GeometryDim, Conn>,
     weights: DVector<T>,
     integration_rule: super::IntegrationRule,
 }
@@ -141,12 +141,16 @@ where
 //    }
 //}
 
-impl<T: Copy + RealField> WavevectorSpace<T, U1, Segment1dConnectivity> {
+impl<T: Copy + RealField, GeometryDim: SmallDim, Conn: Connectivity<T, GeometryDim>>
+    WavevectorSpace<T, GeometryDim, Conn>
+where
+    DefaultAllocator: Allocator<T, GeometryDim>,
+{
     pub(crate) fn num_points(&self) -> usize {
         self.grid.vertices().len()
     }
 
-    pub(crate) fn points(&self) -> impl Iterator<Item = &OPoint<T, U1>> + '_ {
+    pub(crate) fn points(&self) -> impl Iterator<Item = &OPoint<T, GeometryDim>> + '_ {
         self.grid.vertices().iter().map(|x| &x.0)
     }
 

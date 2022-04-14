@@ -107,12 +107,14 @@ where
             .expect("Ham update failed");
 
         // TODO Building the gfs and SE here is a bad idea, we should do this else where so it is not redone on every iteration
+        tracing::trace!("Initialising Greens Functions");
         let mut greens_functions = GreensFunctionBuilder::new()
             .with_info_desk(self.info_desk)
             .with_mesh(self.mesh)
             .with_spectral_discretisation(self.spectral)
             .build()
             .expect("Gf build failed");
+        tracing::trace!("Initialising Self Energies");
         let mut self_energies = SelfEnergyBuilder::new()
             .with_mesh(self.mesh)
             .with_spectral_discretisation(self.spectral)
@@ -138,6 +140,7 @@ where
         Ok(potential.as_ref().clone())
     }
 
+    #[tracing::instrument(name = "Outer loop", skip_all)]
     fn run_loop(&mut self, mut potential: Potential<T>) -> color_eyre::Result<()> {
         // let mixer = Type1AndersonMixer::new(
         //     potential.as_ref().len(),
@@ -150,6 +153,7 @@ where
             self.convergence_settings.maximum_outer_iterations() as u64,
         );
         let mut solver = FixedPointSolver::new(mixer, potential.as_ref().clone());
+        tracing::info!("Beginning outer self-consistent loop");
         let solution = solver.run(self).map_err(|e| {
             color_eyre::eyre::eyre!("Failed to optimise the outer iteration: {:?}", e)
         })?;
@@ -292,6 +296,7 @@ where
         > + Allocator<T, BandDim>
         + Allocator<[T; 3], BandDim>,
 {
+    #[tracing::instrument("Potential update", skip_all)]
     fn update_potential(
         &self,
         previous_potential: &Potential<T>,
@@ -315,7 +320,11 @@ where
         let target = self.convergence_settings.outer_tolerance()
             * self.info_desk.donor_densities[0]
             * T::from_f64(crate::constants::ELECTRON_CHARGE).unwrap();
-        println!("residual: {}, target: {}", residual, target);
+        tracing::info!(
+            "Current residual: {}, target residual: {}",
+            residual,
+            target
+        );
         if residual < target {
             return Ok(previous_potential.clone());
         }
@@ -329,9 +338,13 @@ where
         // Run solver
         let res = Executor::new(cost, solver)
             .configure(|state| state.param(init_param).max_iters(20))
-            .add_observer(SlogLogger::term(), ObserverMode::Always)
+            //.add_observer(SlogLogger::term(), ObserverMode::Never)
             .run()
             .map_err(|e| color_eyre::eyre::eyre!("Failed to optimize poisson system {:?}", e))?;
+        tracing::info!(
+            "Poisson calculation converged in {} iterations",
+            res.state.iter
+        );
 
         let output = res.state.best_param.unwrap();
         // We found the change in potential, so add the full solution back on to find the net result...
@@ -606,8 +619,6 @@ where
             fermi_plus_potential_at_elements[fermi_plus_potential_at_elements.len() - 1]
                 - potential.as_ref()[potential.as_ref().len() - 1],
         );
-        dbg!(result[0]);
-        dbg!(self.get_fermi_level_at_drain());
         result
     }
 
@@ -785,13 +796,15 @@ where
     type Float = T;
     type Square = DMatrix<T>;
 
+    #[tracing::instrument(name = "Single iteration", fields(iteration = self.tracker.iteration + 1), skip_all)]
     fn update(
         &mut self,
         potential: &Self::Param,
     ) -> Result<Self::Param, conflux::core::FixedPointError<T>> {
         let new_potential = self.single_iteration(potential).expect("It should work");
         let change = (&new_potential - potential).norm() / T::from_usize(potential.len()).unwrap();
-        println!("Change in potential per element: {change}");
+        tracing::info!("Change in potential per element: {change}");
+        self.tracker.iteration += 1;
         Ok(new_potential)
     }
 }

@@ -73,8 +73,11 @@ where
 
     fn single_iteration(&mut self) -> color_eyre::Result<()> {
         // TODO Recompute se, check it's ok, recompute green's functions
-        self.self_energies
-            .recalculate(self.mesh, self.hamiltonian, self.spectral)?;
+        self.self_energies.recalculate_contact_self_energy(
+            self.mesh,
+            self.hamiltonian,
+            self.spectral,
+        )?;
         self.greens_functions.update_greens_functions(
             self.hamiltonian,
             self.self_energies,
@@ -83,11 +86,13 @@ where
         Ok(())
     }
 
+    #[tracing::instrument("Inner loop", skip_all)]
     fn run_loop(
         &mut self,
         previous_charge_and_current: &mut ChargeAndCurrent<T, BandDim>,
     ) -> color_eyre::Result<()> {
         // In a coherent calculation there is no inner loop
+        tracing::info!("Recalculating electron density");
         self.single_iteration()?;
         // Run the convergence check, this is solely to update the charge and current in the tracker
         // as we do not track convergence in a coherent calculation

@@ -69,6 +69,10 @@ pub(crate) trait GreensFunctionInfoDesk<T: Copy + RealField> {
     fn get_fermi_integral_at_source(&self, energy: T) -> T;
     /// The zero order fermi integral in the drain contact
     fn get_fermi_integral_at_drain(&self, energy: T) -> T;
+    /// The fermi function in the source contact
+    fn get_fermi_function_at_source(&self, energy: T) -> T;
+    /// The fermi function in the drain contact
+    fn get_fermi_function_at_drain(&self, energy: T) -> T;
 }
 
 impl<'a, T: Copy + RealField, BandDim: SmallDim, GeometryDim: SmallDim> GreensFunctionInfoDesk<T>
@@ -122,6 +126,22 @@ where
             * (fermi_level - energy)
             / (T::from_f64(crate::constants::BOLTZMANN).unwrap() * self.temperature);
         (T::one() + argument.exp()).ln()
+    }
+
+    fn get_fermi_function_at_source(&self, energy: T) -> T {
+        let fermi_level = self.get_fermi_level_at_source(); // - T::one() / (T::one() + T::one());
+        let argument = -T::from_f64(crate::constants::ELECTRON_CHARGE).unwrap()
+            * (fermi_level - energy)
+            / (T::from_f64(crate::constants::BOLTZMANN).unwrap() * self.temperature);
+        T::one() / (T::one() + argument.exp())
+    }
+
+    fn get_fermi_function_at_drain(&self, energy: T) -> T {
+        let fermi_level = self.get_fermi_level_at_drain(); // - T::one() / (T::one() + T::one());
+        let argument = -T::from_f64(crate::constants::ELECTRON_CHARGE).unwrap()
+            * (fermi_level - energy)
+            / (T::from_f64(crate::constants::BOLTZMANN).unwrap() * self.temperature);
+        T::one() / (T::one() + argument.exp())
     }
 }
 
@@ -258,7 +278,7 @@ mod test {
             .build()
             .unwrap();
         self_energy
-            .recalculate(&mesh, &hamiltonian, &spectral_space)
+            .recalculate_contact_self_energy(&mesh, &hamiltonian, &spectral_space)
             .unwrap();
 
         gf.update_aggregate_retarded_greens_function(&hamiltonian, &self_energy, &spectral_space)
@@ -350,7 +370,7 @@ mod test {
             .build()
             .unwrap();
         self_energy
-            .recalculate(&mesh, &hamiltonian, &spectral_space)
+            .recalculate_contact_self_energy(&mesh, &hamiltonian, &spectral_space)
             .unwrap();
 
         gf.update_aggregate_retarded_greens_function(&hamiltonian, &self_energy, &spectral_space)
@@ -440,7 +460,7 @@ mod test {
             .build()
             .unwrap();
         self_energy
-            .recalculate(&mesh, &hamiltonian, &spectral_space)
+            .recalculate_contact_self_energy(&mesh, &hamiltonian, &spectral_space)
             .unwrap();
 
         gf.update_aggregate_retarded_greens_function(&hamiltonian, &self_energy, &spectral_space)
@@ -530,7 +550,7 @@ mod test {
             .build()
             .unwrap();
         self_energy
-            .recalculate(&mesh, &hamiltonian, &spectral_space)
+            .recalculate_contact_self_energy(&mesh, &hamiltonian, &spectral_space)
             .unwrap();
 
         // Act
@@ -636,7 +656,7 @@ mod test {
             .build()
             .unwrap();
         self_energy
-            .recalculate(&mesh, &hamiltonian, &spectral_space)
+            .recalculate_contact_self_energy(&mesh, &hamiltonian, &spectral_space)
             .unwrap();
 
         gf.update_aggregate_retarded_greens_function(&hamiltonian, &self_energy, &spectral_space)

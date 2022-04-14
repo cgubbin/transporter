@@ -1,5 +1,9 @@
 /// This module governs the high-level implementation of the simulation
 mod configuration;
+pub(crate) mod styles;
+mod telemetry;
+use telemetry::{get_subscriber, init_subscriber};
+
 pub(crate) mod tracker;
 pub(crate) use configuration::Configuration;
 pub(crate) use tracker::Tracker;
@@ -9,7 +13,7 @@ use crate::{
     outer_loop::{Outer, Potential},
 };
 use argmin::core::ArgminFloat;
-use clap::{ArgEnum, Parser};
+use clap::{ArgEnum, Args, Parser};
 use color_eyre::eyre::eyre;
 use nalgebra::{
     allocator::Allocator, Const, DefaultAllocator, Dynamic, Matrix, RealField, VecStorage, U1,
@@ -22,21 +26,64 @@ use transporter_mesher::{Connectivity, Mesh, Mesh1d, SmallDim};
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
 struct App {
-    file_path: Option<PathBuf>,
+    #[clap(flatten)]
+    global_opts: GlobalOpts,
+}
+
+#[derive(Debug, Args)]
+struct GlobalOpts {
+    /// The path to the input structure
+    input: Option<PathBuf>,
+    /// The output directory
+    output: Option<PathBuf>,
+    /// The level of logging to display
     #[clap(arg_enum, short, long)]
     log_level: LogLevel,
+    /// The calculation type
     #[clap(arg_enum, short, long)]
     calculation: Calculation,
+    /// The dimension of the calculation
     #[clap(arg_enum, short, long)]
     dimension: Dimension,
+    /// Whether to display in color
+    #[clap(long, arg_enum, global = true, default_value_t = Color::Auto)]
+    color: Color,
+}
+
+#[derive(Clone, Debug, ArgEnum)]
+enum Color {
+    Always,
+    Auto,
+    Never,
+}
+
+impl Color {
+    fn supports_color_on(self, stream: owo_colors::Stream) -> bool {
+        match self {
+            Color::Always => true,
+            Color::Auto => supports_color::on_cached(stream).is_some(),
+            Color::Never => false,
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, ArgEnum)]
-enum LogLevel {
+pub(crate) enum LogLevel {
     Trace,
     Info,
     Debug,
     Error,
+}
+
+impl std::string::ToString for LogLevel {
+    fn to_string(&self) -> String {
+        match self {
+            LogLevel::Trace => "TRACE".into(),
+            LogLevel::Info => "INFO".into(),
+            LogLevel::Debug => "DEBUG".into(),
+            LogLevel::Error => "ERROR".into(),
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, ArgEnum)]
@@ -55,33 +102,58 @@ pub fn run<T>() -> color_eyre::Result<()>
 where
     T: ArgminFloat + Copy + DeserializeOwned + NumCast + RealField + ToPrimitive,
 {
+    // Prepare terminal environment
+    let term = console::Term::stdout();
+    term.set_title("Transporter NEGF Solver");
+    term.hide_cursor()?;
+
+    // Parse the global app options
     let cli = App::parse();
 
+    let subscriber = get_subscriber(cli.global_opts.log_level);
+    init_subscriber(subscriber);
     let __marker: std::marker::PhantomData<T> = std::marker::PhantomData;
-
-    println!("calculation: {:?}", cli.calculation);
-    println!("log_level: {:?}", cli.log_level);
-    println!("path: {:?}", cli.file_path);
-    println!("dimension: {:?}", cli.dimension);
 
     let config: Configuration<T::RealField> = Configuration::build()?;
 
     let path = cli
-        .file_path
+        .global_opts
+        .input
         .ok_or(eyre!("A file path needs to be passed."))?;
 
-    match cli.dimension {
+    match cli.global_opts.dimension {
         Dimension::D1 => {
+            // Initialise and pretty print device
+            tracing::trace!("Initialising device");
             let device: Device<T::RealField, U1> = Device::build(path)?;
+            let mut device_display = device.display();
+            if cli
+                .global_opts
+                .color
+                .supports_color_on(owo_colors::Stream::Stdout)
+            {
+                device_display.colorize();
+            }
+            term.write_line(&format!("{device_display}"))?;
+
             // TODO Info_desk is currently always U1 because it is informed by the device dimension right now, this is no good. We need n_bands to be in-play here.
             let info_desk = device.build_device_info_desk()?;
+            tracing::trace!("Initialising mesh");
             let mesh: Mesh1d<T::RealField> = build_mesh_with_config(&config, device)?;
+            tracing::info!("Mesh initialised with {} elements", mesh.elements().len());
+
             let tracker = tracker::TrackerBuilder::new()
                 .with_mesh(&mesh)
                 .with_info_desk(&info_desk)
                 .build()?;
 
-            build_and_run(config, &mesh, &tracker, cli.calculation, __marker)?;
+            build_and_run(
+                config,
+                &mesh,
+                &tracker,
+                cli.global_opts.calculation,
+                __marker,
+            )?;
         }
         Dimension::D2 => {
             unimplemented!()

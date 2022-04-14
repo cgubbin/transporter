@@ -38,6 +38,10 @@ where
     pub fn midpoint(&self) -> Point1<T> {
         Point1::new((self.vertices[0].x + self.vertices[1].x) / (T::one() + T::one()))
     }
+    // Temporary while we deal with visibility of elementmethods with multiple grids
+    pub fn diameterb(&self) -> T {
+        (self.vertices[0].x - self.vertices[1].x).abs()
+    }
 }
 
 impl<T> Distance<T, Point1<T>> for LineSegment1d<T>

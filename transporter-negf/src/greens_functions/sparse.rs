@@ -13,8 +13,10 @@ use crate::{
     hamiltonian::Hamiltonian,
     postprocessor::{Charge, Current},
     self_energy::SelfEnergy,
-    spectral::SpectralSpace,
+    spectral::{SpectralDiscretisation, SpectralSpace},
 };
+use console::Term;
+use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use nalgebra::{
     allocator::Allocator, ComplexField, Const, DVector, DefaultAllocator, Dynamic, Matrix, OVector,
     RealField, VecStorage,
@@ -60,13 +62,13 @@ impl<T: Copy + RealField> CsrAssembly<T> for CsrMatrix<Complex<T>> {
 }
 
 /// Implementation of the accumulator methods for a sparse AggregateGreensFunction
-impl<T, BandDim, GeometryDim, Conn>
+impl<T, BandDim, GeometryDim, Conn, Spectral>
     AggregateGreensFunctionMethods<
         T,
         BandDim,
         GeometryDim,
         Conn,
-        SpectralSpace<T, ()>,
+        Spectral,
         SelfEnergy<T, GeometryDim, Conn, CsrMatrix<Complex<T>>>,
     > for AggregateGreensFunctions<'_, T, CsrMatrix<Complex<T>>, GeometryDim, BandDim>
 where
@@ -74,6 +76,7 @@ where
     GeometryDim: SmallDim,
     BandDim: SmallDim,
     Conn: Connectivity<T, GeometryDim>,
+    Spectral: SpectralDiscretisation<T>,
     DefaultAllocator: Allocator<
             Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
             BandDim,
@@ -84,21 +87,21 @@ where
     fn accumulate_into_charge_density_vector(
         &self,
         mesh: &Mesh<T, GeometryDim, Conn>,
-        spectral_space: &SpectralSpace<T, ()>,
+        spectral_space: &Spectral,
     ) -> color_eyre::Result<Charge<T, BandDim>> {
         let mut charges: Vec<DVector<T>> = Vec::with_capacity(BandDim::dim());
         // Sum over the diagonal of the calculated spectral density
         let summed_diagonal = self
             .lesser
             .iter()
-            .zip(spectral_space.energy.weights())
-            .zip(spectral_space.energy.grid.elements())
+            .zip(spectral_space.iter_energy_weights())
+            .zip(spectral_space.iter_energy_widths())
             .fold(
                 &self.lesser[0].matrix * Complex::from(T::zero()),
-                |sum, ((value, &weight), element)| {
+                |sum, ((value, weight), width)| {
                     sum + &value.matrix
                         * Complex::from(
-                            weight * element.0.diameter() // Weighted by the integration weight from the `SpectralSpace` and the diameter of the element in the grid
+                            weight * width // Weighted by the integration weight from the `SpectralSpace` and the diameter of the element in the grid
                                 / T::from_f64(crate::constants::ELECTRON_CHARGE).unwrap(), // The Green's function is an inverse energy stored in eV
                         )
                 },
@@ -149,7 +152,7 @@ where
         &self,
         mesh: &Mesh<T, GeometryDim, Conn>,
         self_energy: &SelfEnergy<T, GeometryDim, Conn, CsrMatrix<Complex<T>>>,
-        spectral_space: &SpectralSpace<T, ()>,
+        spectral_space: &Spectral,
     ) -> color_eyre::Result<Current<T, BandDim>> {
         let mut currents: Vec<DVector<T>> = Vec::with_capacity(BandDim::dim());
 
@@ -157,21 +160,18 @@ where
             .retarded
             .iter()
             .zip(self_energy.retarded.iter())
-            .zip(spectral_space.energy.weights())
-            .zip(spectral_space.energy.grid.elements())
+            .zip(spectral_space.iter_energy_weights())
+            .zip(spectral_space.iter_energy_widths())
+            .zip(spectral_space.iter_energies())
             .fold(
                 vec![T::zero(); mesh.elements().len() * BandDim::dim()],
-                |sum, (((gf_r, se_r), &weight), element)| {
+                |sum, ((((gf_r, se_r), weight), width), energy)| {
                     // Gamma = i (\Sigma_r - \Sigma_a) -> in coherent transport \Sigma has only two non-zero elements
                     let gamma_source = -(T::one() + T::one()) * se_r.values()[0].im;
                     let gamma_drain = -(T::one() + T::one()) * se_r.values()[1].im;
                     // Zero order Fermi integrals
-                    let fermi_source = self
-                        .info_desk
-                        .get_fermi_integral_at_source(element.0.midpoint().x);
-                    let fermi_drain = self
-                        .info_desk
-                        .get_fermi_integral_at_drain(element.0.midpoint().x);
+                    let fermi_source = self.info_desk.get_fermi_integral_at_source(energy);
+                    let fermi_drain = self.info_desk.get_fermi_integral_at_drain(energy);
 
                     let values = gf_r
                         .matrix
@@ -182,7 +182,7 @@ where
                         .map(|value| (value * value.conj()).re)
                         .map(|grga| {
                             grga * weight
-                                * element.0.diameter()
+                                * width
                                 * weight
                                 * gamma_source
                                 * gamma_drain
@@ -240,14 +240,16 @@ where
     Matrix: GreensFunctionMethods<T>,
     DefaultAllocator: Allocator<T, BandDim> + Allocator<[T; 3], BandDim>,
 {
-    pub(crate) fn update_greens_functions<Conn>(
+    #[tracing::instrument(name = "Updating Greens Functions", skip_all)]
+    pub(crate) fn update_greens_functions<Conn, Spectral>(
         &mut self,
         hamiltonian: &Hamiltonian<T>,
         self_energy: &SelfEnergy<T, GeometryDim, Conn, Matrix>,
-        spectral_space: &SpectralSpace<T, ()>,
+        spectral_space: &Spectral,
     ) -> color_eyre::Result<()>
     where
         Conn: Connectivity<T, GeometryDim>,
+        Spectral: SpectralDiscretisation<T>,
         DefaultAllocator: Allocator<T, GeometryDim>,
     {
         // In the coherent transport case we only need the retarded and lesser Greens functions (see Lake 1997)
@@ -256,55 +258,137 @@ where
         Ok(())
     }
 
-    pub(crate) fn update_aggregate_retarded_greens_function<Conn>(
+    pub(crate) fn update_aggregate_retarded_greens_function<Conn, Spectral>(
         &mut self,
         hamiltonian: &Hamiltonian<T>,
         self_energy: &SelfEnergy<T, GeometryDim, Conn, Matrix>,
-        spectral_space: &SpectralSpace<T, ()>,
+        spectral_space: &Spectral,
     ) -> color_eyre::Result<()>
     where
         Conn: Connectivity<T, GeometryDim>,
+        Spectral: SpectralDiscretisation<T>,
         DefaultAllocator: Allocator<T, GeometryDim>,
     {
-        for ((retarded_gf, retarded_self_energy), energy) in self
-            .retarded
-            .iter_mut()
-            .zip(self_energy.retarded.iter())
-            .zip(spectral_space.iter_energy())
-        {
-            retarded_gf.as_mut().generate_retarded_into(
-                *energy,
-                T::zero().real(),
-                hamiltonian,
-                retarded_self_energy,
-            )?;
+        tracing::info!("retarded ");
+
+        let term = Term::stdout();
+
+        // Display
+        let spinner_style = ProgressStyle::default_spinner()
+            .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ ")
+            .template(
+                "{prefix:.bold.dim} {spinner} {msg} [{wide_bar:.cyan/blue}] {percent}% ({eta})",
+            );
+        let pb = ProgressBar::with_draw_target(
+            (spectral_space.number_of_energy_points()
+                * spectral_space.number_of_wavevector_points()) as u64,
+            ProgressDrawTarget::term(term, 60),
+        );
+        pb.set_style(spinner_style);
+
+        if let Some(wavevector_points) = spectral_space.iter_wavevectors() {
+            for (idx, wavevector) in wavevector_points.enumerate() {
+                for (jdx, energy) in spectral_space.iter_energies().enumerate() {
+                    pb.set_message(format!(
+                        "Wavevector {:.1}, Energy {:.5}eV",
+                        wavevector, energy
+                    ));
+                    pb.set_position((idx * jdx + jdx) as u64);
+                    self.retarded[idx * jdx + jdx]
+                        .as_mut()
+                        .generate_retarded_into(
+                            energy,
+                            wavevector,
+                            hamiltonian,
+                            &self_energy.retarded[idx * jdx + jdx],
+                        )?
+                }
+            }
+        } else {
+            for (idx, ((retarded_gf, retarded_self_energy), energy)) in self
+                .retarded
+                .iter_mut()
+                .zip(self_energy.retarded.iter())
+                .zip(spectral_space.iter_energies())
+                .enumerate()
+            {
+                pb.set_message(format!("Energy {:.5}eV", energy));
+                pb.set_position(idx as u64);
+                retarded_gf.as_mut().generate_retarded_into(
+                    energy,
+                    T::zero().real(),
+                    hamiltonian,
+                    retarded_self_energy,
+                )?;
+            }
         }
         Ok(())
     }
 
-    pub(crate) fn update_aggregate_lesser_greens_function<Conn>(
+    pub(crate) fn update_aggregate_lesser_greens_function<Conn, Spectral>(
         &mut self,
         self_energy: &SelfEnergy<T, GeometryDim, Conn, Matrix>,
-        spectral_space: &SpectralSpace<T, ()>,
+        spectral_space: &Spectral,
     ) -> color_eyre::Result<()>
     where
         Conn: Connectivity<T, GeometryDim>,
+        Spectral: SpectralDiscretisation<T>,
         DefaultAllocator: Allocator<T, GeometryDim>,
     {
-        for (((lesser_gf, retarded_gf), retarded_self_energy), &energy) in self
-            .lesser
-            .iter_mut()
-            .zip(self.retarded.iter())
-            .zip(self_energy.retarded.iter())
-            .zip(spectral_space.iter_energy())
-        {
-            let source_fermi_integral = self.info_desk.get_fermi_integral_at_source(energy);
-            let drain_fermi_integral = self.info_desk.get_fermi_integral_at_drain(energy);
-            lesser_gf.as_mut().generate_lesser_into(
-                &retarded_gf.matrix,
-                retarded_self_energy,
-                &[source_fermi_integral, drain_fermi_integral],
-            )?;
+        tracing::info!("lesser");
+
+        let term = Term::stdout();
+
+        // Display
+        let spinner_style = ProgressStyle::default_spinner()
+            .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ ")
+            .template(
+                "{prefix:.bold.dim} {spinner} {msg} [{wide_bar:.cyan/blue}] {percent}% ({eta})",
+            );
+        let pb = ProgressBar::with_draw_target(
+            (spectral_space.number_of_energy_points()
+                * spectral_space.number_of_wavevector_points()) as u64,
+            ProgressDrawTarget::term(term, 60),
+        );
+        pb.set_style(spinner_style);
+
+        if let Some(wavevector_points) = spectral_space.iter_wavevectors() {
+            for (idx, wavevector) in wavevector_points.enumerate() {
+                for (jdx, energy) in spectral_space.iter_energies().enumerate() {
+                    pb.set_message(format!(
+                        "Wavevector {:.1}, Energy {:.5}eV",
+                        wavevector, energy
+                    ));
+                    pb.set_position((idx * jdx + jdx) as u64);
+                    let source_fermi_function = self.info_desk.get_fermi_function_at_source(energy);
+                    let drain_fermi_function = self.info_desk.get_fermi_function_at_drain(energy);
+                    self.lesser[idx * jdx + jdx].as_mut().generate_lesser_into(
+                        &self.retarded[idx * jdx + jdx].matrix,
+                        &self_energy.retarded[idx * jdx + jdx],
+                        &[source_fermi_function, drain_fermi_function],
+                    )?;
+                }
+            }
+        } else {
+            for (idx, (((lesser_gf, retarded_gf), retarded_self_energy), energy)) in self
+                .lesser
+                .iter_mut()
+                .zip(self.retarded.iter())
+                .zip(self_energy.retarded.iter())
+                .zip(spectral_space.iter_energies())
+                .enumerate()
+            {
+                pb.set_message(format!("Energy {:.5}eV", energy));
+                pb.set_position(idx as u64);
+
+                let source_fermi_integral = self.info_desk.get_fermi_integral_at_source(energy);
+                let drain_fermi_integral = self.info_desk.get_fermi_integral_at_drain(energy);
+                lesser_gf.as_mut().generate_lesser_into(
+                    &retarded_gf.matrix,
+                    retarded_self_energy,
+                    &[source_fermi_integral, drain_fermi_integral],
+                )?;
+            }
         }
         Ok(())
     }

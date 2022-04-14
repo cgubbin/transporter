@@ -1,7 +1,9 @@
 use super::Material;
+use crate::app::styles::Styles;
 use color_eyre::eyre::eyre;
 use config::{Config, File};
-use nalgebra::{allocator::Allocator, DefaultAllocator, RealField};
+use nalgebra::{allocator::Allocator, DefaultAllocator, RealField, U1};
+use owo_colors::OwoColorize;
 use serde::{de::DeserializeOwned, Deserialize};
 use std::{ops::Deref, path::PathBuf};
 use transporter_mesher::SmallDim;
@@ -52,5 +54,65 @@ where
         let s = Config::builder().add_source(File::from(path)).build()?;
         s.try_deserialize()
             .map_err(|e| eyre!("Failed to deserialize device: {:?}", e))
+    }
+}
+
+impl<T: DeserializeOwned + RealField, GeometryDim: SmallDim> Device<T, GeometryDim>
+where
+    DefaultAllocator: Allocator<T, GeometryDim>,
+    <DefaultAllocator as Allocator<T, GeometryDim>>::Buffer: Deserialize<'static>,
+{
+    /// Returns a type that can display `MyValue`.
+    pub fn display(&self) -> DeviceDisplay<'_, T, GeometryDim> {
+        DeviceDisplay {
+            device: self,
+            styles: Box::new(Styles::default()),
+        }
+    }
+}
+
+pub(crate) struct DeviceDisplay<'a, T: DeserializeOwned + RealField, GeometryDim: SmallDim>
+where
+    DefaultAllocator: Allocator<T, GeometryDim>,
+    <DefaultAllocator as Allocator<T, GeometryDim>>::Buffer: Deserialize<'static>,
+{
+    device: &'a Device<T, GeometryDim>,
+    styles: Box<Styles>,
+}
+
+impl<'a, T: DeserializeOwned + RealField, GeometryDim: SmallDim> DeviceDisplay<'a, T, GeometryDim>
+where
+    DefaultAllocator: Allocator<T, GeometryDim>,
+    <DefaultAllocator as Allocator<T, GeometryDim>>::Buffer: Deserialize<'static>,
+{
+    /// Colorizes the output.
+    pub fn colorize(&mut self) {
+        self.styles.colorize();
+    }
+}
+
+impl<'a, T: DeserializeOwned + RealField> std::fmt::Display for DeviceDisplay<'a, T, U1>
+where
+    DefaultAllocator: Allocator<T, U1>,
+    <DefaultAllocator as Allocator<T, U1>>::Buffer: Deserialize<'static>,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "     {:-^30}", "-".style(self.styles.device_style))?;
+        for layer in self.device.layers.iter() {
+            writeln!(
+                f,
+                "     {}{: ^28}{}",
+                "|".style(self.styles.device_style),
+                format!("{}: {}nm", layer.material, layer.thickness[0]),
+                "|".style(self.styles.device_style),
+            )?;
+            writeln!(f, "     {:-^30}", "-".style(self.styles.device_style))?;
+        }
+        writeln!(
+            f,
+            "     {: <30}",
+            format!("System of {} unique layers", self.device.layers.len())
+        )?;
+        Ok(())
     }
 }
