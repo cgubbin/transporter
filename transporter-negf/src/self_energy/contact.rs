@@ -48,51 +48,14 @@ where
                 );
                 pb.set_style(spinner_style);
 
-                // The wavevector dispersive case
-                if let Some(wavevector_points) = spectral_space.iter_wavevectors() {
-                    for (idx, wavevector) in wavevector_points.enumerate() {
-                        let hamiltonian_matrix = hamiltonian.calculate_total(wavevector);
-                        for (jdx, energy) in spectral_space.iter_energies().enumerate() {
-                            pb.set_message(format!(
-                                "Wavevector: {:.1}, Energy {:.5}eV",
-                                wavevector, energy
-                            ));
-                            pb.set_position((idx * jdx + jdx) as u64);
-                            for (boundary_element, diagonal_element, ind) in [
-                                (
-                                    hamiltonian_matrix.values()[1],
-                                    hamiltonian_matrix.values()[0],
-                                    0,
-                                ),
-                                (
-                                    hamiltonian_matrix.values()
-                                        [hamiltonian_matrix.values().len() - 2],
-                                    hamiltonian_matrix.values()
-                                        [hamiltonian_matrix.values().len() - 1],
-                                    n_elements - 1,
-                                ),
-                            ]
-                            .into_iter()
-                            {
-                                let d = diagonal_element; // The hamiltonian is minus itself. Dumbo
-                                let t = -boundary_element;
-                                let z = Complex::from((d - energy) / (t + t));
-                                if ind == 0 {
-                                    self.retarded[idx * jdx + jdx].values_mut()[0] =
-                                        -Complex::from(t) * (imaginary_unit * z.acos()).exp();
-                                } else {
-                                    self.retarded[idx * jdx + jdx].values_mut()[1] =
-                                        -Complex::from(t) * (imaginary_unit * z.acos()).exp();
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    let hamiltonian_matrix = hamiltonian.calculate_total(T::zero().real());
-                    for (idx, energy) in spectral_space.iter_energies().enumerate() {
-                        pb.set_message(format!("Energy {:.5}eV", energy));
-                        pb.set_position(idx as u64);
-
+                for (idx, wavevector) in spectral_space.iter_wavevectors().enumerate() {
+                    let hamiltonian_matrix = hamiltonian.calculate_total(wavevector);
+                    for (jdx, energy) in spectral_space.iter_energies().enumerate() {
+                        pb.set_message(format!(
+                            "Wavevector: {:.1}, Energy {:.5}eV",
+                            wavevector, energy
+                        ));
+                        pb.set_position((idx * jdx + jdx) as u64);
                         for (boundary_element, diagonal_element, ind) in [
                             (
                                 hamiltonian_matrix.values()[1],
@@ -111,10 +74,10 @@ where
                             let t = -boundary_element;
                             let z = Complex::from((d - energy) / (t + t));
                             if ind == 0 {
-                                self.retarded[idx].values_mut()[0] =
+                                self.retarded[idx * jdx + jdx].values_mut()[0] =
                                     -Complex::from(t) * (imaginary_unit * z.acos()).exp();
                             } else {
-                                self.retarded[idx].values_mut()[1] =
+                                self.retarded[idx * jdx + jdx].values_mut()[1] =
                                     -Complex::from(t) * (imaginary_unit * z.acos()).exp();
                             }
                         }

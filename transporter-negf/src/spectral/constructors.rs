@@ -5,15 +5,14 @@ use super::{
 use nalgebra::{allocator::Allocator, DefaultAllocator, RealField, U1};
 use num_traits::NumCast;
 use std::ops::Range;
-use transporter_mesher::{Connectivity, Segment1dConnectivity, SmallDim};
+use transporter_mesher::{Connectivity, Mesh, Segment1dConnectivity, SmallDim};
 
 pub(crate) struct SpectralSpaceBuilder<
     T,
     RefEnergyRange,
     RefEnergyIntegrationMethod,
     RefWavevectorIntegrationMethod,
-    GeometryDim,
-    Conn,
+    RefMesh,
 > {
     number_of_energy_points: Option<usize>,
     energy_range: RefEnergyRange,
@@ -21,11 +20,10 @@ pub(crate) struct SpectralSpaceBuilder<
     maximum_wavevector: Option<T>,
     energy_integration_rule: RefEnergyIntegrationMethod,
     wavevector_integration_rule: RefWavevectorIntegrationMethod,
-    _marker: std::marker::PhantomData<GeometryDim>,
-    __marker: std::marker::PhantomData<Conn>,
+    mesh: RefMesh,
 }
 
-impl<T> SpectralSpaceBuilder<T, (), (), (), (), ()> {
+impl<T> SpectralSpaceBuilder<T, (), (), (), ()> {
     pub(crate) fn new() -> Self {
         Self {
             number_of_energy_points: None,
@@ -34,27 +32,24 @@ impl<T> SpectralSpaceBuilder<T, (), (), (), (), ()> {
             maximum_wavevector: None,
             energy_integration_rule: (),
             wavevector_integration_rule: (),
-            _marker: std::marker::PhantomData,
-            __marker: std::marker::PhantomData,
+            mesh: (),
         }
     }
 }
 
 impl<
-        T,
+        T: RealField,
         RefEnergyRange,
         RefEnergyIntegrationMethod,
         RefWavevectorIntegrationMethod,
-        GeometryDim,
-        Conn,
+        RefMesh,
     >
     SpectralSpaceBuilder<
         T,
         RefEnergyRange,
         RefEnergyIntegrationMethod,
         RefWavevectorIntegrationMethod,
-        GeometryDim,
-        Conn,
+        RefMesh,
     >
 {
     pub(crate) fn with_number_of_energy_points(self, number_of_energy_points: usize) -> Self {
@@ -65,8 +60,7 @@ impl<
             maximum_wavevector: self.maximum_wavevector,
             energy_integration_rule: self.energy_integration_rule,
             wavevector_integration_rule: self.wavevector_integration_rule,
-            _marker: std::marker::PhantomData,
-            __marker: std::marker::PhantomData,
+            mesh: self.mesh,
         }
     }
 
@@ -81,8 +75,7 @@ impl<
             maximum_wavevector: self.maximum_wavevector,
             energy_integration_rule: self.energy_integration_rule,
             wavevector_integration_rule: self.wavevector_integration_rule,
-            _marker: std::marker::PhantomData,
-            __marker: std::marker::PhantomData,
+            mesh: self.mesh,
         }
     }
 
@@ -94,8 +87,7 @@ impl<
         RefEnergyRange,
         RefEnergyIntegrationMethod,
         RefWavevectorIntegrationMethod,
-        GeometryDim,
-        Conn,
+        RefMesh,
     > {
         SpectralSpaceBuilder {
             number_of_energy_points: self.number_of_energy_points,
@@ -104,8 +96,7 @@ impl<
             maximum_wavevector: Some(maximum_wavevector),
             energy_integration_rule: self.energy_integration_rule,
             wavevector_integration_rule: self.wavevector_integration_rule,
-            _marker: std::marker::PhantomData,
-            __marker: std::marker::PhantomData,
+            mesh: self.mesh,
         }
     }
 
@@ -117,8 +108,7 @@ impl<
         Range<T>,
         RefEnergyIntegrationMethod,
         RefWavevectorIntegrationMethod,
-        GeometryDim,
-        Conn,
+        RefMesh,
     > {
         SpectralSpaceBuilder {
             number_of_energy_points: self.number_of_energy_points,
@@ -127,8 +117,7 @@ impl<
             maximum_wavevector: self.maximum_wavevector,
             energy_integration_rule: self.energy_integration_rule,
             wavevector_integration_rule: self.wavevector_integration_rule,
-            _marker: std::marker::PhantomData,
-            __marker: std::marker::PhantomData,
+            mesh: self.mesh,
         }
     }
 
@@ -140,8 +129,7 @@ impl<
         RefEnergyRange,
         EnergyIntegrationMethod,
         RefWavevectorIntegrationMethod,
-        GeometryDim,
-        Conn,
+        RefMesh,
     > {
         SpectralSpaceBuilder {
             number_of_energy_points: self.number_of_energy_points,
@@ -150,8 +138,7 @@ impl<
             maximum_wavevector: self.maximum_wavevector,
             energy_integration_rule,
             wavevector_integration_rule: self.wavevector_integration_rule,
-            _marker: std::marker::PhantomData,
-            __marker: std::marker::PhantomData,
+            mesh: self.mesh,
         }
     }
 
@@ -163,8 +150,7 @@ impl<
         RefEnergyRange,
         RefEnergyIntegrationMethod,
         WavevectorIntegrationMethod,
-        GeometryDim,
-        Conn,
+        RefMesh,
     > {
         SpectralSpaceBuilder {
             number_of_energy_points: self.number_of_energy_points,
@@ -173,13 +159,36 @@ impl<
             maximum_wavevector: self.maximum_wavevector,
             energy_integration_rule: self.energy_integration_rule,
             wavevector_integration_rule,
-            _marker: std::marker::PhantomData,
-            __marker: std::marker::PhantomData,
+            mesh: self.mesh,
+        }
+    }
+
+    pub(crate) fn with_mesh<GeometryDim: SmallDim, Conn: Connectivity<T, GeometryDim>>(
+        self,
+        mesh: &Mesh<T, GeometryDim, Conn>,
+    ) -> SpectralSpaceBuilder<
+        T,
+        RefEnergyRange,
+        RefEnergyIntegrationMethod,
+        RefWavevectorIntegrationMethod,
+        &Mesh<T, GeometryDim, Conn>,
+    >
+    where
+        DefaultAllocator: Allocator<T, GeometryDim>,
+    {
+        SpectralSpaceBuilder {
+            number_of_energy_points: self.number_of_energy_points,
+            energy_range: self.energy_range,
+            number_of_wavevector_points: self.number_of_wavevector_points,
+            maximum_wavevector: self.maximum_wavevector,
+            energy_integration_rule: self.energy_integration_rule,
+            wavevector_integration_rule: self.wavevector_integration_rule,
+            mesh,
         }
     }
 }
 
-impl<T, EnergyIntegrationRule> SpectralSpaceBuilder<T, Range<T>, EnergyIntegrationRule, (), (), ()>
+impl<T, EnergyIntegrationRule> SpectralSpaceBuilder<T, Range<T>, EnergyIntegrationRule, (), ()>
 where
     T: Copy + RealField + NumCast,
     EnergyIntegrationRule: super::GenerateWeights<T, U1, Segment1dConnectivity>,
@@ -203,8 +212,7 @@ impl<T, Conn, GeometryDim, WavevectorIntegrationRule, EnergyIntegrationRule>
         Range<T>,
         EnergyIntegrationRule,
         WavevectorIntegrationRule,
-        GeometryDim,
-        Conn,
+        &Mesh<T, GeometryDim, Conn>,
     >
 where
     T: Copy + RealField + NumCast,

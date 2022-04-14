@@ -21,11 +21,11 @@ pub(crate) trait SpectralDiscretisation<T: RealField> {
     fn integrate_over_wavevector(&self, integrand: &[T]) -> T;
     fn integrate_over_energy(&self, integrand: &[T]) -> T;
     fn iter_energies(&self) -> Self::Iter;
-    fn iter_wavevectors(&self) -> Option<Self::Iter>;
+    fn iter_wavevectors(&self) -> Self::Iter;
     fn iter_energy_weights(&self) -> Self::Iter;
-    fn iter_wavevector_weights(&self) -> Option<Self::Iter>;
+    fn iter_wavevector_weights(&self) -> Self::Iter;
     fn iter_energy_widths(&self) -> Self::Iter;
-    fn iter_wavevector_widths(&self) -> Option<Self::Iter>;
+    fn iter_wavevector_widths(&self) -> Self::Iter;
 }
 
 /// A general `SpectralSpace` which contains the wavevector and energy discretisation and associated integration rules
@@ -106,9 +106,9 @@ where
         let x = self.energy.points().map(|x| *x).collect::<Vec<_>>();
         x.into_iter()
     }
-    fn iter_wavevectors(&self) -> Option<Self::Iter> {
+    fn iter_wavevectors(&self) -> Self::Iter {
         let x = self.wavevector.points().map(|x| x[0]).collect::<Vec<_>>();
-        Some(x.into_iter())
+        x.into_iter()
     }
 
     fn iter_energy_widths(&self) -> Self::Iter {
@@ -121,7 +121,7 @@ where
             .collect::<Vec<_>>();
         x.into_iter()
     }
-    fn iter_wavevector_widths(&self) -> Option<Self::Iter> {
+    fn iter_wavevector_widths(&self) -> Self::Iter {
         let x = self
             .wavevector
             .grid
@@ -129,16 +129,16 @@ where
             .iter()
             .map(|x| x.0.diameter())
             .collect::<Vec<_>>();
-        Some(x.into_iter())
+        x.into_iter()
     }
 
     fn iter_energy_weights(&self) -> Self::Iter {
         let x = self.energy.weights().map(|x| *x).collect::<Vec<_>>();
         x.into_iter()
     }
-    fn iter_wavevector_weights(&self) -> Option<Self::Iter> {
+    fn iter_wavevector_weights(&self) -> Self::Iter {
         let x = self.wavevector.weights().map(|x| *x).collect::<Vec<_>>();
-        Some(x.into_iter())
+        x.into_iter()
     }
 }
 
@@ -176,8 +176,8 @@ impl<T: RealField + Copy> SpectralDiscretisation<T> for SpectralSpace<T, ()> {
         let x = self.energy.points().map(|x| *x).collect::<Vec<_>>();
         x.into_iter()
     }
-    fn iter_wavevectors(&self) -> Option<Self::Iter> {
-        None
+    fn iter_wavevectors(&self) -> Self::Iter {
+        vec![T::one(); 1].into_iter()
     }
 
     fn iter_energy_widths(&self) -> Self::Iter {
@@ -190,16 +190,16 @@ impl<T: RealField + Copy> SpectralDiscretisation<T> for SpectralSpace<T, ()> {
             .collect::<Vec<_>>();
         x.into_iter()
     }
-    fn iter_wavevector_widths(&self) -> Option<Self::Iter> {
-        None
+    fn iter_wavevector_widths(&self) -> Self::Iter {
+        vec![T::one(); 1].into_iter()
     }
 
     fn iter_energy_weights(&self) -> Self::Iter {
         let x = self.energy.weights().map(|x| *x).collect::<Vec<_>>();
         x.into_iter()
     }
-    fn iter_wavevector_weights(&self) -> Option<Self::Iter> {
-        None
+    fn iter_wavevector_weights(&self) -> Self::Iter {
+        vec![T::one(); 1].into_iter()
     }
 }
 
@@ -225,15 +225,17 @@ where
     fn generate_weights_from_grid(&self, grid: &Mesh<T, GeometryDim, Conn>) -> DVector<T>;
 }
 
-impl<T> GenerateWeights<T, U1, Segment1dConnectivity> for IntegrationRule
+impl<T, GeometryDim, Conn> GenerateWeights<T, GeometryDim, Conn> for IntegrationRule
 where
     T: Copy + RealField,
-    DefaultAllocator: Allocator<T, U1>,
+    GeometryDim: SmallDim,
+    Conn: Connectivity<T, GeometryDim>,
+    DefaultAllocator: Allocator<T, GeometryDim>,
 {
     fn query_integration_rule(&self) -> IntegrationRule {
         *self
     }
-    fn generate_weights_from_grid(&self, grid: &Mesh<T, U1, Segment1dConnectivity>) -> DVector<T> {
+    fn generate_weights_from_grid(&self, grid: &Mesh<T, GeometryDim, Conn>) -> DVector<T> {
         let num_points = grid.vertices().len();
         // A closure generating the weight for a given point index
         let weight = |idx: usize| -> T {

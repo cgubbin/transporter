@@ -13,7 +13,7 @@ use crate::{
     hamiltonian::Hamiltonian,
     postprocessor::{Charge, Current},
     self_energy::SelfEnergy,
-    spectral::{SpectralDiscretisation, SpectralSpace},
+    spectral::SpectralDiscretisation,
 };
 use console::Term;
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
@@ -91,25 +91,57 @@ where
     ) -> color_eyre::Result<Charge<T, BandDim>> {
         let mut charges: Vec<DVector<T>> = Vec::with_capacity(BandDim::dim());
         // Sum over the diagonal of the calculated spectral density
-        let summed_diagonal = self
-            .lesser
-            .iter()
-            .zip(spectral_space.iter_energy_weights())
-            .zip(spectral_space.iter_energy_widths())
-            .fold(
-                &self.lesser[0].matrix * Complex::from(T::zero()),
-                |sum, ((value, weight), width)| {
-                    sum + &value.matrix
-                        * Complex::from(
-                            weight * width // Weighted by the integration weight from the `SpectralSpace` and the diameter of the element in the grid
+        let mut summed_diagonal = vec![T::zero(); self.lesser[0].matrix.values().len()];
+
+        for (idx, ((wavevector, weight), width)) in spectral_space
+            .iter_wavevectors()
+            .zip(spectral_space.iter_wavevector_weights())
+            .zip(spectral_space.iter_wavevector_widths())
+            .enumerate()
+        {
+            let new_diagonal = self
+                .lesser
+                .iter()
+                .zip(spectral_space.iter_energy_weights())
+                .zip(spectral_space.iter_energy_widths())
+                .fold(
+                    &self.lesser[0].matrix * Complex::from(T::zero()),
+                    |sum, ((value, weight), width)| {
+                        sum + &value.matrix
+                            * Complex::from(
+                                weight * width // Weighted by the integration weight from the `SpectralSpace` and the diameter of the element in the grid
                                 / T::from_f64(crate::constants::ELECTRON_CHARGE).unwrap(), // The Green's function is an inverse energy stored in eV
-                        )
-                },
-            )
-            .values()
-            .iter()
-            .map(|&x| x.real()) // The charge in the device is a real quantity
-            .collect::<Vec<_>>();
+                            )
+                    },
+                )
+                .values()
+                .iter()
+                .map(|&x| x.real())
+                .collect::<Vec<_>>(); // The charge in the device is a real quantity
+            summed_diagonal
+                .iter_mut()
+                .zip(new_diagonal.into_iter())
+                .for_each(|(ele, new)| *ele += wavevector * weight * width * new);
+        }
+        // let summed_diagonal = self
+        //     .lesser
+        //     .iter()
+        //     .zip(spectral_space.iter_energy_weights())
+        //     .zip(spectral_space.iter_energy_widths())
+        //     .fold(
+        //         &self.lesser[0].matrix * Complex::from(T::zero()),
+        //         |sum, ((value, weight), width)| {
+        //             sum + &value.matrix
+        //                 * Complex::from(
+        //                     weight * width // Weighted by the integration weight from the `SpectralSpace` and the diameter of the element in the grid
+        //                         / T::from_f64(crate::constants::ELECTRON_CHARGE).unwrap(), // The Green's function is an inverse energy stored in eV
+        //                 )
+        //         },
+        //     )
+        //     .values()
+        //     .iter()
+        //     .map(|&x| x.real()) // The charge in the device is a real quantity
+        //     .collect::<Vec<_>>();
 
         // Separate out the diagonals for each `BandDim` into their own charge vector
         for band_number in 0..BandDim::dim() {
@@ -286,42 +318,39 @@ where
         );
         pb.set_style(spinner_style);
 
-        if let Some(wavevector_points) = spectral_space.iter_wavevectors() {
-            for (idx, wavevector) in wavevector_points.enumerate() {
-                for (jdx, energy) in spectral_space.iter_energies().enumerate() {
-                    pb.set_message(format!(
-                        "Wavevector {:.1}, Energy {:.5}eV",
-                        wavevector, energy
-                    ));
-                    pb.set_position((idx * jdx + jdx) as u64);
-                    self.retarded[idx * jdx + jdx]
-                        .as_mut()
-                        .generate_retarded_into(
-                            energy,
-                            wavevector,
-                            hamiltonian,
-                            &self_energy.retarded[idx * jdx + jdx],
-                        )?
-                }
-            }
-        } else {
-            for (idx, ((retarded_gf, retarded_self_energy), energy)) in self
-                .retarded
-                .iter_mut()
-                .zip(self_energy.retarded.iter())
-                .zip(spectral_space.iter_energies())
-                .enumerate()
-            {
-                pb.set_message(format!("Energy {:.5}eV", energy));
-                pb.set_position(idx as u64);
-                retarded_gf.as_mut().generate_retarded_into(
-                    energy,
-                    T::zero().real(),
-                    hamiltonian,
-                    retarded_self_energy,
-                )?;
+        for (idx, wavevector) in spectral_space.iter_wavevectors().enumerate() {
+            for (jdx, energy) in spectral_space.iter_energies().enumerate() {
+                pb.set_message(format!(
+                    "Wavevector {:.1}, Energy {:.5}eV",
+                    wavevector, energy
+                ));
+                pb.set_position((idx * jdx + jdx) as u64);
+                self.retarded[idx * jdx + jdx]
+                    .as_mut()
+                    .generate_retarded_into(
+                        energy,
+                        wavevector,
+                        hamiltonian,
+                        &self_energy.retarded[idx * jdx + jdx],
+                    )?
             }
         }
+        //for (idx, ((retarded_gf, retarded_self_energy), energy)) in self
+        //    .retarded
+        //    .iter_mut()
+        //    .zip(self_energy.retarded.iter())
+        //    .zip(spectral_space.iter_energies())
+        //    .enumerate()
+        //{
+        //    pb.set_message(format!("Energy {:.5}eV", energy));
+        //    pb.set_position(idx as u64);
+        //    retarded_gf.as_mut().generate_retarded_into(
+        //        energy,
+        //        T::zero().real(),
+        //        hamiltonian,
+        //        retarded_self_energy,
+        //    )?;
+        //}
         Ok(())
     }
 
@@ -352,44 +381,49 @@ where
         );
         pb.set_style(spinner_style);
 
-        if let Some(wavevector_points) = spectral_space.iter_wavevectors() {
-            for (idx, wavevector) in wavevector_points.enumerate() {
-                for (jdx, energy) in spectral_space.iter_energies().enumerate() {
-                    pb.set_message(format!(
-                        "Wavevector {:.1}, Energy {:.5}eV",
-                        wavevector, energy
-                    ));
-                    pb.set_position((idx * jdx + jdx) as u64);
-                    let source_fermi_function = self.info_desk.get_fermi_function_at_source(energy);
-                    let drain_fermi_function = self.info_desk.get_fermi_function_at_drain(energy);
-                    self.lesser[idx * jdx + jdx].as_mut().generate_lesser_into(
-                        &self.retarded[idx * jdx + jdx].matrix,
-                        &self_energy.retarded[idx * jdx + jdx],
-                        &[source_fermi_function, drain_fermi_function],
-                    )?;
-                }
-            }
-        } else {
-            for (idx, (((lesser_gf, retarded_gf), retarded_self_energy), energy)) in self
-                .lesser
-                .iter_mut()
-                .zip(self.retarded.iter())
-                .zip(self_energy.retarded.iter())
-                .zip(spectral_space.iter_energies())
-                .enumerate()
-            {
-                pb.set_message(format!("Energy {:.5}eV", energy));
-                pb.set_position(idx as u64);
-
-                let source_fermi_integral = self.info_desk.get_fermi_integral_at_source(energy);
-                let drain_fermi_integral = self.info_desk.get_fermi_integral_at_drain(energy);
-                lesser_gf.as_mut().generate_lesser_into(
-                    &retarded_gf.matrix,
-                    retarded_self_energy,
-                    &[source_fermi_integral, drain_fermi_integral],
+        for (idx, wavevector) in spectral_space.iter_wavevectors().enumerate() {
+            for (jdx, energy) in spectral_space.iter_energies().enumerate() {
+                pb.set_message(format!(
+                    "Wavevector {:.1}, Energy {:.5}eV",
+                    wavevector, energy
+                ));
+                pb.set_position((idx * jdx + jdx) as u64);
+                let (source, drain) = match spectral_space.number_of_wavevector_points() {
+                    1 => (
+                        self.info_desk.get_fermi_integral_at_source(energy),
+                        self.info_desk.get_fermi_integral_at_drain(energy),
+                    ),
+                    _ => (
+                        self.info_desk.get_fermi_function_at_source(energy),
+                        self.info_desk.get_fermi_function_at_drain(energy),
+                    ),
+                };
+                self.lesser[idx * jdx + jdx].as_mut().generate_lesser_into(
+                    &self.retarded[idx * jdx + jdx].matrix,
+                    &self_energy.retarded[idx * jdx + jdx],
+                    &[source, drain],
                 )?;
             }
         }
+        //  for (idx, (((lesser_gf, retarded_gf), retarded_self_energy), energy)) in self
+        //      .lesser
+        //      .iter_mut()
+        //      .zip(self.retarded.iter())
+        //      .zip(self_energy.retarded.iter())
+        //      .zip(spectral_space.iter_energies())
+        //      .enumerate()
+        //  {
+        //      pb.set_message(format!("Energy {:.5}eV", energy));
+        //      pb.set_position(idx as u64);
+
+        //      let source_fermi_integral = self.info_desk.get_fermi_integral_at_source(energy);
+        //      let drain_fermi_integral = self.info_desk.get_fermi_integral_at_drain(energy);
+        //      lesser_gf.as_mut().generate_lesser_into(
+        //          &retarded_gf.matrix,
+        //          retarded_self_energy,
+        //          &[source_fermi_integral, drain_fermi_integral],
+        //      )?;
+        //  }
         Ok(())
     }
 }

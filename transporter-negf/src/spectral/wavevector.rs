@@ -1,7 +1,10 @@
 use super::GenerateWeights;
 use nalgebra::{allocator::Allocator, DVector, DefaultAllocator, OPoint, RealField, U1};
 use num_traits::NumCast;
-use transporter_mesher::{Connectivity, Mesh, Segment1dConnectivity, SmallDim};
+use transporter_mesher::{
+    create_line_segment_from_endpoints_and_number_of_points, Connectivity, Mesh,
+    Segment1dConnectivity, SmallDim,
+};
 
 pub(crate) struct WavevectorSpaceBuilder<T, IntegrationMethod, GeometryDim> {
     number_of_points: Option<usize>,
@@ -80,17 +83,30 @@ where
     fn build(self) -> WavevectorSpace<T, GeometryDim, Conn>;
 }
 
-impl<T, IntegrationRule, GeometryDim: SmallDim, Conn>
-    BuildWavevectorSpace<T, IntegrationRule, GeometryDim, Conn>
-    for WavevectorSpaceBuilder<T, IntegrationRule, GeometryDim>
+impl<T, IntegrationRule> BuildWavevectorSpace<T, IntegrationRule, U1, Segment1dConnectivity>
+    for WavevectorSpaceBuilder<T, IntegrationRule, U1>
 where
     T: Copy + RealField + NumCast,
-    Conn: Connectivity<T, GeometryDim>,
-    IntegrationRule: GenerateWeights<T, GeometryDim, Conn>,
-    DefaultAllocator: Allocator<T, GeometryDim>,
+    IntegrationRule: GenerateWeights<T, U1, Segment1dConnectivity>,
+    DefaultAllocator: Allocator<T, U1>,
 {
-    fn build(self) -> WavevectorSpace<T, GeometryDim, Conn> {
-        todo!()
+    fn build(self) -> WavevectorSpace<T, U1, Segment1dConnectivity> {
+        // Build the wavevector mesh in meV
+        let wavevector_range = std::ops::Range {
+            start: T::zero(),
+            end: self.maximum_wavevector.unwrap(),
+        };
+        let grid = create_line_segment_from_endpoints_and_number_of_points(
+            wavevector_range,
+            self.number_of_points.unwrap(),
+            0,
+        );
+        let weights = self.integration_rule.generate_weights_from_grid(&grid);
+        WavevectorSpace {
+            grid,
+            weights,
+            integration_rule: self.integration_rule.query_integration_rule(),
+        }
     }
 }
 

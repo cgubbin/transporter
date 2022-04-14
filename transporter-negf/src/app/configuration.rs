@@ -21,6 +21,9 @@ pub(crate) struct SpectralConfiguration<T> {
     pub(crate) minimum_energy: T,
     pub(crate) maximum_energy: T,
     pub(crate) energy_integration_rule: IntegrationRule,
+    pub(crate) number_of_wavevector_points: usize,
+    pub(crate) maximum_wavevector: T,
+    pub(crate) wavevector_integration_rule: IntegrationRule,
 }
 
 #[derive(Debug, Deserialize)]

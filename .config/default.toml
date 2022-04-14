@@ -19,3 +19,7 @@ number_of_energy_points = 2000
 minimum_energy = 0.0
 maximum_energy = 0.25
 energy_integration_rule = "ThreePoint"
+number_of_wavevector_points = 200
+maximum_wavevector = 0.25
+wavevector_integration_rule = "ThreePoint"
+
