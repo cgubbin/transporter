@@ -206,25 +206,23 @@ where
     }
 }
 
-impl<T, Conn, GeometryDim, WavevectorIntegrationRule, EnergyIntegrationRule>
+impl<T, WavevectorIntegrationRule, EnergyIntegrationRule>
     SpectralSpaceBuilder<
         T,
         Range<T>,
         EnergyIntegrationRule,
         WavevectorIntegrationRule,
-        &Mesh<T, GeometryDim, Conn>,
+        &Mesh<T, U1, Segment1dConnectivity>,
     >
 where
     T: Copy + RealField + NumCast,
-    GeometryDim: SmallDim,
-    Conn: Connectivity<T, GeometryDim>,
     EnergyIntegrationRule: GenerateWeights<T, U1, Segment1dConnectivity>,
-    WavevectorIntegrationRule: GenerateWeights<T, GeometryDim, Conn>,
-    DefaultAllocator: Allocator<T, GeometryDim>,
+    WavevectorIntegrationRule: GenerateWeights<T, U1, Segment1dConnectivity>,
+    DefaultAllocator: Allocator<T, U1>,
 {
     pub(crate) fn build_incoherent(
         self,
-    ) -> SpectralSpace<T, WavevectorSpace<T, GeometryDim, Conn>> {
+    ) -> SpectralSpace<T, WavevectorSpace<T, U1, Segment1dConnectivity>> {
         let energy = EnergySpaceBuilder::new()
             .with_integration_rule(self.energy_integration_rule)
             .with_number_of_points(self.number_of_energy_points.unwrap())

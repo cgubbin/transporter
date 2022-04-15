@@ -7,6 +7,7 @@
 use super::{GreensFunction, GreensFunctionMethods};
 use crate::postprocessor::{Charge, Current};
 use crate::{
+    app::Calculation,
     device::info_desk::DeviceInfoDesk,
     spectral::{SpectralDiscretisation, SpectralSpace, WavevectorSpace},
 };
@@ -20,18 +21,20 @@ use transporter_mesher::{Connectivity, Mesh, SmallDim};
 
 /// Builder struct for aggregated Green's functions
 #[derive(Clone)]
-pub(crate) struct GreensFunctionBuilder<T, RefInfoDesk, RefMesh, RefSpectral> {
+pub(crate) struct GreensFunctionBuilder<T, RefInfoDesk, RefMesh, RefSpectral, RefCalculationType> {
     /// Placeholder for a reference to the problem's information desk
     pub(crate) info_desk: RefInfoDesk,
     /// Placeholder for a reference to the problem's Mesh
     pub(crate) mesh: RefMesh,
     /// Placeholder for a reference to the problems spectral discretisation
     pub(crate) spectral: RefSpectral,
+    /// Placeholder for the flavour of calculation (coherent or incoherent)
+    pub(crate) calculation: RefCalculationType,
     /// Marker to set the numeric type `T` on instantiation
     pub(crate) marker: std::marker::PhantomData<T>,
 }
 
-impl<T> GreensFunctionBuilder<T, (), (), ()>
+impl<T> GreensFunctionBuilder<T, (), (), (), ()>
 where
     T: RealField,
 {
@@ -41,23 +44,25 @@ where
             info_desk: (),
             mesh: (),
             spectral: (),
+            calculation: (),
             marker: std::marker::PhantomData,
         }
     }
 }
 
-impl<T, RefInfoDesk, RefMesh, RefSpectral>
-    GreensFunctionBuilder<T, RefInfoDesk, RefMesh, RefSpectral>
+impl<T, RefInfoDesk, RefMesh, RefSpectral, RefCalculationType>
+    GreensFunctionBuilder<T, RefInfoDesk, RefMesh, RefSpectral, RefCalculationType>
 {
     /// Attach an information desk to the builder
     pub(crate) fn with_info_desk<InfoDesk>(
         self,
         info_desk: &InfoDesk,
-    ) -> GreensFunctionBuilder<T, &InfoDesk, RefMesh, RefSpectral> {
+    ) -> GreensFunctionBuilder<T, &InfoDesk, RefMesh, RefSpectral, RefCalculationType> {
         GreensFunctionBuilder {
             info_desk,
             mesh: self.mesh,
             spectral: self.spectral,
+            calculation: self.calculation,
             marker: std::marker::PhantomData,
         }
     }
@@ -66,11 +71,12 @@ impl<T, RefInfoDesk, RefMesh, RefSpectral>
     pub(crate) fn with_mesh<Mesh>(
         self,
         mesh: &Mesh,
-    ) -> GreensFunctionBuilder<T, RefInfoDesk, &Mesh, RefSpectral> {
+    ) -> GreensFunctionBuilder<T, RefInfoDesk, &Mesh, RefSpectral, RefCalculationType> {
         GreensFunctionBuilder {
             info_desk: self.info_desk,
             mesh,
             spectral: self.spectral,
+            calculation: self.calculation,
             marker: std::marker::PhantomData,
         }
     }
@@ -79,11 +85,26 @@ impl<T, RefInfoDesk, RefMesh, RefSpectral>
     pub(crate) fn with_spectral_discretisation<Spectral>(
         self,
         spectral: &Spectral,
-    ) -> GreensFunctionBuilder<T, RefInfoDesk, RefMesh, &Spectral> {
+    ) -> GreensFunctionBuilder<T, RefInfoDesk, RefMesh, &Spectral, RefCalculationType> {
         GreensFunctionBuilder {
             info_desk: self.info_desk,
             mesh: self.mesh,
             spectral,
+            calculation: self.calculation,
+            marker: std::marker::PhantomData,
+        }
+    }
+
+    /// Select the calculation flavour
+    pub(crate) fn incoherent_calculation<CalculationType>(
+        self,
+        calculation: &CalculationType,
+    ) -> GreensFunctionBuilder<T, RefInfoDesk, RefMesh, RefSpectral, &CalculationType> {
+        GreensFunctionBuilder {
+            info_desk: self.info_desk,
+            mesh: self.mesh,
+            spectral: self.spectral,
+            calculation,
             marker: std::marker::PhantomData,
         }
     }
@@ -95,6 +116,7 @@ impl<'a, T, GeometryDim, Conn, BandDim>
         &'a DeviceInfoDesk<T, GeometryDim, BandDim>,
         &'a Mesh<T, GeometryDim, Conn>,
         &'a SpectralSpace<T, ()>,
+        (),
     >
 where
     T: RealField + Copy,
@@ -161,34 +183,104 @@ impl<'a, T, GeometryDim, Conn, BandDim>
         &'a DeviceInfoDesk<T, GeometryDim, BandDim>,
         &'a Mesh<T, GeometryDim, Conn>,
         &'a SpectralSpace<T, WavevectorSpace<T, GeometryDim, Conn>>,
+        (),
     >
 where
     T: RealField + Copy,
     GeometryDim: SmallDim,
     BandDim: SmallDim,
-    Conn: Connectivity<T, GeometryDim>,
+    Conn: Connectivity<T, GeometryDim> + Send + Sync,
+    <Conn as Connectivity<T, GeometryDim>>::Element: Send + Sync,
     DefaultAllocator:
         Allocator<T, GeometryDim> + Allocator<T, BandDim> + Allocator<[T; 3], BandDim>,
+    <DefaultAllocator as Allocator<T, GeometryDim>>::Buffer: Send + Sync,
 {
     /// When the attached spectral space has wavevector discretisation we build out a vector of dense
     /// `DMatrix` as the scattering process under study is incoherent.
     pub(crate) fn build(
         self,
-    ) -> AggregateGreensFunctions<'a, T, DMatrix<Complex<T>>, GeometryDim, BandDim> {
-        AggregateGreensFunctions {
+    ) -> color_eyre::Result<
+        AggregateGreensFunctions<'a, T, CsrMatrix<Complex<T>>, GeometryDim, BandDim>,
+    > {
+        // Assemble the sparsity pattern for the retarded green's function
+        let sparsity_pattern = assemble_csr_sparsity_for_retarded_gf(self.mesh.elements().len())?;
+        // Fill with dummy values
+        let initial_values = vec![Complex::from(T::zero()); sparsity_pattern.nnz()];
+        let csr = CsrMatrix::try_from_pattern_and_values(sparsity_pattern, initial_values)
+            .map_err(|e| eyre!("Failed to write values to Csr GF Matrix {:?}", e))?;
+        // Map the csr matrix over the number of points in the spectral space to assemble the initial Green's function vector
+        let spectrum_of_csr = (0..self.spectral.total_number_of_points())
+            .map(|_| GreensFunction {
+                matrix: csr.clone(),
+                marker: std::marker::PhantomData,
+            })
+            .collect::<Vec<_>>();
+
+        // Get the sparsity pattern corresponding to the diagonal of `csr`
+        let diagonal_sparsity_pattern = csr.diagonal_as_csr().pattern().clone();
+        let initial_values = vec![Complex::from(T::zero()); diagonal_sparsity_pattern.nnz()];
+        let diagonal_csr =
+            CsrMatrix::try_from_pattern_and_values(diagonal_sparsity_pattern, initial_values)
+                .map_err(|e| eyre!("Failed to write values to Csr GF Matrix {:?}", e))?;
+        let spectrum_of_diagonal_csr = (0..self.spectral.total_number_of_points())
+            .map(|_| GreensFunction {
+                matrix: diagonal_csr.clone(),
+                marker: std::marker::PhantomData,
+            })
+            .collect::<Vec<_>>();
+
+        // In the coherent calculation we do not use the advanced or greater Greens function. We therefore do not fill these elements
+        // in the resulting `AggregateGreensFunctions` struct
+        Ok(AggregateGreensFunctions {
+            //    spectral: self.spectral,
+            info_desk: self.info_desk,
+            retarded: spectrum_of_csr,
+            advanced: Vec::new(),
+            lesser: spectrum_of_diagonal_csr,
+            greater: Vec::new(),
+        })
+    }
+}
+
+impl<'a, T, GeometryDim, Conn, BandDim>
+    GreensFunctionBuilder<
+        T,
+        &'a DeviceInfoDesk<T, GeometryDim, BandDim>,
+        &'a Mesh<T, GeometryDim, Conn>,
+        &'a SpectralSpace<T, WavevectorSpace<T, GeometryDim, Conn>>,
+        &'a Calculation,
+    >
+where
+    T: RealField + Copy,
+    GeometryDim: SmallDim,
+    BandDim: SmallDim,
+    Conn: Connectivity<T, GeometryDim> + Send + Sync,
+    <Conn as Connectivity<T, GeometryDim>>::Element: Send + Sync,
+    DefaultAllocator:
+        Allocator<T, GeometryDim> + Allocator<T, BandDim> + Allocator<[T; 3], BandDim>,
+    <DefaultAllocator as Allocator<T, GeometryDim>>::Buffer: Send + Sync,
+{
+    /// When the attached spectral space has wavevector discretisation we build out a vector of dense
+    /// `DMatrix` as the scattering process under study is incoherent.
+    pub(crate) fn build(
+        self,
+    ) -> color_eyre::Result<
+        AggregateGreensFunctions<'a, T, DMatrix<Complex<T>>, GeometryDim, BandDim>,
+    > {
+        Ok(AggregateGreensFunctions {
             //    spectral: self.spectral,
             info_desk: self.info_desk,
             retarded: Vec::with_capacity(self.spectral.total_number_of_points()),
             advanced: Vec::with_capacity(self.spectral.total_number_of_points()),
             lesser: Vec::with_capacity(self.spectral.total_number_of_points()),
             greater: Vec::with_capacity(self.spectral.total_number_of_points()),
-        }
+        })
     }
 }
 #[derive(Debug)]
 pub(crate) struct AggregateGreensFunctions<'a, T, Matrix, GeometryDim, BandDim>
 where
-    Matrix: GreensFunctionMethods<T>,
+    Matrix: GreensFunctionMethods<T> + Send + Sync,
     T: RealField + Copy,
     GeometryDim: SmallDim,
     BandDim: SmallDim,

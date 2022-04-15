@@ -1,3 +1,4 @@
+use super::Calculation;
 use crate::{
     device::info_desk::DeviceInfoDesk,
     hamiltonian::HamiltonianInfoDesk,
@@ -28,6 +29,7 @@ where
     charge_densities: Charge<T, BandDim>,
     current_densities: Current<T, BandDim>,
     potential: Potential<T>,
+    calculation: Calculation,
     __marker: PhantomData<GeometryDim>,
 }
 
@@ -51,6 +53,10 @@ where
 
     pub(crate) fn current(&self) -> &Current<T, BandDim> {
         &self.current_densities
+    }
+
+    pub(crate) fn calculation(&self) -> Calculation {
+        self.calculation
     }
 
     pub(crate) fn num_vertices(&self) -> usize {
@@ -105,13 +111,15 @@ where
 pub(crate) struct TrackerBuilder<RefInfoDesk, RefMesh> {
     info_desk: RefInfoDesk,
     mesh: RefMesh,
+    calculation: Calculation,
 }
 
 impl TrackerBuilder<(), ()> {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(calculation: Calculation) -> Self {
         Self {
             info_desk: (),
             mesh: (),
+            calculation,
         }
     }
 }
@@ -124,12 +132,14 @@ impl<RefInfoDesk, RefMesh> TrackerBuilder<RefInfoDesk, RefMesh> {
         TrackerBuilder {
             info_desk,
             mesh: self.mesh,
+            calculation: self.calculation,
         }
     }
     pub(crate) fn with_mesh<Mesh>(self, mesh: &Mesh) -> TrackerBuilder<RefInfoDesk, &Mesh> {
         TrackerBuilder {
             info_desk: self.info_desk,
             mesh,
+            calculation: self.calculation,
         }
     }
 }
@@ -160,6 +170,7 @@ where
             potential,
             charge_densities,
             current_densities,
+            calculation: self.calculation,
             __marker: PhantomData,
         })
     }

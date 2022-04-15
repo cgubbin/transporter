@@ -27,9 +27,11 @@ tracing = "0.1.33"
 tracing-log = { version = "0.1.2", features = ["env_logger"] }
 log = "0.4.16"
 tracing-subscriber = { version = "0.3.11", features = ["env-filter", "fmt", "registry"] }
-indicatif = "0.16.2"
+indicatif = { version = "0.16.2", features = ["rayon"] }
 tracing-slog = "0.1.0"
 slog = "2.7.0"
+itertools = "0.10.3"
+rayon = "1.5.2"
 
 [dependencies.conflux]
 git = "https://github.com/cgubbin/conflux"
@@ -37,6 +39,15 @@ branch = "nalgebra"
 
 [dev-dependencies]
 approx = "0.5.1"
+criterion = "0.3.5"
 matrixcompare = { version = "0.3.0", features = ["proptest-support"] }
 proptest = "1.0.0"
 rand = "0.8.5"
+utilities = { path = "utilities" }
+
+[profile.bench]
+debug = true
+
+[[bench]]
+name = "recursive_greens_functions"
+harness = false

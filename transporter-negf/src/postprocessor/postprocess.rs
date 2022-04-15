@@ -33,13 +33,13 @@ where
             AggregateGreensFunctionMethods<T, BandDim, GeometryDim, Conn, Spectral, SelfEnergy>;
 }
 
-impl<T, GeometryDim, Conn, BandDim>
+impl<T, GeometryDim, Conn, BandDim, Spectral>
     PostProcess<
         T,
         BandDim,
         GeometryDim,
         Conn,
-        SpectralSpace<T, ()>,
+        Spectral,
         SelfEnergy<T, GeometryDim, Conn, CsrMatrix<Complex<T>>>,
     > for PostProcessor<'_, T, GeometryDim, Conn>
 where
@@ -47,6 +47,7 @@ where
     Conn: Connectivity<T, GeometryDim>,
     GeometryDim: SmallDim,
     BandDim: SmallDim,
+    Spectral: SpectralDiscretisation<T>,
     DefaultAllocator: Allocator<T, GeometryDim>
         + Allocator<
             Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
@@ -57,7 +58,7 @@ where
         &self,
         greens_functions: &AggregateGreensFunctions,
         self_energy: &SelfEnergy<T, GeometryDim, Conn, CsrMatrix<Complex<T>>>,
-        spectral_discretisation: &SpectralSpace<T, ()>,
+        spectral_discretisation: &Spectral,
     ) -> color_eyre::Result<ChargeAndCurrent<T, BandDim>>
     where
         AggregateGreensFunctions: AggregateGreensFunctionMethods<
@@ -65,7 +66,7 @@ where
             BandDim,
             GeometryDim,
             Conn,
-            SpectralSpace<T, ()>,
+            Spectral,
             SelfEnergy<T, GeometryDim, Conn, CsrMatrix<Complex<T>>>,
         >,
     {

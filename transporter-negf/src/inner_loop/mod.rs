@@ -214,7 +214,8 @@ where
     GeometryDim: SmallDim,
     BandDim: SmallDim,
     Conn: Connectivity<T, GeometryDim>,
-    Matrix: GreensFunctionMethods<T>,
+    <Conn as Connectivity<T, GeometryDim>>::Element: Send + Sync,
+    Matrix: GreensFunctionMethods<T> + Send + Sync,
     DefaultAllocator:
         Allocator<T, GeometryDim> + Allocator<T, BandDim> + Allocator<[T; 3], BandDim>,
 {
@@ -241,7 +242,8 @@ where
     GeometryDim: SmallDim,
     BandDim: SmallDim,
     Conn: Connectivity<T, GeometryDim>,
-    Matrix: GreensFunctionMethods<T>,
+    <Conn as Connectivity<T, GeometryDim>>::Element: Send + Sync,
+    Matrix: GreensFunctionMethods<T> + Send + Sync,
     DefaultAllocator:
         Allocator<T, GeometryDim> + Allocator<T, BandDim> + Allocator<[T; 3], BandDim>,
 {

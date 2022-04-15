@@ -42,7 +42,7 @@ where
                     "{prefix:.bold.dim} {spinner} {msg} [{wide_bar:.cyan/blue}] {percent}% ({eta})",
                 );
                 let pb = ProgressBar::with_draw_target(
-                    (2 * spectral_space.number_of_energy_points()
+                    (spectral_space.number_of_energy_points()
                         * spectral_space.number_of_wavevector_points()) as u64,
                     ProgressDrawTarget::term(term, 60),
                 );
@@ -55,7 +55,9 @@ where
                             "Wavevector: {:.1}, Energy {:.5}eV",
                             wavevector, energy
                         ));
-                        pb.set_position((idx * jdx + jdx) as u64);
+                        pb.set_position(
+                            (idx * spectral_space.number_of_energy_points() + jdx) as u64,
+                        );
                         for (boundary_element, diagonal_element, ind) in [
                             (
                                 hamiltonian_matrix.values()[1],
@@ -74,10 +76,14 @@ where
                             let t = -boundary_element;
                             let z = Complex::from((d - energy) / (t + t));
                             if ind == 0 {
-                                self.retarded[idx * jdx + jdx].values_mut()[0] =
+                                self.retarded
+                                    [idx * spectral_space.number_of_energy_points() + jdx]
+                                    .values_mut()[0] =
                                     -Complex::from(t) * (imaginary_unit * z.acos()).exp();
                             } else {
-                                self.retarded[idx * jdx + jdx].values_mut()[1] =
+                                self.retarded
+                                    [idx * spectral_space.number_of_energy_points() + jdx]
+                                    .values_mut()[1] =
                                     -Complex::from(t) * (imaginary_unit * z.acos()).exp();
                             }
                         }

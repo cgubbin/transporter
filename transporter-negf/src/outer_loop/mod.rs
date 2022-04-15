@@ -292,8 +292,10 @@ where
     }
 }
 
+use crate::app::Calculation;
 use nalgebra::RealField;
 use nalgebra::{Const, Dynamic, Matrix, VecStorage};
+
 pub(crate) struct LoopTracker<T: nalgebra::RealField, BandDim: SmallDim>
 where
     DefaultAllocator: Allocator<
@@ -310,6 +312,7 @@ where
     potential: Potential<T>,
     fermi_level: DVector<T>,
     iteration: usize,
+    calculation: Calculation,
 }
 
 impl<T: Copy + RealField, BandDim: SmallDim> LoopTracker<T, BandDim>
@@ -344,6 +347,7 @@ where
                     .map(|_| T::zero())
                     .collect::<Vec<_>>(),
             ),
+            calculation: global_tracker.calculation(),
             iteration: 0,
         }
     }

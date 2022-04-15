@@ -21,7 +21,7 @@ use nalgebra::{
 use num_traits::{NumCast, ToPrimitive};
 use serde::{de::DeserializeOwned, Deserialize};
 use std::path::PathBuf;
-use transporter_mesher::{Connectivity, Mesh, Mesh1d, SmallDim};
+use transporter_mesher::{Mesh, Mesh1d, Segment1dConnectivity, SmallDim};
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
@@ -142,7 +142,7 @@ where
             let mesh: Mesh1d<T::RealField> = build_mesh_with_config(&config, device)?;
             tracing::info!("Mesh initialised with {} elements", mesh.elements().len());
 
-            let tracker = tracker::TrackerBuilder::new()
+            let tracker = tracker::TrackerBuilder::new(cli.global_opts.calculation)
                 .with_mesh(&mesh)
                 .with_info_desk(&info_desk)
                 .build()?;
@@ -190,24 +190,26 @@ where
     )
 }
 
-fn build_and_run<T, GeometryDim: SmallDim, Conn, BandDim: SmallDim>(
+fn build_and_run<T, BandDim: SmallDim>(
     config: Configuration<T>,
-    mesh: &Mesh<T, GeometryDim, Conn>,
-    tracker: &Tracker<'_, T, GeometryDim, BandDim>,
+    mesh: &Mesh<T, U1, Segment1dConnectivity>,
+    tracker: &Tracker<'_, T, U1, BandDim>,
     _calculation_type: Calculation,
     _marker: std::marker::PhantomData<T>,
 ) -> color_eyre::Result<()>
 where
     T: ArgminFloat + Copy + num_traits::NumCast + RealField,
-    Conn: Connectivity<T, GeometryDim>,
     //Tracker: crate::HamiltonianInfoDesk<T::RealField>,
-    DefaultAllocator: Allocator<T, GeometryDim>
+    DefaultAllocator: Allocator<T, U1>
         + Allocator<T, BandDim>
         + Allocator<[T; 3], BandDim>
         + Allocator<
             Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
             BandDim,
         >,
+    <DefaultAllocator as Allocator<T, U1>>::Buffer: Send + Sync,
+    <DefaultAllocator as Allocator<T, BandDim>>::Buffer: Send + Sync,
+    <DefaultAllocator as Allocator<[T; 3], BandDim>>::Buffer: Send + Sync,
 {
     let mut hamiltonian = crate::hamiltonian::HamiltonianBuilder::new()
         .with_mesh(mesh)
@@ -247,12 +249,12 @@ where
     };
     let mut outer_loop: crate::outer_loop::OuterLoop<
         T,
-        GeometryDim,
-        Conn,
+        U1,
+        Segment1dConnectivity,
         BandDim,
         crate::spectral::SpectralSpace<
             T::RealField,
-            crate::spectral::WavevectorSpace<T, GeometryDim, Conn>,
+            crate::spectral::WavevectorSpace<T, U1, Segment1dConnectivity>,
         >,
     > = crate::outer_loop::OuterLoopBuilder::new()
         .with_mesh(mesh)

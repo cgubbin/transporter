@@ -22,7 +22,7 @@
 //! nodes of the mesh.
 //!
 
-mod global;
+pub mod global;
 mod local;
 
 pub use global::*;

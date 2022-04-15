@@ -65,7 +65,8 @@ impl<T, GeometryDim, Conn, BandDim> Outer<T>
     for OuterLoop<'_, T, GeometryDim, Conn, BandDim, SpectralSpace<T, ()>>
 where
     T: ArgminFloat + RealField + Copy,
-    Conn: Connectivity<T, GeometryDim>,
+    Conn: Connectivity<T, GeometryDim> + Send + Sync,
+    <Conn as Connectivity<T, GeometryDim>>::Element: Send + Sync,
     GeometryDim: SmallDim,
     BandDim: SmallDim,
     DefaultAllocator: Allocator<T, GeometryDim>
@@ -74,6 +75,9 @@ where
             BandDim,
         > + Allocator<T, BandDim>
         + Allocator<[T; 3], BandDim>,
+    <DefaultAllocator as Allocator<T, GeometryDim>>::Buffer: Send + Sync,
+    <DefaultAllocator as Allocator<T, BandDim>>::Buffer: Send + Sync,
+    <DefaultAllocator as Allocator<[T; 3], BandDim>>::Buffer: Send + Sync,
 {
     fn is_loop_converged(&self, previous_potential: &mut Potential<T>) -> color_eyre::Result<bool> {
         let potential = self.update_potential(previous_potential)?;
@@ -162,39 +166,6 @@ where
 
         potential = Potential::from_vector(solution.get_param());
         //// A single iteration before the loop to avoid updating the potential with an empty charge vector
-        //self.single_iteration(&potential)?;
-        //let mut iteration = 1;
-
-        //// Update the Fermi level using the new charge density
-        //self.tracker.fermi_level = DVector::from(self.info_desk.determine_fermi_level(
-        //    self.mesh,
-        //    &potential,
-        //    self.tracker.charge_as_ref(),
-        //));
-
-        //while !self.is_loop_converged(&mut potential)? {
-        //    // Update the Fermi level using the new charge density
-        //    self.tracker.fermi_level = DVector::from(self.info_desk.determine_fermi_level(
-        //        self.mesh,
-        //        &potential,
-        //        self.tracker.charge_as_ref(),
-        //    ));
-
-        //    // Put the new potential into the tracker so the GF can see it.
-        //    self.tracker.update_potential(potential.clone());
-        //    // Todo Get the new potential into the new hamiltonian...
-        //    self.hamiltonian
-        //        .update_potential(&self.tracker, self.mesh)?;
-        //    // Do the inner loop
-        //    self.single_iteration(&potential)?;
-
-        //    iteration += 1;
-        //    if iteration >= self.convergence_settings.maximum_outer_iterations() {
-        //        return Err(color_eyre::eyre::eyre!(
-        //            "Reached maximum iteration count in the outer loop"
-        //        ));
-        //    }
-        //}
         Ok(())
     }
 }
@@ -212,7 +183,8 @@ impl<T, GeometryDim, Conn, BandDim> Outer<T>
     >
 where
     T: ArgminFloat + RealField + Copy,
-    Conn: Connectivity<T, GeometryDim>,
+    Conn: Connectivity<T, GeometryDim> + Send + Sync,
+    <Conn as Connectivity<T, GeometryDim>>::Element: Send + Sync,
     GeometryDim: SmallDim,
     BandDim: SmallDim,
     DefaultAllocator: Allocator<T, GeometryDim>
@@ -221,66 +193,91 @@ where
             BandDim,
         > + Allocator<T, BandDim>
         + Allocator<[T; 3], BandDim>,
+    <DefaultAllocator as Allocator<T, GeometryDim>>::Buffer: Send + Sync,
+    <DefaultAllocator as Allocator<T, BandDim>>::Buffer: Send + Sync,
+    <DefaultAllocator as Allocator<[T; 3], BandDim>>::Buffer: Send + Sync,
 {
-    fn is_loop_converged(
-        &self,
-        _previous_potential: &mut Potential<T>,
-    ) -> color_eyre::Result<bool> {
-        //let potential = self.update_potential()?;
-        //let result = potential.is_change_within_tolerance(
-        //    previous_potential,
-        //    self.convergence_settings.outer_tolerance(),
-        //);
-        //let _ = std::mem::replace(previous_potential, potential);
-        //Ok(result)
-        Ok(false)
+    fn is_loop_converged(&self, previous_potential: &mut Potential<T>) -> color_eyre::Result<bool> {
+        let potential = self.update_potential(previous_potential)?;
+        let result = potential.is_change_within_tolerance(
+            previous_potential,
+            self.convergence_settings.outer_tolerance(),
+        );
+        let _ = std::mem::replace(previous_potential, potential);
+        Ok(result)
     }
     /// Carry out a single iteration of the self-consistent outer loop
-    fn single_iteration(&mut self, potential: &DVector<T>) -> color_eyre::Result<DVector<T>> {
-        // Build the inner loop, if we are running a ballistic calculation or have not arrived
-        // at an initial converged ballistic solution then we create a
-        // coherent inner loop, with sparse matrices, else we create a dense one.
-        // TODO Builder the gfs and SE here is a bad idea, we should do this else where so it is not redone on every iteration
-        //let mut greens_functions = GreensFunctionBuilder::new()
-        //    .with_info_desk(self.info_desk)
-        //    .with_mesh(self.mesh)
-        //    .with_spectral_discretisation(self.spectral)
-        //    .build();
-        //let mut self_energies = SelfEnergyBuilder::new()
-        //    .with_mesh(self.mesh)
-        //    .with_spectral_discretisation(self.spectral)
-        //    .build();
-        //let mut inner_loop =
-        //    self.build_incoherent_inner_loop(&mut greens_functions, &mut self_energies);
-        //let mut charge_and_currents = self.tracker.charge_and_currents.clone();
-        //inner_loop.run_loop(&mut charge_and_currents)?;
-        //let _ = std::mem::replace(self.tracker.charge_and_currents_mut(), charge_and_currents);
-        //Ok(())
-        todo!()
+    fn single_iteration(
+        &mut self,
+        previous_potential: &DVector<T>,
+    ) -> color_eyre::Result<DVector<T>> {
+        self.tracker
+            .update_potential(Potential::from_vector(previous_potential.clone()));
+        // Todo Get the new potential into the new hamiltonian...
+        self.hamiltonian
+            .update_potential(&self.tracker, self.mesh)
+            .expect("Ham update failed");
+
+        // TODO Building the gfs and SE here is a bad idea, we should do this else where so it is not redone on every iteration
+        tracing::trace!("Initialising Greens Functions");
+        let mut greens_functions = GreensFunctionBuilder::new()
+            .with_info_desk(self.info_desk)
+            .with_mesh(self.mesh)
+            .with_spectral_discretisation(self.spectral)
+            .build()
+            .expect("Gf build failed");
+        tracing::trace!("Initialising Self Energies");
+        let mut self_energies = SelfEnergyBuilder::new()
+            .with_mesh(self.mesh)
+            .with_spectral_discretisation(self.spectral)
+            .build()
+            .expect("Self energy build failed");
+        let mut inner_loop =
+            self.build_coherent_inner_loop(&mut greens_functions, &mut self_energies);
+        let mut charge_and_currents = self.tracker.charge_and_currents.clone();
+        inner_loop
+            .run_loop(&mut charge_and_currents)
+            .expect("Inner loop failed");
+        let _ = std::mem::replace(self.tracker.charge_and_currents_mut(), charge_and_currents);
+
+        // Update the Fermi level in the device
+        self.tracker.fermi_level = DVector::from(self.info_desk.determine_fermi_level(
+            self.mesh,
+            &Potential::from_vector(previous_potential.clone()),
+            self.tracker.charge_as_ref(),
+        ));
+        let potential = self
+            .update_potential(&Potential::from_vector(previous_potential.clone()))
+            .expect("Potential update failed");
+
+        Ok(potential.as_ref().clone())
     }
 
     fn run_loop(&mut self, mut potential: Potential<T>) -> color_eyre::Result<()> {
-        // let mut iteration = 0;
-        // while !self.is_loop_converged(&mut potential)? {
-        //     self.single_iteration(&potential)?;
-        //     iteration += 1;
-        //     if iteration >= self.convergence_settings.maximum_outer_iterations() {
-        //         return Err(color_eyre::eyre::eyre!(
-        //             "Reached maximum iteration count in the inner loop"
-        //         ));
-        //     }
-        // }
+        let mixer = LinearMixer::new(
+            T::from_f64(0.5).unwrap(),
+            self.convergence_settings.outer_tolerance(),
+            self.convergence_settings.maximum_outer_iterations() as u64,
+        );
+        let mut solver = FixedPointSolver::new(mixer, potential.as_ref().clone());
+        tracing::info!("Beginning outer self-consistent loop");
+        let solution = solver.run(self).map_err(|e| {
+            color_eyre::eyre::eyre!("Failed to optimise the outer iteration: {:?}", e)
+        })?;
+
+        dbg!(solution.get_param());
+
+        potential = Potential::from_vector(solution.get_param());
+        //// A single iteration before the loop to avoid updating the potential with an empty charge vector
         Ok(())
     }
 }
 
 use crate::greens_functions::{AggregateGreensFunctions, GreensFunctionBuilder};
 use crate::inner_loop::InnerLoopBuilder;
-use argmin::core::observers::ObserverMode;
-use argmin::core::observers::SlogLogger;
 use argmin::core::ArgminFloat;
 use argmin::core::Executor;
-use transporter_poisson::{NewtonSolver, PoissonMethods, PoissonSourceBuilder};
+use transporter_poisson::PoissonMethods;
 
 impl<T, GeometryDim, Conn, BandDim, SpectralSpace>
     OuterLoop<'_, T, GeometryDim, Conn, BandDim, SpectralSpace>
@@ -425,6 +422,7 @@ impl<T, GeometryDim, Conn, BandDim>
 where
     T: ArgminFloat + RealField + Copy,
     Conn: Connectivity<T, GeometryDim>,
+    <Conn as Connectivity<T, GeometryDim>>::Element: Send + Sync,
     GeometryDim: SmallDim,
     BandDim: SmallDim,
     DefaultAllocator: Allocator<T, GeometryDim>
@@ -469,6 +467,59 @@ impl<T, GeometryDim, Conn, BandDim>
 where
     T: ArgminFloat + RealField + Copy,
     Conn: Connectivity<T, GeometryDim>,
+    <Conn as Connectivity<T, GeometryDim>>::Element: Send + Sync,
+    GeometryDim: SmallDim,
+    BandDim: SmallDim,
+    DefaultAllocator: Allocator<T, GeometryDim>
+        + Allocator<
+            Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
+            BandDim,
+        > + Allocator<T, BandDim>
+        + Allocator<[T; 3], BandDim>,
+{
+    fn build_coherent_inner_loop<'a>(
+        &'a self,
+        greens_functions: &'a mut AggregateGreensFunctions<
+            'a,
+            T,
+            CsrMatrix<Complex<T>>,
+            GeometryDim,
+            BandDim,
+        >,
+        self_energies: &'a mut SelfEnergy<T, GeometryDim, Conn, CsrMatrix<Complex<T>>>,
+    ) -> InnerLoop<
+        'a,
+        T,
+        GeometryDim,
+        Conn,
+        CsrMatrix<Complex<T>>,
+        SpectralSpace<T, WavevectorSpace<T, GeometryDim, Conn>>,
+        BandDim,
+    > {
+        InnerLoopBuilder::new()
+            .with_convergence_settings(self.convergence_settings)
+            .with_mesh(self.mesh)
+            .with_spectral_discretisation(self.spectral)
+            .with_hamiltonian(self.hamiltonian)
+            .with_greens_functions(greens_functions)
+            .with_self_energies(self_energies)
+            .build()
+    }
+}
+
+impl<T, GeometryDim, Conn, BandDim>
+    OuterLoop<
+        '_,
+        T,
+        GeometryDim,
+        Conn,
+        BandDim,
+        SpectralSpace<T, WavevectorSpace<T, GeometryDim, Conn>>,
+    >
+where
+    T: ArgminFloat + RealField + Copy,
+    Conn: Connectivity<T, GeometryDim>,
+    <Conn as Connectivity<T, GeometryDim>>::Element: Send + Sync,
     GeometryDim: SmallDim,
     BandDim: SmallDim,
     DefaultAllocator: Allocator<T, GeometryDim>
@@ -782,7 +833,8 @@ where
     T: RealField + Copy + ArgminFloat, // + conflux::core::FPFloat,
     GeometryDim: SmallDim,
     BandDim: SmallDim,
-    Conn: Connectivity<T, GeometryDim>,
+    Conn: Connectivity<T, GeometryDim> + Send + Sync,
+    <Conn as Connectivity<T, GeometryDim>>::Element: Send + Sync,
     DefaultAllocator: Allocator<T, GeometryDim>
         + Allocator<T, BandDim>
         + Allocator<[T; 3], BandDim>
@@ -790,6 +842,53 @@ where
             Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
             BandDim,
         >,
+    <DefaultAllocator as Allocator<T, GeometryDim>>::Buffer: Send + Sync,
+    <DefaultAllocator as Allocator<T, BandDim>>::Buffer: Send + Sync,
+    <DefaultAllocator as Allocator<[T; 3], BandDim>>::Buffer: Send + Sync,
+{
+    type Output = DVector<T>;
+    type Param = DVector<T>;
+    type Float = T;
+    type Square = DMatrix<T>;
+
+    #[tracing::instrument(name = "Single iteration", fields(iteration = self.tracker.iteration + 1), skip_all)]
+    fn update(
+        &mut self,
+        potential: &Self::Param,
+    ) -> Result<Self::Param, conflux::core::FixedPointError<T>> {
+        let new_potential = self.single_iteration(potential).expect("It should work");
+        let change = (&new_potential - potential).norm() / T::from_usize(potential.len()).unwrap();
+        tracing::info!("Change in potential per element: {change}");
+        self.tracker.iteration += 1;
+        Ok(new_potential)
+    }
+}
+
+impl<T, GeometryDim, Conn, BandDim> conflux::core::FixedPointProblem
+    for OuterLoop<
+        '_,
+        T,
+        GeometryDim,
+        Conn,
+        BandDim,
+        SpectralSpace<T, WavevectorSpace<T, GeometryDim, Conn>>,
+    >
+where
+    T: RealField + Copy + ArgminFloat, // + conflux::core::FPFloat,
+    GeometryDim: SmallDim,
+    BandDim: SmallDim,
+    Conn: Connectivity<T, GeometryDim> + Send + Sync,
+    <Conn as Connectivity<T, GeometryDim>>::Element: Send + Sync,
+    DefaultAllocator: Allocator<T, GeometryDim>
+        + Allocator<T, BandDim>
+        + Allocator<[T; 3], BandDim>
+        + Allocator<
+            Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
+            BandDim,
+        >,
+    <DefaultAllocator as Allocator<T, GeometryDim>>::Buffer: Send + Sync,
+    <DefaultAllocator as Allocator<T, BandDim>>::Buffer: Send + Sync,
+    <DefaultAllocator as Allocator<[T; 3], BandDim>>::Buffer: Send + Sync,
 {
     type Output = DVector<T>;
     type Param = DVector<T>;
@@ -813,7 +912,7 @@ where
 mod test {
     use super::{OuterLoopInfoDesk, Potential};
     use crate::{
-        app::{tracker::TrackerBuilder, Configuration},
+        app::{tracker::TrackerBuilder, Calculation, Configuration},
         device::{info_desk::BuildInfoDesk, Device},
     };
     use nalgebra::{DVector, U1};
@@ -832,7 +931,7 @@ mod test {
         let config: Configuration<f64> = Configuration::build().unwrap();
         let mesh: transporter_mesher::Mesh1d<f64> =
             crate::app::build_mesh_with_config(&config, device).unwrap();
-        let tracker = TrackerBuilder::new()
+        let tracker = TrackerBuilder::new(Calculation::Coherent)
             .with_mesh(&mesh)
             .with_info_desk(&info_desk)
             .build()
@@ -888,7 +987,7 @@ mod test {
         let config: Configuration<f64> = Configuration::build().unwrap();
         let mesh: transporter_mesher::Mesh1d<f64> =
             crate::app::build_mesh_with_config(&config, device).unwrap();
-        let tracker = TrackerBuilder::new()
+        let tracker = TrackerBuilder::new(Calculation::Coherent)
             .with_mesh(&mesh)
             .with_info_desk(&info_desk)
             .build()
@@ -947,7 +1046,7 @@ mod test {
         let config: Configuration<f64> = Configuration::build().unwrap();
         let mesh: transporter_mesher::Mesh1d<f64> =
             crate::app::build_mesh_with_config(&config, device).unwrap();
-        let tracker = TrackerBuilder::new()
+        let tracker = TrackerBuilder::new(Calculation::Coherent)
             .with_mesh(&mesh)
             .with_info_desk(&info_desk)
             .build()

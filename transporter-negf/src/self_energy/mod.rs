@@ -138,14 +138,16 @@ fn construct_csr_pattern_from_elements(
 impl<'a, T, GeometryDim, Conn>
     SelfEnergyBuilder<
         T,
-        &'a SpectralSpace<T, WavevectorSpace<T::RealField, GeometryDim, Conn>>,
+        &'a SpectralSpace<T, WavevectorSpace<T, GeometryDim, Conn>>,
         &'a Mesh<T, GeometryDim, Conn>,
     >
 where
     T: RealField + Copy,
     GeometryDim: SmallDim,
-    Conn: Connectivity<T::RealField, GeometryDim>,
-    DefaultAllocator: Allocator<T::RealField, GeometryDim>,
+    Conn: Connectivity<T, GeometryDim> + Send + Sync,
+    <Conn as Connectivity<T, GeometryDim>>::Element: Send + Sync,
+    DefaultAllocator: Allocator<T, GeometryDim>,
+    <DefaultAllocator as Allocator<T, GeometryDim>>::Buffer: Send + Sync,
 {
     pub(crate) fn build(
         self,

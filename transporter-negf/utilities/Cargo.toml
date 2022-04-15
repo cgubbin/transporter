@@ -1,0 +1,13 @@
+[package]
+name = "utilities"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+nalgebra = "0.30"
+nalgebra-sparse = "0.6.0"
+transporter-negf = {path = ".."}
+rand = "0.8.5"

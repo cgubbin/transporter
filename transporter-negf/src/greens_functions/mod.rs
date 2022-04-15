@@ -1,6 +1,6 @@
 mod aggregate;
 mod dense;
-mod recursive;
+pub mod recursive;
 mod sparse;
 
 use crate::{device::info_desk::DeviceInfoDesk, Hamiltonian};
@@ -13,8 +13,8 @@ use transporter_mesher::SmallDim;
 #[derive(Clone, Debug)]
 pub(crate) struct GreensFunction<Matrix, T>
 where
-    Matrix: GreensFunctionMethods<T>,
-    T: RealField + Copy,
+    Matrix: GreensFunctionMethods<T> + Send + Sync,
+    T: RealField + Copy + Send + Sync,
 {
     matrix: Matrix,
     marker: std::marker::PhantomData<T>,
@@ -22,8 +22,8 @@ where
 
 impl<Matrix, T> GreensFunction<Matrix, T>
 where
-    Matrix: GreensFunctionMethods<T>,
-    T: RealField + Copy,
+    Matrix: GreensFunctionMethods<T> + Send + Sync,
+    T: RealField + Copy + Send + Sync,
 {
     fn as_mut(&mut self) -> &mut Matrix {
         &mut self.matrix
@@ -166,6 +166,7 @@ mod test {
             &'a DeviceInfoDesk<T, GeometryDim, BandDim>,
             &'a Mesh<T, GeometryDim, Conn>,
             &'a SpectralSpace<T, ()>,
+            (),
         >
     where
         T: RealField + Copy,
@@ -228,6 +229,7 @@ mod test {
         }
     }
 
+    use crate::app::Calculation;
     use crate::app::{tracker::TrackerBuilder, Configuration};
     use crate::device::{info_desk::BuildInfoDesk, Device};
     use nalgebra::U1;
@@ -242,7 +244,7 @@ mod test {
         let config: Configuration<f64> = Configuration::build().unwrap();
         let mesh: transporter_mesher::Mesh1d<f64> =
             crate::app::build_mesh_with_config(&config, device).unwrap();
-        let tracker = TrackerBuilder::new()
+        let tracker = TrackerBuilder::new(Calculation::Coherent)
             .with_mesh(&mesh)
             .with_info_desk(&info_desk)
             .build()
@@ -334,7 +336,7 @@ mod test {
         let config: Configuration<f64> = Configuration::build().unwrap();
         let mesh: transporter_mesher::Mesh1d<f64> =
             crate::app::build_mesh_with_config(&config, device).unwrap();
-        let tracker = TrackerBuilder::new()
+        let tracker = TrackerBuilder::new(Calculation::Coherent)
             .with_mesh(&mesh)
             .with_info_desk(&info_desk)
             .build()
@@ -424,7 +426,7 @@ mod test {
         let config: Configuration<f64> = Configuration::build().unwrap();
         let mesh: transporter_mesher::Mesh1d<f64> =
             crate::app::build_mesh_with_config(&config, device).unwrap();
-        let tracker = TrackerBuilder::new()
+        let tracker = TrackerBuilder::new(Calculation::Coherent)
             .with_mesh(&mesh)
             .with_info_desk(&info_desk)
             .build()
@@ -514,7 +516,7 @@ mod test {
         let config: Configuration<f64> = Configuration::build().unwrap();
         let mesh: transporter_mesher::Mesh1d<f64> =
             crate::app::build_mesh_with_config(&config, device).unwrap();
-        let tracker = TrackerBuilder::new()
+        let tracker = TrackerBuilder::new(Calculation::Coherent)
             .with_mesh(&mesh)
             .with_info_desk(&info_desk)
             .build()
@@ -620,7 +622,7 @@ mod test {
         let config: Configuration<f64> = Configuration::build().unwrap();
         let mesh: transporter_mesher::Mesh1d<f64> =
             crate::app::build_mesh_with_config(&config, device).unwrap();
-        let tracker = TrackerBuilder::new()
+        let tracker = TrackerBuilder::new(Calculation::Coherent)
             .with_mesh(&mesh)
             .with_info_desk(&info_desk)
             .build()

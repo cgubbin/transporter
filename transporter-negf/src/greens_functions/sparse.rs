@@ -16,13 +16,15 @@ use crate::{
     spectral::SpectralDiscretisation,
 };
 use console::Term;
-use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
+use indicatif::{ParallelProgressIterator, ProgressBar, ProgressDrawTarget, ProgressStyle};
+use itertools::Itertools;
 use nalgebra::{
     allocator::Allocator, ComplexField, Const, DVector, DefaultAllocator, Dynamic, Matrix, OVector,
     RealField, VecStorage,
 };
 use nalgebra_sparse::CsrMatrix;
 use num_complex::Complex;
+use rayon::prelude::*;
 use transporter_mesher::{Connectivity, ElementMethods, Mesh, SmallDim};
 
 /// A trait for commonly used csr assembly patterns
@@ -102,6 +104,7 @@ where
             let new_diagonal = self
                 .lesser
                 .iter()
+                .skip(idx * spectral_space.number_of_energy_points())
                 .zip(spectral_space.iter_energy_weights())
                 .zip(spectral_space.iter_energy_widths())
                 .fold(
@@ -155,22 +158,35 @@ where
             ));
         }
 
-        // Multiply by the scalar prefactor to arrive at a physical quantity
+        // Multiply by the scalar prefactor in to arrive at a physical quantity
         for (n_band, charge) in charges.iter_mut().enumerate() {
             for (charge_at_element, element) in charge.iter_mut().zip(mesh.elements()) {
                 let region = element.1;
-                let prefactor = T::from_f64(
-                    crate::constants::BOLTZMANN
-                        * crate::constants::ELECTRON_CHARGE
-                        * crate::constants::ELECTRON_MASS
-                        / 2.
-                        / std::f64::consts::PI.powi(2)
-                        / crate::constants::HBAR.powi(2),
-                )
-                .unwrap()
-                    * self.info_desk.temperature
-                    * self.info_desk.effective_masses[region][n_band][1]
-                    / element.0.diameter();
+                let prefactor = match spectral_space.number_of_wavevector_points() {
+                    1 => {
+                        T::from_f64(
+                            crate::constants::BOLTZMANN
+                                * crate::constants::ELECTRON_CHARGE
+                                * crate::constants::ELECTRON_MASS
+                                / 2.
+                                / std::f64::consts::PI.powi(2)
+                                / crate::constants::HBAR.powi(2),
+                        )
+                        .unwrap()
+                            * self.info_desk.temperature
+                            * self.info_desk.effective_masses[region][n_band][1]
+                            / element.0.diameter()
+                    }
+                    _ => {
+                        T::from_f64(
+                            crate::constants::ELECTRON_CHARGE
+                                / 2_f64
+                                / std::f64::consts::PI.powi(2),
+                        )
+                        .unwrap()
+                            / element.0.diameter()
+                    }
+                };
                 *charge_at_element *= prefactor;
             }
         }
@@ -266,10 +282,10 @@ where
 impl<'a, T, GeometryDim, BandDim, Matrix>
     AggregateGreensFunctions<'a, T, Matrix, GeometryDim, BandDim>
 where
-    T: RealField + Copy,
-    GeometryDim: SmallDim,
+    T: RealField + Copy + Clone + Send + Sync,
+    GeometryDim: SmallDim + Send + Sync,
     BandDim: SmallDim,
-    Matrix: GreensFunctionMethods<T>,
+    Matrix: GreensFunctionMethods<T> + Send + Sync,
     DefaultAllocator: Allocator<T, BandDim> + Allocator<[T; 3], BandDim>,
 {
     #[tracing::instrument(name = "Updating Greens Functions", skip_all)]
@@ -280,9 +296,12 @@ where
         spectral_space: &Spectral,
     ) -> color_eyre::Result<()>
     where
-        Conn: Connectivity<T, GeometryDim>,
+        Conn: Connectivity<T, GeometryDim> + Send + Sync,
         Spectral: SpectralDiscretisation<T>,
         DefaultAllocator: Allocator<T, GeometryDim>,
+        <DefaultAllocator as Allocator<T, GeometryDim>>::Buffer: Send + Sync,
+        <DefaultAllocator as Allocator<T, BandDim>>::Buffer: Send + Sync,
+        <DefaultAllocator as Allocator<[T; 3], BandDim>>::Buffer: Send + Sync,
     {
         // In the coherent transport case we only need the retarded and lesser Greens functions (see Lake 1997)
         self.update_aggregate_retarded_greens_function(hamiltonian, self_energy, spectral_space)?;
@@ -297,7 +316,7 @@ where
         spectral_space: &Spectral,
     ) -> color_eyre::Result<()>
     where
-        Conn: Connectivity<T, GeometryDim>,
+        Conn: Connectivity<T, GeometryDim> + Send + Sync,
         Spectral: SpectralDiscretisation<T>,
         DefaultAllocator: Allocator<T, GeometryDim>,
     {
@@ -318,39 +337,22 @@ where
         );
         pb.set_style(spinner_style);
 
-        for (idx, wavevector) in spectral_space.iter_wavevectors().enumerate() {
-            for (jdx, energy) in spectral_space.iter_energies().enumerate() {
-                pb.set_message(format!(
-                    "Wavevector {:.1}, Energy {:.5}eV",
-                    wavevector, energy
-                ));
-                pb.set_position((idx * jdx + jdx) as u64);
-                self.retarded[idx * jdx + jdx]
-                    .as_mut()
-                    .generate_retarded_into(
-                        energy,
-                        wavevector,
-                        hamiltonian,
-                        &self_energy.retarded[idx * jdx + jdx],
-                    )?
-            }
-        }
-        //for (idx, ((retarded_gf, retarded_self_energy), energy)) in self
-        //    .retarded
-        //    .iter_mut()
-        //    .zip(self_energy.retarded.iter())
-        //    .zip(spectral_space.iter_energies())
-        //    .enumerate()
-        //{
-        //    pb.set_message(format!("Energy {:.5}eV", energy));
-        //    pb.set_position(idx as u64);
-        //    retarded_gf.as_mut().generate_retarded_into(
-        //        energy,
-        //        T::zero().real(),
-        //        hamiltonian,
-        //        retarded_self_energy,
-        //    )?;
-        //}
+        let n_energies = spectral_space.number_of_energy_points();
+        self.retarded
+            .par_iter_mut()
+            .enumerate()
+            .progress_with(pb)
+            // .try_for_each(|(index, (wavevector, energy))| {
+            .try_for_each(|(index, gf)| {
+                let energy = spectral_space.energy_at(index % n_energies);
+                let wavevector = spectral_space.wavevector_at(index / n_energies);
+                gf.as_mut().generate_retarded_into(
+                    energy,
+                    wavevector,
+                    hamiltonian,
+                    &self_energy.retarded[index],
+                )
+            })?;
         Ok(())
     }
 
@@ -360,9 +362,12 @@ where
         spectral_space: &Spectral,
     ) -> color_eyre::Result<()>
     where
-        Conn: Connectivity<T, GeometryDim>,
+        Conn: Connectivity<T, GeometryDim> + Send + Sync,
         Spectral: SpectralDiscretisation<T>,
         DefaultAllocator: Allocator<T, GeometryDim>,
+        <DefaultAllocator as Allocator<T, GeometryDim>>::Buffer: Send + Sync,
+        <DefaultAllocator as Allocator<T, BandDim>>::Buffer: Send + Sync,
+        <DefaultAllocator as Allocator<[T; 3], BandDim>>::Buffer: Send + Sync,
     {
         tracing::info!("lesser");
 
@@ -381,14 +386,17 @@ where
         );
         pb.set_style(spinner_style);
 
-        for (idx, wavevector) in spectral_space.iter_wavevectors().enumerate() {
-            for (jdx, energy) in spectral_space.iter_energies().enumerate() {
-                pb.set_message(format!(
-                    "Wavevector {:.1}, Energy {:.5}eV",
-                    wavevector, energy
-                ));
-                pb.set_position((idx * jdx + jdx) as u64);
-                let (source, drain) = match spectral_space.number_of_wavevector_points() {
+        let n_wavevectors = spectral_space.number_of_wavevector_points();
+        let n_energies = spectral_space.number_of_energy_points();
+
+        self.lesser
+            .par_iter_mut()
+            .enumerate()
+            .progress_with(pb)
+            // .try_for_each(|(index, (wavevector, energy))| {
+            .try_for_each(|(index, gf)| {
+                let energy = spectral_space.energy_at(index % n_energies);
+                let (source, drain) = match n_wavevectors {
                     1 => (
                         self.info_desk.get_fermi_integral_at_source(energy),
                         self.info_desk.get_fermi_integral_at_drain(energy),
@@ -398,32 +406,12 @@ where
                         self.info_desk.get_fermi_function_at_drain(energy),
                     ),
                 };
-                self.lesser[idx * jdx + jdx].as_mut().generate_lesser_into(
-                    &self.retarded[idx * jdx + jdx].matrix,
-                    &self_energy.retarded[idx * jdx + jdx],
+                gf.as_mut().generate_lesser_into(
+                    &self.retarded[index].matrix,
+                    &self_energy.retarded[index],
                     &[source, drain],
-                )?;
-            }
-        }
-        //  for (idx, (((lesser_gf, retarded_gf), retarded_self_energy), energy)) in self
-        //      .lesser
-        //      .iter_mut()
-        //      .zip(self.retarded.iter())
-        //      .zip(self_energy.retarded.iter())
-        //      .zip(spectral_space.iter_energies())
-        //      .enumerate()
-        //  {
-        //      pb.set_message(format!("Energy {:.5}eV", energy));
-        //      pb.set_position(idx as u64);
-
-        //      let source_fermi_integral = self.info_desk.get_fermi_integral_at_source(energy);
-        //      let drain_fermi_integral = self.info_desk.get_fermi_integral_at_drain(energy);
-        //      lesser_gf.as_mut().generate_lesser_into(
-        //          &retarded_gf.matrix,
-        //          retarded_self_energy,
-        //          &[source_fermi_integral, drain_fermi_integral],
-        //      )?;
-        //  }
+                )
+            })?;
         Ok(())
     }
 }

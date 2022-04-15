@@ -18,7 +18,7 @@ use nalgebra_sparse::CsrMatrix;
 /// We then propagate the left connected Green's function through the device by solving the equation
 /// g_{ii}^{RL} = (D_{i} - t_{i, i-1} g_{i-1i-1}^{RL} t_{i-1, i})^{-1}
 /// at each layer. Here t_{i, j} are the hopping elements in the Hamiltonian.
-fn left_connected_diagonal<T>(
+pub fn left_connected_diagonal<T>(
     energy: T::RealField,
     hamiltonian: &CsrMatrix<T::RealField>,
     self_energies: &(T, T),
@@ -56,6 +56,44 @@ where
     Ok(diagonal)
 }
 
+#[inline]
+pub fn left_connected_diagonal_no_alloc<T>(
+    energy: T::RealField,
+    hamiltonian: &CsrMatrix<T::RealField>,
+    self_energies: &(T, T),
+    diagonal: &mut DVector<T>,
+    // An optional early termination argument, to go down the whole matrix pass nrows
+) -> color_eyre::Result<()>
+where
+    T: ComplexField + Copy,
+    <T as ComplexField>::RealField: Copy,
+{
+    // at the left contact g_{00}^{LR} is just the inverse of the diagonal matrix element D_{0}
+    diagonal[0] =
+        T::one() / (T::from_real(energy - hamiltonian.row(0).values()[0]) - self_energies.0);
+    let mut previous = diagonal[0]; // g_{00}^{LR}
+    let mut previous_hopping_element = T::from_real(hamiltonian.row(0).values()[1]); // t_{0 1}
+
+    for (idx, (element, row)) in diagonal
+        .iter_mut()
+        .zip(hamiltonian.row_iter())
+        .skip(1)
+        .enumerate()
+    {
+        let hopping_element = T::from_real(row.values()[0]); //  t_{i-1, i}
+        let diagonal = T::from_real(energy - row.values()[1])
+            - if idx == hamiltonian.nrows() - 2 {
+                self_energies.1
+            } else {
+                T::zero()
+            };
+        *element = T::one() / (diagonal - previous * hopping_element * previous_hopping_element); // g_{ii}^{LR}
+        previous_hopping_element = hopping_element;
+        previous = *element;
+    }
+    Ok(())
+}
+
 /// Calculates the right connected diagonal from the Hamiltonian of the system, and the self energy in the semi-infinite right lead.
 ///
 /// This process is initialised using the self-energy in the right lead, and solving
@@ -64,7 +102,7 @@ where
 /// We then propagate the right connected Green's function through the device by solving the equation
 /// g_{ii}^{RR} = (D_{i} - t_{i, i+1} g_{i+1i+1}^{RR} t_{i+1, i})^{-1}
 /// at each layer. Here t_{i, j} are the hopping elements in the Hamiltonian.
-fn right_connected_diagonal<T>(
+pub fn right_connected_diagonal<T>(
     energy: T::RealField,
     hamiltonian: &CsrMatrix<T::RealField>,
     self_energies: &(T, T),
@@ -98,6 +136,41 @@ where
     Ok(diagonal)
 }
 
+#[inline]
+pub fn right_connected_diagonal_no_alloc<T>(
+    energy: T::RealField,
+    hamiltonian: &CsrMatrix<T::RealField>,
+    self_energies: &(T, T),
+    diagonal: &mut DVector<T>,
+) -> color_eyre::Result<()>
+where
+    T: ComplexField + Copy,
+    <T as ComplexField>::RealField: Copy,
+{
+    let nrows = hamiltonian.nrows();
+    assert_eq!(nrows, diagonal.len());
+    // g_{N-1N-1}^{RR} = D_{N-1}^{-1}
+    diagonal[nrows - 1] = T::one()
+        / (T::from_real(energy - hamiltonian.row(nrows - 1).values()[1]) - self_energies.1);
+    let mut previous = diagonal[nrows - 1];
+    let mut previous_hopping_element = T::from_real(hamiltonian.row(nrows - 1).values()[0]); // t_{i, i+1}
+    for (idx, element) in diagonal.iter_mut().rev().skip(1).enumerate() {
+        let row = hamiltonian.row(nrows - 2 - idx);
+        let hopping_element = T::from_real(row.values()[row.values().len() - 1]);
+        let diagonal = T::from_real(energy - row.values()[row.values().len() - 2])
+            - if idx == hamiltonian.nrows() - 2 {
+                self_energies.1
+            } else {
+                T::zero()
+            };
+        *element = T::one() / (diagonal - previous * hopping_element * previous_hopping_element);
+
+        previous_hopping_element = hopping_element;
+        previous = *element;
+    }
+    Ok(())
+}
+
 /// Calculate the full, fully connected diagonal of the retarded Green's function
 ///
 /// The full retarded Greens function diagonal can be found from the left-connected diagonal g_{ii}^{LR}
@@ -105,7 +178,7 @@ where
 /// G_{N-1N-1}^{R} = g_{N-1N-1}^{LR}
 /// and we can find the previous elements using the recursion
 /// G_{i i}^{R} = g_{i i}^{LR} (1 + t_{i i+1} G_{i+1 i+1}^{R} t_{i+1 i} g_{i i}^{LR})
-pub(crate) fn diagonal<T>(
+pub fn diagonal<T>(
     energy: T::RealField,
     hamiltonian: &CsrMatrix<T::RealField>,
     self_energies: &(T, T),
@@ -363,7 +436,7 @@ mod test {
         let config: Configuration<f64> = Configuration::build().unwrap();
         let mesh: transporter_mesher::Mesh1d<f64> =
             crate::app::build_mesh_with_config(&config, device).unwrap();
-        let tracker = TrackerBuilder::new()
+        let tracker = TrackerBuilder::new(Calculation::Coherent)
             .with_mesh(&mesh)
             .with_info_desk(&info_desk)
             .build()
@@ -413,6 +486,8 @@ mod test {
         }
     }
 
+    use crate::app::Calculation;
+
     #[test]
     fn elements_on_the_recursive_diagonal_coincide_with_dense_inverse() {
         let path = std::path::PathBuf::try_from("../.config/structure.toml").unwrap();
@@ -423,7 +498,7 @@ mod test {
         let config: Configuration<f64> = Configuration::build().unwrap();
         let mesh: transporter_mesher::Mesh1d<f64> =
             crate::app::build_mesh_with_config(&config, device).unwrap();
-        let tracker = TrackerBuilder::new()
+        let tracker = TrackerBuilder::new(Calculation::Coherent)
             .with_mesh(&mesh)
             .with_info_desk(&info_desk)
             .build()
@@ -486,7 +561,7 @@ mod test {
         let config: Configuration<f64> = Configuration::build().unwrap();
         let mesh: transporter_mesher::Mesh1d<f64> =
             crate::app::build_mesh_with_config(&config, device).unwrap();
-        let tracker = TrackerBuilder::new()
+        let tracker = TrackerBuilder::new(Calculation::Coherent)
             .with_mesh(&mesh)
             .with_info_desk(&info_desk)
             .build()
@@ -578,7 +653,7 @@ mod test {
         let config: Configuration<f64> = Configuration::build().unwrap();
         let mesh: transporter_mesher::Mesh1d<f64> =
             crate::app::build_mesh_with_config(&config, device).unwrap();
-        let tracker = TrackerBuilder::new()
+        let tracker = TrackerBuilder::new(Calculation::Coherent)
             .with_mesh(&mesh)
             .with_info_desk(&info_desk)
             .build()
@@ -671,7 +746,7 @@ mod test {
         let config: Configuration<f64> = Configuration::build().unwrap();
         let mesh: transporter_mesher::Mesh1d<f64> =
             crate::app::build_mesh_with_config(&config, device).unwrap();
-        let tracker = TrackerBuilder::new()
+        let tracker = TrackerBuilder::new(Calculation::Coherent)
             .with_mesh(&mesh)
             .with_info_desk(&info_desk)
             .build()
