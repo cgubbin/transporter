@@ -1,6 +1,5 @@
 use argmin::core::Operator;
 use conflux::core::FixedPointSolver;
-use conflux::solvers::anderson::Type1AndersonMixer;
 use conflux::solvers::linear::LinearMixer;
 use std::io::Write;
 
@@ -396,7 +395,7 @@ where
         output: &mut DVector<T>,
     ) -> color_eyre::Result<()> {
         // TODO actually swap in place, rather than allocating then swapping
-        let mut updated = self.compute_jacobian_diagonal(fermi_level, solution, mesh);
+        let updated = self.compute_jacobian_diagonal(fermi_level, solution, mesh);
         // Neumann
         let _ = std::mem::replace(output, updated);
         Ok(())
@@ -603,7 +602,6 @@ pub(crate) trait OuterLoopInfoDesk<
     ) -> DVector<T>;
 }
 
-use crate::greens_functions::GreensFunctionInfoDesk;
 impl<T: Copy + RealField, GeometryDim: SmallDim, Conn, BandDim: SmallDim>
     OuterLoopInfoDesk<T, GeometryDim, Conn, BandDim> for DeviceInfoDesk<T, GeometryDim, BandDim>
 where

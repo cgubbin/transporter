@@ -301,7 +301,7 @@ impl<T: Copy + RealField> CsrAssembler<T> {
 
         // Assemble the potential into a diagonal
         for n_row in 0..num_single_band_rows {
-            let element_vertices = element_assembler.populate_element_vertices(&mut scratch, n_row);
+            element_assembler.populate_element_vertices(&mut scratch, n_row);
             let potential = element_assembler.potential(&scratch);
             for n_band in 0..element_assembler.number_of_bands() {
                 let mut csr_row = csr.row_mut(n_row + n_row * n_band);

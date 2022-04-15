@@ -1,6 +1,5 @@
 use super::InnerLoop;
 use crate::{
-    greens_functions::GreensFunctionMethods,
     postprocessor::{ChargeAndCurrent, PostProcess, PostProcessor, PostProcessorBuilder},
     spectral::{SpectralSpace, WavevectorSpace},
 };

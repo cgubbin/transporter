@@ -1,8 +1,7 @@
 use super::{ChargeAndCurrent, PostProcessor};
 use crate::{
-    greens_functions::AggregateGreensFunctionMethods,
-    self_energy::SelfEnergy,
-    spectral::{SpectralDiscretisation, SpectralSpace},
+    greens_functions::AggregateGreensFunctionMethods, self_energy::SelfEnergy,
+    spectral::SpectralDiscretisation,
 };
 use nalgebra::{
     allocator::Allocator, Const, DefaultAllocator, Dynamic, Matrix, RealField, VecStorage,

@@ -17,7 +17,6 @@ use crate::{
 };
 use console::Term;
 use indicatif::{ParallelProgressIterator, ProgressBar, ProgressDrawTarget, ProgressStyle};
-use itertools::Itertools;
 use nalgebra::{
     allocator::Allocator, ComplexField, Const, DVector, DefaultAllocator, Dynamic, Matrix, OVector,
     RealField, VecStorage,

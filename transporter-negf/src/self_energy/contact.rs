@@ -1,8 +1,5 @@
 use super::SelfEnergy;
-use crate::{
-    hamiltonian::Hamiltonian,
-    spectral::{SpectralDiscretisation, SpectralSpace, WavevectorSpace},
-};
+use crate::{hamiltonian::Hamiltonian, spectral::SpectralDiscretisation};
 use console::Term;
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use nalgebra::{allocator::Allocator, ComplexField, DefaultAllocator, RealField};
