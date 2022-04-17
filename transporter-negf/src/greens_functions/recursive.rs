@@ -61,7 +61,7 @@ pub fn left_connected_diagonal_no_alloc<T>(
     energy: T::RealField,
     hamiltonian: &CsrMatrix<T::RealField>,
     self_energies: &(T, T),
-    diagonal: &mut DVector<T>,
+    diagonal: &mut ndarray::Array1<T>,
     // An optional early termination argument, to go down the whole matrix pass nrows
 ) -> color_eyre::Result<()>
 where

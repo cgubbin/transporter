@@ -19,7 +19,7 @@ use console::Term;
 use indicatif::{ParallelProgressIterator, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use nalgebra::{
     allocator::Allocator, ComplexField, Const, DVector, DefaultAllocator, Dynamic, Matrix, OVector,
-    RealField, VecStorage,
+    RealField, SimdComplexField, VecStorage,
 };
 use nalgebra_sparse::CsrMatrix;
 use num_complex::Complex;
@@ -492,21 +492,16 @@ where
             .zip(fermi_functions)
             .map(|(&x, &fermi)| Complex::new(T::zero(), fermi * T::one()) * (x - x.conjugate()))
             .collect::<Vec<_>>();
-        let gamma = CsrMatrix::try_from_pattern_and_values(
-            retarded_self_energy.pattern().clone(),
-            gamma_values,
-        )
-        .unwrap();
+        let n_ele = self.values().len();
 
-        let spectral_density_diagonal =
-            (retarded_greens_function * (gamma) * advanced_greens_function).diagonal_as_csr();
-
-        for (element, &value) in self
+        for (element, value) in self
             .values_mut()
             .iter_mut()
-            .zip(spectral_density_diagonal.values().iter())
+            .zip(retarded_greens_function.row_iter())
         {
-            *element = value;
+            let left = Complex::from(value.get_entry(0).unwrap().into_value().simd_abs());
+            let right = Complex::from(value.get_entry(n_ele - 1).unwrap().into_value().simd_abs());
+            *element = left.powi(2) * gamma_values[0] + right.powi(2) * gamma_values[1];
         }
         Ok(())
     }

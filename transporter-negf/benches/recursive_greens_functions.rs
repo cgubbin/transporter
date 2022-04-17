@@ -20,7 +20,8 @@ pub fn bench_left_connected_diagonal(c: &mut Criterion) {
 
     for num_rows in [32, 64, 128, 256, 512, 1024, 2048].iter() {
         let hamiltonian = construct_test_hamiltonian(*num_rows);
-        let mut diagonal = DVector::zeros(*num_rows);
+        // let mut diagonal = DVector::zeros(*num_rows);
+        let mut diagonal = ndarray::Array1::zeros(*num_rows);
         group.bench_with_input(
             BenchmarkId::from_parameter(*num_rows),
             num_rows,
@@ -97,9 +98,9 @@ pub fn bench_fully_connected_diagonal(c: &mut Criterion) {
 }
 
 criterion_group!(
-    recursive_benchmarks,
-    // bench_left_connected_diagonal,
+    recursive_greens_functions,
+    bench_left_connected_diagonal,
     bench_right_connected_diagonal,
     // bench_fully_connected_diagonal
 );
-criterion_main!(recursive_benchmarks);
+criterion_main!(recursive_greens_functions);
