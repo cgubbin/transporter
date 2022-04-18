@@ -406,6 +406,19 @@ where
             .collect::<Vec<_>>();
         static_epsilon.push(vertex.static_dielectric_constant(vertex.index())[spatial_idx]);
 
+        // The epsilon on the elements adjoining in our staggered grid
+        let static_epsilon = if static_epsilon.len() == 3 {
+            [
+                (static_epsilon[0] + static_epsilon[2]) / (T::one() + T::one()),
+                (static_epsilon[1] + static_epsilon[2]) / (T::one() + T::one()),
+            ]
+        } else {
+            [
+                (static_epsilon[0] + static_epsilon[1]) / (T::one() + T::one()),
+                (static_epsilon[0] + static_epsilon[1]) / (T::one() + T::one()),
+            ]
+        };
+
         // Construct the components of the Hamiltonian at the elements considered
         let elements = construct_internal(delta_m, delta_p, &static_epsilon, prefactor);
 
@@ -436,31 +449,26 @@ where
 fn construct_internal<T: Copy + RealField>(
     delta_m: T,
     delta_p: T,
-    effective_masses: &[T],
+    epsilons: &[T],
     prefactor: T,
 ) -> [T; 3] {
     // Get the first derivative differential operator
     let first_derivatives = first_derivative(delta_m, delta_p, prefactor);
     // Get the second derivative differential operator
-    let l = effective_masses.len();
-    let second_derivatives =
-        second_derivative(delta_m, delta_p, effective_masses[l - 1], prefactor);
-    // Get the first derivative of the mass
-    let epsilon_first_derivatives = epsilon_first_derivative(delta_m, delta_p, effective_masses);
+    let second_derivatives = second_derivative(
+        delta_m,
+        delta_p,
+        (epsilons[0] + epsilons[1]) / (T::one() + T::one()),
+        prefactor,
+    );
+    let epsilon_first_derivatives =
+        (epsilons[1] - epsilons[0]) / (T::one() + T::one()) / (delta_m + delta_p);
 
     [
         second_derivatives[0] + first_derivatives[0] * epsilon_first_derivatives,
         second_derivatives[1] + first_derivatives[1] * epsilon_first_derivatives,
-        if effective_masses.len() == 3 {
-            second_derivatives[2] + first_derivatives[2] * epsilon_first_derivatives
-        } else {
-            T::zero()
-        },
+        second_derivatives[2] + first_derivatives[2] * epsilon_first_derivatives,
     ]
-}
-
-fn is_all_same<T: PartialEq>(arr: &[T]) -> bool {
-    arr.windows(2).all(|w| w[0] == w[1])
 }
 
 /// Computes the second derivatve component of the differential for an inhomogeneous mesh assuming a three point stencil
@@ -478,31 +486,6 @@ fn second_derivative<T: Copy + RealField>(
     let central_term = prefactor * (delta_p.powi(2) - delta_m.powi(2)) - minus_term - plus_term;
 
     [minus_term, central_term, plus_term]
-}
-
-/// Computes the first derivatve masses for an inhomogeneous mesh assuming a three point stencil
-fn epsilon_first_derivative<T: Copy + RealField>(
-    delta_m: T,
-    delta_p: T,
-    epsilon_static: &[T],
-) -> T {
-    if is_all_same(epsilon_static) {
-        return T::zero();
-    }
-    let first_derivative_operator_components = first_derivative(delta_m, delta_p, T::one());
-
-    let mut result = first_derivative_operator_components[0] * epsilon_static[0];
-
-    // If we are at the mesh edge assume the mass and mesh spacing is constant out into the next element
-    if epsilon_static.len() == 2 {
-        result += first_derivative_operator_components[2] * epsilon_static[0]
-            + first_derivative_operator_components[1] * epsilon_static[1];
-    } else {
-        result += first_derivative_operator_components[2] * epsilon_static[1]
-            + first_derivative_operator_components[1] * epsilon_static[2];
-    }
-
-    result
 }
 
 /// Computes the first derivatve component of the differential for an inhomogeneous mesh assuming a three point stencil
@@ -678,30 +661,6 @@ where
 mod test {
     use approx::assert_relative_eq;
     use rand::Rng;
-
-    #[test]
-    fn epsilon_first_derivative_is_zero_when_epsilonss_are_equal() {
-        let mut rng = rand::thread_rng();
-        let epsilon: f64 = rng.gen();
-        let delta_m = rng.gen();
-        let delta_p = rng.gen();
-
-        let epsilons = [epsilon, epsilon, epsilon];
-        let result = super::epsilon_first_derivative(delta_m, delta_p, &epsilons);
-        assert_relative_eq!(result, 0f64);
-    }
-
-    #[test]
-    fn epsilon_first_derivative_is_zero_when_epsilons_are_equal_at_mesh_edge() {
-        let mut rng = rand::thread_rng();
-        let epsilon: f64 = rng.gen();
-        let delta_m = rng.gen();
-        let delta_p = rng.gen();
-
-        let epsilons = [epsilon, epsilon];
-        let result = super::epsilon_first_derivative(delta_m, delta_p, &epsilons);
-        assert_relative_eq!(result, 0f64);
-    }
 
     #[test]
     fn poisson_first_derivative_sum_is_zero_when_deltas_are_equal() {

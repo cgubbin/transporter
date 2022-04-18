@@ -165,7 +165,7 @@ impl<T: RealField> LayerInfoDesk<T, U1> {
         Self {
             effective_mass: nalgebra::Vector1::new([0.067, 0.067, 0.067]),
             band_offset: Point1::new(0.3),
-            dielectric_constant: [11.5, 11.5, 11.5],
+            dielectric_constant: [40.0, 40.0, 40.0],
         }
     }
 

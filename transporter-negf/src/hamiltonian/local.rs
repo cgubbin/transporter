@@ -469,7 +469,7 @@ fn construct_internal<T: Copy + RealField>(
                 / T::from_f64(ELECTRON_MASS).expect("Electron mass must fit in T"),
         if effective_masses.len() == 3 {
             second_derivatives[2]
-                + first_derivatives[2] * mass_first_derivatives
+                - first_derivatives[2] * mass_first_derivatives
                     / T::from_f64(ELECTRON_MASS).expect("Electron mass must fit in T")
         } else {
             T::zero()
