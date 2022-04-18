@@ -345,7 +345,7 @@ where
         let output = res.state.best_param.unwrap();
         // We found the change in potential, so add the full solution back on to find the net result...
         let output =
-            previous_potential.as_ref() + &output - DVector::from(vec![output[2]; output.len()]);
+            previous_potential.as_ref() + &output - DVector::from(vec![output[0]; output.len()]);
 
         // Writing to file
         let system_time = std::time::SystemTime::now();

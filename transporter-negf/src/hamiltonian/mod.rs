@@ -99,7 +99,6 @@ impl<T: Copy + RealField> Hamiltonian<T> {
 
     /// Finds the total Hamiltonian at fixed `wavevector`
     pub(crate) fn calculate_total(&self, wavevector: T) -> CsrMatrix<T> {
-        // TODO Positive or negative? Let's make a decision
         &self.fixed - &self.potential + &self.wavevector * wavevector.powi(2)
     }
 }

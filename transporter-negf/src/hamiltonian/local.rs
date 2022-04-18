@@ -375,8 +375,8 @@ where
     );
 
     // The position and band independent prefactor
-    let prefactor =
-        -T::from_f64(HBAR * HBAR / ELECTRON_CHARGE / 2.).expect("Prefactor must fit in T");
+    let prefactor = -T::from_f64(HBAR * HBAR / ELECTRON_CHARGE / ELECTRON_MASS / 2.)
+        .expect("Prefactor must fit in T");
     for (band_index, mut row) in output.row_iter_mut().enumerate() {
         // Get the indices of the elements connected to `element` and their displacements from `element`
         let deltas = element.deltas_by_dimension();
@@ -419,8 +419,21 @@ where
                 .collect::<Vec<_>>();
             masses.push(mass);
 
+            // The epsilon on the elements adjoining in our staggered grid
+            let inverse_masses = if masses.len() == 3 {
+                [
+                    (T::one() / masses[0] + T::one() / masses[2]) / (T::one() + T::one()),
+                    (T::one() / masses[1] + T::one() / masses[2]) / (T::one() + T::one()),
+                ]
+            } else {
+                [
+                    (T::one() / masses[0] + T::one() / masses[1]) / (T::one() + T::one()),
+                    (T::one() / masses[0] + T::one() / masses[1]) / (T::one() + T::one()),
+                ]
+            };
+
             // Construct the components of the Hamiltonian at the elements considered
-            let elements = construct_internal(delta_m, delta_p, &masses, prefactor);
+            let elements = construct_internal(delta_m, delta_p, &inverse_masses, prefactor);
             single_band_values.push((elements[0], indices[0]));
             // If the length of `delta_row != 2` we are at the edge of the mesh and there is only a single connected element
             if delta_row.len() == 2 {
@@ -454,26 +467,32 @@ fn construct_internal<T: Copy + RealField>(
     // Get the first derivative differential operator
     let first_derivatives = first_derivative(delta_m, delta_p, prefactor);
     // Get the second derivative differential operator
-    let l = effective_masses.len();
-    let second_derivatives =
-        second_derivative(delta_m, delta_p, effective_masses[l - 1], prefactor);
+    // let l = effective_masses.len();
+    // let second_derivatives =
+    // second_derivative(delta_m, delta_p, effective_masses[l - 1], prefactor);
+    let second_derivatives = second_derivative(
+        delta_m,
+        delta_p,
+        (effective_masses[0] + effective_masses[1]) / (T::one() + T::one()),
+        prefactor,
+    );
     // Get the first derivative of the mass
-    let mass_first_derivatives = mass_first_derivative(delta_m, delta_p, effective_masses);
+    // let mass_first_derivatives = mass_first_derivative(delta_m, delta_p, effective_masses);
+    let mass_first_derivative =
+        (effective_masses[1] - effective_masses[0]) / (T::one() + T::one()) / (delta_m + delta_p);
+    // let mass_first_derivative = T::zero();
 
     [
-        second_derivatives[0]
-            + first_derivatives[0] * mass_first_derivatives
-                / T::from_f64(ELECTRON_MASS).expect("Electron mass must fit in T"),
-        second_derivatives[1]
-            + first_derivatives[1] * mass_first_derivatives
-                / T::from_f64(ELECTRON_MASS).expect("Electron mass must fit in T"),
-        if effective_masses.len() == 3 {
-            second_derivatives[2]
-                - first_derivatives[2] * mass_first_derivatives
-                    / T::from_f64(ELECTRON_MASS).expect("Electron mass must fit in T")
-        } else {
-            T::zero()
-        },
+        second_derivatives[0] + first_derivatives[0] * mass_first_derivative,
+        second_derivatives[1] + first_derivatives[1] * mass_first_derivative,
+        second_derivatives[2] + first_derivatives[2] * mass_first_derivative,
+        // if effective_masses.len() == 3 {
+        //     second_derivatives[2]
+        //         - first_derivatives[2] * mass_first_derivatives
+        //             / T::from_f64(ELECTRON_MASS).expect("Electron mass must fit in T")
+        // } else {
+        //     T::zero()
+        // },
     ]
 }
 
@@ -488,10 +507,8 @@ fn second_derivative<T: Copy + RealField>(
     effective_mass: T,
     prefactor: T,
 ) -> [T; 3] {
-    let prefactor = prefactor * (T::one() + T::one())
-        / (delta_m * delta_p * (delta_m + delta_p))
-        / effective_mass
-        / T::from_f64(ELECTRON_MASS).expect("Electron mass must fit in T");
+    let prefactor = prefactor * (T::one() + T::one()) / (delta_m * delta_p * (delta_m + delta_p))
+        * effective_mass;
 
     let minus_term = prefactor * delta_m.powi(2) / delta_p;
     let plus_term = prefactor * delta_p.powi(2) / delta_m;
@@ -505,6 +522,7 @@ fn mass_first_derivative<T: Copy + RealField>(delta_m: T, delta_p: T, masses: &[
     if is_all_same(masses) {
         return T::zero();
     }
+    unreachable!();
     let first_derivative_operator_components = first_derivative(delta_m, delta_p, T::one());
 
     let mut result = first_derivative_operator_components[0] / masses[0];
