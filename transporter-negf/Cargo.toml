@@ -43,7 +43,7 @@ criterion = "0.3.5"
 matrixcompare = { version = "0.3.0", features = ["proptest-support"] }
 proptest = "1.0.0"
 rand = "0.8.5"
-simba = { version = "0.7.1", features = ["packed_simd"] }
+# simba = { version = "0.7.1", features = ["packed_simd"] }
 utilities = { path = "utilities" }
 
 [profile.bench]
@@ -55,6 +55,6 @@ name = "recursive_greens_functions"
 harness = false
 
 
-[[bench]]
-name = "simd_matrices"
-harness = false
+# [[bench]]
+# name = "simd_matrices"
+# harness = false

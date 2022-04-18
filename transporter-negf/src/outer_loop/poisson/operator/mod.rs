@@ -2,12 +2,12 @@ mod global;
 mod local;
 
 use global::CsrAssembler;
-use local::VertexPoissonAssemblerBuilder;
 
 use super::PoissonProblemBuilder;
 use crate::device::info_desk::DeviceInfoDesk;
 use crate::outer_loop::Potential;
 use crate::postprocessor::Charge;
+use crate::utilities::assemblers::VertexAssemblerBuilder;
 use nalgebra::{allocator::Allocator, DVector, DefaultAllocator, RealField};
 use nalgebra::{Const, Dynamic, Matrix, VecStorage};
 use nalgebra_sparse::CsrMatrix;
@@ -44,7 +44,7 @@ where
     type Source = DVector<T>;
     fn build_operator(&self) -> color_eyre::Result<CsrMatrix<T>> {
         // Build out the constructors
-        let vertex_assembler = VertexPoissonAssemblerBuilder::new()
+        let vertex_assembler = VertexAssemblerBuilder::new()
             .with_info_desk(self.info_desk)
             .with_mesh(self.mesh)
             .build();
@@ -54,7 +54,7 @@ where
     }
     fn build_source(&self) -> color_eyre::Result<DVector<T>> {
         // Build out the constructors
-        let vertex_assembler = VertexPoissonAssemblerBuilder::new()
+        let vertex_assembler = VertexAssemblerBuilder::new()
             .with_info_desk(self.info_desk)
             .with_mesh(self.mesh)
             .build();

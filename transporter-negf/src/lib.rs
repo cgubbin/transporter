@@ -11,6 +11,7 @@ mod outer_loop;
 mod postprocessor;
 mod self_energy;
 mod spectral;
+mod utilities;
 
 pub use constants::*;
 pub use hamiltonian::*;

@@ -3,15 +3,12 @@
 //! This module provides global assemblers for the `Hamiltonian` matrix, taking the elements produced in the
 //! local subcrate and throwing them into a global CsrMatrix
 
-use super::{
-    local::{AssembleVertexDiagonal, AssembleVertexMatrix, VertexConnectivityAssembler},
-    PoissonInfoDesk,
+use super::PoissonInfoDesk;
+use crate::utilities::assemblers::{
+    AssembleVertexDiagonal, AssembleVertexMatrix, VertexConnectivityAssembler,
 };
 use color_eyre::eyre::eyre;
-use nalgebra::{
-    allocator::Allocator, DMatrix, DVector, DefaultAllocator, Dynamic, Matrix, RealField, Storage,
-    U1,
-};
+use nalgebra::{allocator::Allocator, DVector, DefaultAllocator, RealField};
 use nalgebra_sparse::{pattern::SparsityPattern, CsrMatrix};
 use std::cell::RefCell;
 
@@ -79,7 +76,6 @@ impl<T: Copy + RealField> CsrAssembler<T> {
         DefaultAllocator: Allocator<T, Assembler::GeometryDim> + Allocator<T, Assembler::BandDim>,
     {
         let sdim = vertex_assembler.solution_dim();
-        let n_vertices = vertex_assembler.num_vertices() + 1;
         let num_rows = sdim * vertex_assembler.num_vertices();
 
         let mut vertex_connections = Vec::new();

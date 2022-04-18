@@ -517,28 +517,6 @@ fn second_derivative<T: Copy + RealField>(
     [minus_term, central_term, plus_term]
 }
 
-/// Computes the first derivatve masses for an inhomogeneous mesh assuming a three point stencil
-fn mass_first_derivative<T: Copy + RealField>(delta_m: T, delta_p: T, masses: &[T]) -> T {
-    if is_all_same(masses) {
-        return T::zero();
-    }
-    unreachable!();
-    let first_derivative_operator_components = first_derivative(delta_m, delta_p, T::one());
-
-    let mut result = first_derivative_operator_components[0] / masses[0];
-
-    // If we are at the mesh edge assume the mass and mesh spacing is constant out into the next element
-    if masses.len() == 2 {
-        result += first_derivative_operator_components[2] / masses[0]
-            + first_derivative_operator_components[1] / masses[1];
-    } else {
-        result += first_derivative_operator_components[2] / masses[1]
-            + first_derivative_operator_components[1] / masses[2];
-    }
-
-    result
-}
-
 /// Computes the first derivatve component of the differential for an inhomogeneous mesh assuming a three point stencil
 fn first_derivative<T: Copy + RealField>(delta_m: T, delta_p: T, prefactor: T) -> [T; 3] {
     let prefactor = prefactor / (delta_m * delta_p * (delta_m + delta_p));
@@ -758,30 +736,6 @@ where
 mod test {
     use approx::assert_relative_eq;
     use rand::Rng;
-
-    #[test]
-    fn mass_first_derivative_is_zero_when_masses_are_equal() {
-        let mut rng = rand::thread_rng();
-        let mass: f64 = rng.gen();
-        let delta_m = rng.gen();
-        let delta_p = rng.gen();
-
-        let masses = [mass, mass, mass];
-        let result = super::mass_first_derivative(delta_m, delta_p, &masses);
-        assert_relative_eq!(result, 0f64);
-    }
-
-    #[test]
-    fn mass_first_derivative_is_zero_when_masses_are_equal_at_mesh_edge() {
-        let mut rng = rand::thread_rng();
-        let mass: f64 = rng.gen();
-        let delta_m = rng.gen();
-        let delta_p = rng.gen();
-
-        let masses = [mass, mass];
-        let result = super::mass_first_derivative(delta_m, delta_p, &masses);
-        assert_relative_eq!(result, 0f64);
-    }
 
     #[test]
     fn first_derivative_sum_is_zero_when_deltas_are_equal() {
