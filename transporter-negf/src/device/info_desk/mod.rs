@@ -7,7 +7,7 @@ use nalgebra::{
     allocator::Allocator, DefaultAllocator, OPoint, OVector, Point1, RealField, U1, U3,
 };
 use std::marker::PhantomData;
-use transporter_mesher::SmallDim;
+use transporter_mesher::{Assignment, SmallDim};
 
 /// Struct holding all the material information necessary to solve the problem
 #[derive(Debug)]
@@ -27,6 +27,70 @@ where
     pub(crate) temperature: T,
     pub(crate) voltage_offsets: Vec<T>,
     marker: PhantomData<GeometryDim>,
+}
+
+impl<T: Copy + RealField, GeometryDim: SmallDim, BandDim: SmallDim>
+    DeviceInfoDesk<T, GeometryDim, BandDim>
+where
+    DefaultAllocator: Allocator<T, BandDim> + Allocator<[T; 3], BandDim>,
+{
+    pub(crate) fn acceptor_density_from_assignment(&self, assignment: &Assignment) -> T {
+        match assignment {
+            Assignment::Core(region) => self.acceptor_densities[*region],
+            Assignment::Boundary(regions) => {
+                let n = regions.len();
+                regions.iter().fold(T::zero(), |acc, &region| {
+                    acc + self.acceptor_densities[region] / T::from_usize(n).unwrap()
+                })
+            }
+        }
+    }
+
+    pub(crate) fn donor_density_from_assignment(&self, assignment: &Assignment) -> T {
+        match assignment {
+            Assignment::Core(region) => self.donor_densities[*region],
+            Assignment::Boundary(regions) => {
+                let n = regions.len();
+                regions.iter().fold(T::zero(), |acc, &region| {
+                    acc + self.donor_densities[region] / T::from_usize(n).unwrap()
+                })
+            }
+        }
+    }
+
+    pub(crate) fn effective_mass_from_assignment(
+        &self,
+        assignment: &Assignment,
+        band_index: usize,
+        spatial_index: usize,
+    ) -> T {
+        match assignment {
+            Assignment::Core(region) => self.effective_masses[*region][band_index][spatial_index],
+            Assignment::Boundary(regions) => {
+                let n = regions.len();
+                regions.iter().fold(T::zero(), |acc, &region| {
+                    acc + self.effective_masses[region][band_index][spatial_index]
+                        / T::from_usize(n).unwrap()
+                })
+            }
+        }
+    }
+
+    pub(crate) fn band_offset_from_assignment(
+        &self,
+        assignment: &Assignment,
+        band_index: usize,
+    ) -> T {
+        match assignment {
+            Assignment::Core(region) => self.band_offsets[*region][band_index],
+            Assignment::Boundary(regions) => {
+                let n = regions.len();
+                regions.iter().fold(T::zero(), |acc, &region| {
+                    acc + self.band_offsets[region][band_index] / T::from_usize(n).unwrap()
+                })
+            }
+        }
+    }
 }
 
 impl<T: RealField, GeometryDim: SmallDim, BandDim: SmallDim> Default
@@ -165,7 +229,7 @@ impl<T: RealField> LayerInfoDesk<T, U1> {
         Self {
             effective_mass: nalgebra::Vector1::new([0.067, 0.067, 0.067]),
             band_offset: Point1::new(0.3),
-            dielectric_constant: [10.0, 10.0, 10.0],
+            dielectric_constant: [11.5, 11.5, 11.5],
         }
     }
 

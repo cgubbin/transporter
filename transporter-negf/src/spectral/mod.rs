@@ -184,7 +184,7 @@ impl<T: RealField + Copy> SpectralDiscretisation<T> for SpectralSpace<T, ()> {
     }
 
     fn energy_at(&self, index: usize) -> T {
-        self.energy.grid.elements()[index].0.midpoint()[0]
+        self.energy.grid.vertices()[index].0[0]
     }
 
     fn wavevector_at(&self, _: usize) -> T {

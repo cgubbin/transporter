@@ -1,5 +1,6 @@
 use argmin::core::Operator;
 use conflux::core::FixedPointSolver;
+use conflux::solvers::anderson::Type1AndersonMixer;
 use conflux::solvers::linear::LinearMixer;
 use std::io::Write;
 
@@ -63,7 +64,7 @@ where
 impl<T, GeometryDim, Conn, BandDim> Outer<T>
     for OuterLoop<'_, T, GeometryDim, Conn, BandDim, SpectralSpace<T, ()>>
 where
-    T: ArgminFloat + RealField + Copy,
+    T: ArgminFloat + RealField + Copy + ndarray::ScalarOperand,
     Conn: Connectivity<T, GeometryDim> + Send + Sync,
     <Conn as Connectivity<T, GeometryDim>>::Element: Send + Sync,
     GeometryDim: SmallDim,
@@ -126,6 +127,7 @@ where
         let mut inner_loop =
             self.build_coherent_inner_loop(&mut greens_functions, &mut self_energies);
         let mut charge_and_currents = self.tracker.charge_and_currents.clone();
+
         inner_loop
             .run_loop(&mut charge_and_currents)
             .expect("Inner loop failed");
@@ -137,6 +139,7 @@ where
             &Potential::from_vector(previous_potential.clone()),
             self.tracker.charge_as_ref(),
         ));
+
         let potential = self
             .update_potential(&Potential::from_vector(previous_potential.clone()))
             .expect("Potential update failed");
@@ -145,17 +148,15 @@ where
 
     #[tracing::instrument(name = "Outer loop", skip_all)]
     fn run_loop(&mut self, mut potential: Potential<T>) -> color_eyre::Result<()> {
-        // let mixer = Type1AndersonMixer::new(
-        //     potential.as_ref().len(),
-        //     self.convergence_settings.outer_tolerance(),
-        //     self.convergence_settings.maximum_outer_iterations() as u64,
-        // );
-        let mixer = LinearMixer::new(
-            T::from_f64(0.5).unwrap(),
+        let mixer = Type1AndersonMixer::new(
+            potential.as_ref().len(),
             self.convergence_settings.outer_tolerance(),
             self.convergence_settings.maximum_outer_iterations() as u64,
         );
-        let mut solver = FixedPointSolver::new(mixer, potential.as_ref().clone());
+        let vec_para = potential.as_ref().iter().map(|x| *x).collect::<Vec<_>>();
+        let initial_parameter = ndarray::Array1::from(vec_para);
+        // let mut solver = FixedPointSolver::new(mixer, potential.as_ref().clone());
+        let mut solver = FixedPointSolver::new(mixer, initial_parameter);
         tracing::info!("Beginning outer self-consistent loop");
         let solution = solver.run(self).map_err(|e| {
             color_eyre::eyre::eyre!("Failed to optimise the outer iteration: {:?}", e)
@@ -163,7 +164,8 @@ where
 
         dbg!(solution.get_param());
 
-        potential = Potential::from_vector(solution.get_param());
+        let solution = DVector::from(solution.get_param().iter().map(|x| *x).collect::<Vec<_>>());
+        potential = Potential::from_vector(solution);
         //// A single iteration before the loop to avoid updating the potential with an empty charge vector
         Ok(())
     }
@@ -181,7 +183,7 @@ impl<T, GeometryDim, Conn, BandDim> Outer<T>
         SpectralSpace<T, WavevectorSpace<T, GeometryDim, Conn>>,
     >
 where
-    T: ArgminFloat + RealField + Copy,
+    T: ArgminFloat + RealField + Copy + ndarray::ScalarOperand,
     Conn: Connectivity<T, GeometryDim> + Send + Sync,
     <Conn as Connectivity<T, GeometryDim>>::Element: Send + Sync,
     GeometryDim: SmallDim,
@@ -253,12 +255,14 @@ where
     }
 
     fn run_loop(&mut self, mut potential: Potential<T>) -> color_eyre::Result<()> {
-        let mixer = LinearMixer::new(
-            T::from_f64(0.5).unwrap(),
+        let mixer = Type1AndersonMixer::new(
+            potential.as_ref().len(),
             self.convergence_settings.outer_tolerance(),
             self.convergence_settings.maximum_outer_iterations() as u64,
         );
-        let mut solver = FixedPointSolver::new(mixer, potential.as_ref().clone());
+        let vec_para = potential.as_ref().iter().map(|x| *x).collect::<Vec<_>>();
+        let initial_parameter = ndarray::Array1::from(vec_para);
+        let mut solver = FixedPointSolver::new(mixer, initial_parameter);
         tracing::info!("Beginning outer self-consistent loop");
         let solution = solver.run(self).map_err(|e| {
             color_eyre::eyre::eyre!("Failed to optimise the outer iteration: {:?}", e)
@@ -266,7 +270,9 @@ where
 
         dbg!(solution.get_param());
 
-        potential = Potential::from_vector(solution.get_param());
+        let solution = DVector::from(solution.get_param().iter().map(|x| *x).collect::<Vec<_>>());
+        potential = Potential::from_vector(solution);
+        // potential = Potential::from_vector(solution.get_param());
         //// A single iteration before the loop to avoid updating the potential with an empty charge vector
         Ok(())
     }
@@ -281,7 +287,7 @@ use transporter_poisson::PoissonMethods;
 impl<T, GeometryDim, Conn, BandDim, SpectralSpace>
     OuterLoop<'_, T, GeometryDim, Conn, BandDim, SpectralSpace>
 where
-    T: ArgminFloat + RealField + Copy,
+    T: ArgminFloat + RealField + Copy + ndarray::ScalarOperand,
     Conn: Connectivity<T, GeometryDim>,
     GeometryDim: SmallDim,
     BandDim: SmallDim,
@@ -419,7 +425,7 @@ where
 impl<T, GeometryDim, Conn, BandDim>
     OuterLoop<'_, T, GeometryDim, Conn, BandDim, SpectralSpace<T, ()>>
 where
-    T: ArgminFloat + RealField + Copy,
+    T: ArgminFloat + RealField + Copy + ndarray::ScalarOperand,
     Conn: Connectivity<T, GeometryDim>,
     <Conn as Connectivity<T, GeometryDim>>::Element: Send + Sync,
     GeometryDim: SmallDim,
@@ -464,7 +470,7 @@ impl<T, GeometryDim, Conn, BandDim>
         SpectralSpace<T, WavevectorSpace<T, GeometryDim, Conn>>,
     >
 where
-    T: ArgminFloat + RealField + Copy,
+    T: ArgminFloat + RealField + Copy + ndarray::ScalarOperand,
     Conn: Connectivity<T, GeometryDim>,
     <Conn as Connectivity<T, GeometryDim>>::Element: Send + Sync,
     GeometryDim: SmallDim,
@@ -516,7 +522,7 @@ impl<T, GeometryDim, Conn, BandDim>
         SpectralSpace<T, WavevectorSpace<T, GeometryDim, Conn>>,
     >
 where
-    T: ArgminFloat + RealField + Copy,
+    T: ArgminFloat + RealField + Copy + ndarray::ScalarOperand,
     Conn: Connectivity<T, GeometryDim>,
     <Conn as Connectivity<T, GeometryDim>>::Element: Send + Sync,
     GeometryDim: SmallDim,
@@ -621,15 +627,16 @@ where
         charge: &Charge<T, BandDim>, // The charge density which is evaluated at each mesh element
     ) -> Vec<T> {
         // Evaluate the Fermi level over the elements of the mesh
-        let fermi_plus_potential_at_elements = charge
+        let result = charge
             .net_charge()
             .into_iter()
-            .zip(mesh.elements().iter())
-            .map(|(&n, element)| {
-                let region = element.1;
+            .zip(mesh.vertices().iter())
+            .zip(potential.as_ref().iter())
+            .map(|((&n, vertex), &phi)| {
+                let assignment = &vertex.1;
                 // Calculate the density of states in the conduction band
                 let n3d = (T::one() + T::one()) // Currently always getting the x-component, is this dumb?
-                    * (self.effective_masses[region][0][0] // The conduction band is always supposed to be in position 0
+                    * (self.effective_mass_from_assignment(assignment, 0, 0) // The conduction band is always supposed to be in position 0
                         * T::from_f64(crate::constants::ELECTRON_MASS).unwrap()
                         * T::from_f64(crate::constants::BOLTZMANN).unwrap()
                         * self.temperature
@@ -650,24 +657,12 @@ where
                 let eta_f_minus_ec_plus_phi =
                     crate::fermi::inverse_fermi_integral_05(gamma * n / n3d) / factor;
 
-                let band_offset = self.band_offsets[region][0]; // Again we assume the band offset for the c-band is in position 0
-                                                                // Get eta_f_plus_phi
-                eta_f_minus_ec_plus_phi + band_offset //- phi // TODO should this be a plus phi or a minus phi??
+                let band_offset = self.band_offset_from_assignment(assignment, 0); // Again we assume the band offset for the c-band is in position 0
+                                                                                   // Get eta_f_plus_phi
+                eta_f_minus_ec_plus_phi + band_offset - phi // TODO should this be a plus phi or a minus phi??
             })
             .collect::<Vec<_>>();
-        // Move to a result evaluated at the vertices by averaging
-        // Use the potential Here as it is defined over the vertices, not the elements
-        let mut result = vec![fermi_plus_potential_at_elements[0] - potential.as_ref()[0]];
-        let mut core = fermi_plus_potential_at_elements
-            .windows(2)
-            .zip(potential.as_ref().iter().skip(1))
-            .map(|(x, &phi)| (x[0] + x[1]) / (T::one() + T::one()) - phi)
-            .collect::<Vec<_>>();
-        result.append(&mut core);
-        result.push(
-            fermi_plus_potential_at_elements[fermi_plus_potential_at_elements.len() - 1]
-                - potential.as_ref()[potential.as_ref().len() - 1],
-        );
+
         result
     }
 
@@ -678,26 +673,18 @@ where
     ) -> DVector<T> {
         let net_charge = charge.net_charge();
 
-        let net_charge = net_charge
+        let result = net_charge
             .iter()
-            .zip(mesh.elements())
-            .map(|(&n, element)| {
-                let region = element.1;
-                let acceptor_density = self.acceptor_densities[region];
-                let donor_density = self.donor_densities[region];
+            .zip(mesh.vertices())
+            .map(|(&n, vertex)| {
+                let assignment = &vertex.1;
+                let acceptor_density = self.acceptor_density_from_assignment(assignment);
+                let donor_density = self.donor_density_from_assignment(assignment);
                 (n + acceptor_density - donor_density)
                     * T::from_f64(crate::constants::ELECTRON_CHARGE).unwrap()
             })
             .collect::<Vec<_>>();
 
-        // Move to a result evaluated at the vertices by averaging
-        let mut result = vec![net_charge[0]];
-        let mut core = net_charge
-            .windows(2)
-            .map(|x| (x[0] + x[1]) / (T::one() + T::one()))
-            .collect::<Vec<_>>();
-        result.append(&mut core);
-        result.push(net_charge[net_charge.len() - 1]);
         DVector::from(result)
     }
 
@@ -724,20 +711,9 @@ where
                 .zip(fermi_level.iter())
                 .zip(potential.iter())
                 .map(|((vertex, &fermi_level), &potential)| {
-                    let region = &vertex.1;
-                    let (band_offset, effective_mass) = match region {
-                        Assignment::Boundary(x) => (
-                            x.iter()
-                                .fold(T::zero(), |acc, &i| acc + self.band_offsets[i][0])
-                                / T::from_usize(x.len()).unwrap(),
-                            x.iter()
-                                .fold(T::zero(), |acc, &i| acc + self.effective_masses[i][0][0])
-                                / T::from_usize(x.len()).unwrap(),
-                        ),
-                        Assignment::Core(x) => {
-                            (self.band_offsets[*x][0], self.effective_masses[*x][0][0])
-                        }
-                    };
+                    let assignment = &vertex.1;
+                    let band_offset = self.band_offset_from_assignment(assignment, 0);
+                    let effective_mass = self.effective_mass_from_assignment(assignment, 0, 0);
 
                     let n3d = (T::one() + T::one())
                         * (effective_mass
@@ -782,20 +758,9 @@ where
                 .zip(fermi_level.iter())
                 .zip(potential.iter())
                 .map(|((vertex, &fermi_level), &potential)| {
-                    let region = &vertex.1;
-                    let (band_offset, effective_mass) = match region {
-                        Assignment::Boundary(x) => (
-                            x.iter()
-                                .fold(T::zero(), |acc, &i| acc + self.band_offsets[i][0])
-                                / T::from_usize(x.len()).unwrap(),
-                            x.iter()
-                                .fold(T::zero(), |acc, &i| acc + self.effective_masses[i][0][0])
-                                / T::from_usize(x.len()).unwrap(),
-                        ),
-                        Assignment::Core(x) => {
-                            (self.band_offsets[*x][0], self.effective_masses[*x][0][0])
-                        }
-                    };
+                    let assignment = &vertex.1;
+                    let band_offset = self.band_offset_from_assignment(assignment, 0);
+                    let effective_mass = self.effective_mass_from_assignment(assignment, 0, 0);
 
                     let n3d = (T::one() + T::one())
                         * (effective_mass
@@ -828,7 +793,7 @@ where
 impl<T, GeometryDim, Conn, BandDim> conflux::core::FixedPointProblem
     for OuterLoop<'_, T, GeometryDim, Conn, BandDim, SpectralSpace<T, ()>>
 where
-    T: RealField + Copy + ArgminFloat, // + conflux::core::FPFloat,
+    T: RealField + Copy + ArgminFloat + ndarray::ScalarOperand, // + conflux::core::FPFloat,
     GeometryDim: SmallDim,
     BandDim: SmallDim,
     Conn: Connectivity<T, GeometryDim> + Send + Sync,
@@ -844,20 +809,28 @@ where
     <DefaultAllocator as Allocator<T, BandDim>>::Buffer: Send + Sync,
     <DefaultAllocator as Allocator<[T; 3], BandDim>>::Buffer: Send + Sync,
 {
-    type Output = DVector<T>;
-    type Param = DVector<T>;
+    // type Output = DVector<T>;
+    // type Param = DVector<T>;
+    // type Float = T;
+    // type Square = DMatrix<T>;
+    type Output = ndarray::Array1<T>;
+    type Param = ndarray::Array1<T>;
     type Float = T;
-    type Square = DMatrix<T>;
+    type Square = ndarray::Array2<T>;
 
     #[tracing::instrument(name = "Single iteration", fields(iteration = self.tracker.iteration + 1), skip_all)]
     fn update(
         &mut self,
         potential: &Self::Param,
     ) -> Result<Self::Param, conflux::core::FixedPointError<T>> {
-        let new_potential = self.single_iteration(potential).expect("It should work");
-        let change = (&new_potential - potential).norm() / T::from_usize(potential.len()).unwrap();
+        let potential = DVector::from(potential.into_iter().map(|x| *x).collect::<Vec<_>>());
+        let new_potential = self.single_iteration(&potential).expect("It should work");
+        let change = (&new_potential - &potential).norm() / T::from_usize(potential.len()).unwrap();
         tracing::info!("Change in potential per element: {change}");
         self.tracker.iteration += 1;
+
+        let vec_para = new_potential.iter().map(|x| *x).collect::<Vec<_>>();
+        let new_potential = ndarray::Array1::from(vec_para);
         Ok(new_potential)
     }
 }
@@ -872,7 +845,7 @@ impl<T, GeometryDim, Conn, BandDim> conflux::core::FixedPointProblem
         SpectralSpace<T, WavevectorSpace<T, GeometryDim, Conn>>,
     >
 where
-    T: RealField + Copy + ArgminFloat, // + conflux::core::FPFloat,
+    T: RealField + Copy + ArgminFloat + ndarray::ScalarOperand, // + conflux::core::FPFloat,
     GeometryDim: SmallDim,
     BandDim: SmallDim,
     Conn: Connectivity<T, GeometryDim> + Send + Sync,
@@ -888,20 +861,27 @@ where
     <DefaultAllocator as Allocator<T, BandDim>>::Buffer: Send + Sync,
     <DefaultAllocator as Allocator<[T; 3], BandDim>>::Buffer: Send + Sync,
 {
-    type Output = DVector<T>;
-    type Param = DVector<T>;
+    // type Output = DVector<T>;
+    // type Param = DVector<T>;
+    // type Float = T;
+    // type Square = DMatrix<T>;
+    type Output = ndarray::Array1<T>;
+    type Param = ndarray::Array1<T>;
     type Float = T;
-    type Square = DMatrix<T>;
+    type Square = ndarray::Array2<T>;
 
     #[tracing::instrument(name = "Single iteration", fields(iteration = self.tracker.iteration + 1), skip_all)]
     fn update(
         &mut self,
         potential: &Self::Param,
     ) -> Result<Self::Param, conflux::core::FixedPointError<T>> {
-        let new_potential = self.single_iteration(potential).expect("It should work");
-        let change = (&new_potential - potential).norm() / T::from_usize(potential.len()).unwrap();
+        let potential = DVector::from(potential.into_iter().map(|x| *x).collect::<Vec<_>>());
+        let new_potential = self.single_iteration(&potential).expect("It should work");
+        let change = (&new_potential - &potential).norm() / T::from_usize(potential.len()).unwrap();
         tracing::info!("Change in potential per element: {change}");
         self.tracker.iteration += 1;
+        let vec_para = new_potential.iter().map(|x| *x).collect::<Vec<_>>();
+        let new_potential = ndarray::Array1::from(vec_para);
         Ok(new_potential)
     }
 }

@@ -5,11 +5,43 @@
 use super::PoissonInfoDesk;
 use crate::constants::{ELECTRON_CHARGE, EPSILON_0};
 use nalgebra::{
-    allocator::Allocator, DVectorSliceMut, DefaultAllocator, OPoint, OVector, RealField,
+    allocator::Allocator, DVector, DVectorSliceMut, DefaultAllocator, OPoint, OVector, RealField,
 };
 use transporter_mesher::{Assignment, Connectivity, Mesh};
 
-use crate::utilities::assemblers::{AssembleVertexDiagonal, AssembleVertexMatrix, VertexAssembler};
+use crate::utilities::assemblers::{VertexAssembler, VertexConnectivityAssembler};
+
+/// Helper trait to construct the diagonal elements of a differential operator
+pub(crate) trait AssembleVertexPoissonDiagonal<T: RealField>:
+    VertexConnectivityAssembler
+{
+    /// Assembles the wavevector component into `output` for the element at `element_index`. Takes an output vector of length
+    /// `num_bands` which is enforced by an assertion
+    fn assemble_vertex_diagonal(&self, vertex_index: usize) -> color_eyre::Result<T>;
+}
+
+/// Helper trait to construct the fixed component of the operator (ie: the differential bit)
+pub(crate) trait AssembleVertexPoissonMatrix<T: RealField>:
+    VertexConnectivityAssembler
+{
+    /// Takes an output matrix of dimension `num_bands` * `num_connections + 1` which is enforced by an assertion, and fills with the fixed
+    ///  component of the Hamiltonian
+    fn assemble_vertex_matrix_into(
+        &self,
+        vertex_index: usize,
+        output: DVectorSliceMut<T>,
+    ) -> color_eyre::Result<()>;
+
+    fn assemble_vertex_matrix(
+        &self,
+        vertex_index: usize,
+        num_connections: usize,
+    ) -> color_eyre::Result<DVector<T>> {
+        let mut output = DVector::zeros(num_connections + 1);
+        self.assemble_vertex_matrix_into(vertex_index, DVectorSliceMut::from(&mut output))?;
+        Ok(output)
+    }
+}
 
 /// Implement the `HamiltonianInfoDesk` trait for the element assembler to reduce verbiosity
 impl<T, Conn, InfoDesk> PoissonInfoDesk<T>
@@ -158,7 +190,7 @@ where
     }
 }
 
-impl<'a, T, Conn, InfoDesk> AssembleVertexMatrix<T>
+impl<'a, T, Conn, InfoDesk> AssembleVertexPoissonMatrix<T>
     for VertexAssembler<'a, T, InfoDesk, Mesh<T, InfoDesk::GeometryDim, Conn>>
 where
     T: Copy + RealField,
@@ -330,7 +362,7 @@ fn first_derivative<T: Copy + RealField>(delta_m: T, delta_p: T, prefactor: T) -
     [minus_term, central_term, plus_term]
 }
 
-impl<'a, T, Conn, InfoDesk> AssembleVertexDiagonal<T>
+impl<'a, T, Conn, InfoDesk> AssembleVertexPoissonDiagonal<T>
     for VertexAssembler<'a, T, InfoDesk, Mesh<T, InfoDesk::GeometryDim, Conn>>
 where
     T: Copy + RealField,

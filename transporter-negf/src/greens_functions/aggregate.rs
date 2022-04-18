@@ -138,7 +138,7 @@ where
         AggregateGreensFunctions<'a, T, CsrMatrix<Complex<T>>, GeometryDim, BandDim>,
     > {
         // Assemble the sparsity pattern for the retarded green's function
-        let sparsity_pattern = assemble_csr_sparsity_for_retarded_gf(self.mesh.elements().len())?;
+        let sparsity_pattern = assemble_csr_sparsity_for_retarded_gf(self.mesh.vertices().len())?;
         // Fill with dummy values
         let initial_values = vec![Complex::from(T::zero()); sparsity_pattern.nnz()];
         let csr = CsrMatrix::try_from_pattern_and_values(sparsity_pattern, initial_values)
@@ -203,7 +203,7 @@ where
         AggregateGreensFunctions<'a, T, CsrMatrix<Complex<T>>, GeometryDim, BandDim>,
     > {
         // Assemble the sparsity pattern for the retarded green's function
-        let sparsity_pattern = assemble_csr_sparsity_for_retarded_gf(self.mesh.elements().len())?;
+        let sparsity_pattern = assemble_csr_sparsity_for_retarded_gf(self.mesh.vertices().len())?;
         // Fill with dummy values
         let initial_values = vec![Complex::from(T::zero()); sparsity_pattern.nnz()];
         let csr = CsrMatrix::try_from_pattern_and_values(sparsity_pattern, initial_values)

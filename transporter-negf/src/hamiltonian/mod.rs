@@ -26,8 +26,8 @@ pub mod global;
 mod local;
 
 pub use global::*;
-pub use local::*;
 
+use crate::utilities::assemblers::VertexAssemblerBuilder;
 use nalgebra::{allocator::Allocator, DefaultAllocator, DimName, OPoint, RealField};
 use nalgebra_sparse::CsrMatrix;
 use transporter_mesher::{Connectivity, Mesh, SmallDim};
@@ -72,7 +72,7 @@ where
 pub(crate) trait PotentialInfoDesk<T: RealField> {
     type BandDim: SmallDim;
     /// Return the potential at mesh element `element` index by averaging over the values at each vertex providec
-    fn potential(&self, vertex_indices: &[usize]) -> T;
+    fn potential(&self, vertex_index: usize) -> T;
     fn number_of_bands(&self) -> usize {
         Self::BandDim::dim()
     }
@@ -90,11 +90,11 @@ impl<T: Copy + RealField> Hamiltonian<T> {
         C: Connectivity<T, GeometryDim>,
         DefaultAllocator: Allocator<T, InfoDesk::BandDim> + Allocator<T, GeometryDim>,
     {
-        let element_assembler = ElementHamiltonianAssemblerBuilder::new()
+        let vertex_assembler = VertexAssemblerBuilder::new()
             .with_info_desk(info_desk)
             .with_mesh(mesh)
             .build();
-        CsrAssembler::assemble_potential_into(&element_assembler, &mut self.potential)
+        CsrAssembler::assemble_potential_into(&vertex_assembler, &mut self.potential)
     }
 
     /// Finds the total Hamiltonian at fixed `wavevector`
@@ -182,22 +182,22 @@ where
         DefaultAllocator: Allocator<T, InfoDesk::GeometryDim> + Allocator<T, InfoDesk::BandDim>,
     {
         // Build out the constructors
-        let element_assembler = ElementHamiltonianAssemblerBuilder::new()
+        let vertex_assembler = VertexAssemblerBuilder::new()
             .with_info_desk(info_desk)
             .with_mesh(mesh)
             .build();
         let hamiltonian_constructor: CsrAssembler<T> =
-            CsrAssembler::from_element_assembler(&element_assembler)?;
+            CsrAssembler::from_vertex_assembler(&vertex_assembler)?;
 
         // Build the fixed component: the differential operator and band offsets
         tracing::trace!("Assembling hamiltonian differential operator");
-        let fixed = hamiltonian_constructor.assemble_fixed(&element_assembler)?;
+        let fixed = hamiltonian_constructor.assemble_fixed(&vertex_assembler)?;
         // Assemble the potential into a diagonal CsrMatrix
         tracing::trace!("Initialising the potential diagonal");
-        let potential = hamiltonian_constructor.assemble_potential(&element_assembler)?;
+        let potential = hamiltonian_constructor.assemble_potential(&vertex_assembler)?;
         // Assemble the dispersive component
         tracing::trace!("Assembling the dispersive diagonal");
-        let wavevector = hamiltonian_constructor.assemble_wavevector(&element_assembler)?;
+        let wavevector = hamiltonian_constructor.assemble_wavevector(&vertex_assembler)?;
 
         assert_eq!(
             fixed.nrows(),

@@ -218,7 +218,7 @@ impl<
 pub(crate) struct OuterLoop<'a, T, GeometryDim, Conn, BandDim, SpectralSpace>
 where
     T: ComplexField,
-    <T as ComplexField>::RealField: ArgminFloat + Copy,
+    <T as ComplexField>::RealField: ArgminFloat + Copy + ndarray::ScalarOperand,
     BandDim: SmallDim,
     GeometryDim: SmallDim,
     Conn: Connectivity<T::RealField, GeometryDim>,
@@ -259,7 +259,7 @@ impl<'a, T, GeometryDim, Conn, BandDim, SpectralSpace>
     >
 where
     T: ComplexField + Copy,
-    <T as ComplexField>::RealField: ArgminFloat + Copy,
+    <T as ComplexField>::RealField: ArgminFloat + Copy + ndarray::ScalarOperand,
     GeometryDim: SmallDim,
     BandDim: SmallDim,
     Conn: Connectivity<T::RealField, GeometryDim>,
@@ -392,9 +392,7 @@ where
     >,
 {
     type BandDim = BandDim;
-    fn potential(&self, vertex_indices: &[usize]) -> T {
-        vertex_indices.iter().fold(T::zero(), |acc, &vertex_index| {
-            acc + self.potential.get(vertex_index)
-        }) / T::from_usize(vertex_indices.len()).unwrap()
+    fn potential(&self, vertex_index: usize) -> T {
+        self.potential.get(vertex_index)
     }
 }

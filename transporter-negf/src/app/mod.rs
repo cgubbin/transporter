@@ -100,7 +100,13 @@ enum Dimension {
 
 pub fn run<T>() -> color_eyre::Result<()>
 where
-    T: ArgminFloat + Copy + DeserializeOwned + NumCast + RealField + ToPrimitive,
+    T: ArgminFloat
+        + Copy
+        + DeserializeOwned
+        + NumCast
+        + RealField
+        + ToPrimitive
+        + ndarray::ScalarOperand,
 {
     // Prepare terminal environment
     let term = console::Term::stdout();
@@ -194,11 +200,11 @@ fn build_and_run<T, BandDim: SmallDim>(
     config: Configuration<T>,
     mesh: &Mesh<T, U1, Segment1dConnectivity>,
     tracker: &Tracker<'_, T, U1, BandDim>,
-    _calculation_type: Calculation,
+    calculation_type: Calculation,
     _marker: std::marker::PhantomData<T>,
 ) -> color_eyre::Result<()>
 where
-    T: ArgminFloat + Copy + num_traits::NumCast + RealField,
+    T: ArgminFloat + Copy + num_traits::NumCast + RealField + ndarray::ScalarOperand,
     //Tracker: crate::HamiltonianInfoDesk<T::RealField>,
     DefaultAllocator: Allocator<T, U1>
         + Allocator<T, BandDim>
@@ -216,72 +222,157 @@ where
         .with_info_desk(tracker)
         .build()?;
 
-    // Begin by building a coherent spectral space, regardless of calculation we begin with a coherent loop
-    //let spectral_space_builder = crate::spectral::constructors::SpectralSpaceBuilder::new()
-    //    .with_number_of_energy_points(config.spectral.number_of_energy_points)
-    //    .with_energy_range(std::ops::Range {
-    //        start: config.spectral.minimum_energy,
-    //        end: config.spectral.maximum_energy,
-    //    })
-    //    .with_energy_integration_method(config.spectral.energy_integration_rule);
-
-    //let spectral_space = spectral_space_builder.build_coherent();
-    let spectral_space_builder = crate::spectral::constructors::SpectralSpaceBuilder::new()
-        .with_number_of_energy_points(config.spectral.number_of_energy_points)
-        .with_energy_range(std::ops::Range {
-            start: config.spectral.minimum_energy,
-            end: config.spectral.maximum_energy,
-        })
-        .with_energy_integration_method(config.spectral.energy_integration_rule)
-        .with_maximum_wavevector(config.spectral.maximum_wavevector)
-        .with_number_of_wavevector_points(config.spectral.number_of_wavevector_points)
-        .with_wavevector_integration_method(config.spectral.wavevector_integration_rule)
-        .with_mesh(mesh);
-
-    let spectral_space = spectral_space_builder.build_incoherent();
-
-    let outer_config = crate::outer_loop::Convergence {
-        outer_tolerance: config.outer_loop.tolerance,
-        maximum_outer_iterations: config.outer_loop.maximum_iterations,
-        inner_tolerance: config.inner_loop.tolerance,
-        maximum_inner_iterations: config.inner_loop.maximum_iterations,
-        calculation_type: Calculation::Coherent,
-    };
-    let mut outer_loop: crate::outer_loop::OuterLoop<
-        T,
-        U1,
-        Segment1dConnectivity,
-        BandDim,
-        crate::spectral::SpectralSpace<
-            T::RealField,
-            crate::spectral::WavevectorSpace<T, U1, Segment1dConnectivity>,
-        >,
-    > = crate::outer_loop::OuterLoopBuilder::new()
-        .with_mesh(mesh)
-        .with_hamiltonian(&mut hamiltonian)
-        .with_spectral_space(&spectral_space)
-        .with_convergence_settings(&outer_config)
-        .with_tracker(tracker)
-        .with_info_desk(tracker.info_desk)
-        .build()?;
-    //let mut outer_loop: crate::outer_loop::OuterLoop<
-    //    T,
-    //    GeometryDim,
-    //    Conn,
-    //    BandDim,
-    //    crate::spectral::SpectralSpace<T::RealField, ()>,
-    //> = crate::outer_loop::OuterLoopBuilder::new()
-    //    .with_mesh(mesh)
-    //    .with_hamiltonian(&mut hamiltonian)
-    //    .with_spectral_space(&spectral_space)
-    //    .with_convergence_settings(&outer_config)
-    //    .with_tracker(tracker)
-    //    .with_info_desk(tracker.info_desk)
-    //    .build()?;
-
     let initial_potential = Potential::from_vector(nalgebra::DVector::from_element(
         mesh.num_nodes(),
         T::zero().real(),
     ));
-    outer_loop.run_loop(initial_potential)
+
+    // Do we do a coherent or incoherent?
+    match calculation_type {
+        Calculation::Coherent => {
+            // If we asked for a coherent calculation ALL the masses need to be equal (probably only along z, check)
+            let first = tracker.info_desk.effective_masses[0].clone();
+            assert!(tracker
+                .info_desk
+                .effective_masses
+                .iter()
+                .all(|item| item.clone() == first));
+
+            let spectral_space_builder = crate::spectral::constructors::SpectralSpaceBuilder::new()
+                .with_number_of_energy_points(config.spectral.number_of_energy_points)
+                .with_energy_range(std::ops::Range {
+                    start: config.spectral.minimum_energy,
+                    end: config.spectral.maximum_energy,
+                })
+                .with_energy_integration_method(config.spectral.energy_integration_rule);
+
+            let spectral_space = spectral_space_builder.build_coherent();
+            let outer_config = crate::outer_loop::Convergence {
+                outer_tolerance: config.outer_loop.tolerance,
+                maximum_outer_iterations: config.outer_loop.maximum_iterations,
+                inner_tolerance: config.inner_loop.tolerance,
+                maximum_inner_iterations: config.inner_loop.maximum_iterations,
+                calculation_type: Calculation::Coherent,
+            };
+            let mut outer_loop: crate::outer_loop::OuterLoop<
+                T,
+                U1,
+                Segment1dConnectivity,
+                BandDim,
+                crate::spectral::SpectralSpace<T::RealField, ()>,
+            > = crate::outer_loop::OuterLoopBuilder::new()
+                .with_mesh(mesh)
+                .with_hamiltonian(&mut hamiltonian)
+                .with_spectral_space(&spectral_space)
+                .with_convergence_settings(&outer_config)
+                .with_tracker(tracker)
+                .with_info_desk(tracker.info_desk)
+                .build()?;
+
+            outer_loop.run_loop(initial_potential)
+        }
+        Calculation::Incoherent => {
+            let first = tracker.info_desk.effective_masses[0].clone();
+            let all_masses_equal = tracker
+                .info_desk
+                .effective_masses
+                .iter()
+                .all(|item| item.clone() == first);
+
+            if all_masses_equal {
+                let spectral_space_builder =
+                    crate::spectral::constructors::SpectralSpaceBuilder::new()
+                        .with_number_of_energy_points(config.spectral.number_of_energy_points)
+                        .with_energy_range(std::ops::Range {
+                            start: config.spectral.minimum_energy,
+                            end: config.spectral.maximum_energy,
+                        })
+                        .with_energy_integration_method(config.spectral.energy_integration_rule);
+                let spectral_space = spectral_space_builder.build_coherent();
+                let outer_config = crate::outer_loop::Convergence {
+                    outer_tolerance: config.outer_loop.tolerance,
+                    maximum_outer_iterations: config.outer_loop.maximum_iterations,
+                    inner_tolerance: config.inner_loop.tolerance,
+                    maximum_inner_iterations: config.inner_loop.maximum_iterations,
+                    calculation_type: Calculation::Coherent,
+                };
+                let mut outer_loop: crate::outer_loop::OuterLoop<
+                    T,
+                    U1,
+                    Segment1dConnectivity,
+                    BandDim,
+                    crate::spectral::SpectralSpace<T::RealField, ()>,
+                > = crate::outer_loop::OuterLoopBuilder::new()
+                    .with_mesh(mesh)
+                    .with_hamiltonian(&mut hamiltonian)
+                    .with_spectral_space(&spectral_space)
+                    .with_convergence_settings(&outer_config)
+                    .with_tracker(tracker)
+                    .with_info_desk(tracker.info_desk)
+                    .build()?;
+
+                outer_loop.run_loop(initial_potential)
+            // Else run a coherent calculation with a wavevector discretisation
+            } else {
+                let spectral_space_builder =
+                    crate::spectral::constructors::SpectralSpaceBuilder::new()
+                        .with_number_of_energy_points(config.spectral.number_of_energy_points)
+                        .with_energy_range(std::ops::Range {
+                            start: config.spectral.minimum_energy,
+                            end: config.spectral.maximum_energy,
+                        })
+                        .with_energy_integration_method(config.spectral.energy_integration_rule)
+                        .with_maximum_wavevector(config.spectral.maximum_wavevector)
+                        .with_number_of_wavevector_points(
+                            config.spectral.number_of_wavevector_points,
+                        )
+                        .with_wavevector_integration_method(
+                            config.spectral.wavevector_integration_rule,
+                        )
+                        .with_mesh(mesh);
+                let spectral_space = spectral_space_builder.build_incoherent();
+
+                let outer_config = crate::outer_loop::Convergence {
+                    outer_tolerance: config.outer_loop.tolerance,
+                    maximum_outer_iterations: config.outer_loop.maximum_iterations,
+                    inner_tolerance: config.inner_loop.tolerance,
+                    maximum_inner_iterations: config.inner_loop.maximum_iterations,
+                    calculation_type: Calculation::Coherent,
+                };
+                let mut outer_loop: crate::outer_loop::OuterLoop<
+                    T,
+                    U1,
+                    Segment1dConnectivity,
+                    BandDim,
+                    crate::spectral::SpectralSpace<
+                        T::RealField,
+                        crate::spectral::WavevectorSpace<T, U1, Segment1dConnectivity>,
+                    >,
+                > = crate::outer_loop::OuterLoopBuilder::new()
+                    .with_mesh(mesh)
+                    .with_hamiltonian(&mut hamiltonian)
+                    .with_spectral_space(&spectral_space)
+                    .with_convergence_settings(&outer_config)
+                    .with_tracker(tracker)
+                    .with_info_desk(tracker.info_desk)
+                    .build()?;
+                //let mut outer_loop: crate::outer_loop::OuterLoop<
+                //    T,
+                //    GeometryDim,
+                //    Conn,
+                //    BandDim,
+                //    crate::spectral::SpectralSpace<T::RealField, ()>,
+                //> = crate::outer_loop::OuterLoopBuilder::new()
+                //    .with_mesh(mesh)
+                //    .with_hamiltonian(&mut hamiltonian)
+                //    .with_spectral_space(&spectral_space)
+                //    .with_convergence_settings(&outer_config)
+                //    .with_tracker(tracker)
+                //    .with_info_desk(tracker.info_desk)
+                //    .build()?;
+
+                outer_loop.run_loop(initial_potential)
+            }
+        }
+    }
 }

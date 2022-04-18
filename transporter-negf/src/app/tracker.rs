@@ -101,10 +101,8 @@ where
         >,
 {
     type BandDim = BandDim;
-    fn potential(&self, vertex_indices: &[usize]) -> T {
-        vertex_indices.iter().fold(T::zero(), |acc, &vertex_index| {
-            acc + self.potential.get(vertex_index)
-        }) / T::from_usize(vertex_indices.len()).unwrap()
+    fn potential(&self, vertex_index: usize) -> T {
+        self.potential.get(vertex_index)
     }
 }
 
@@ -158,7 +156,7 @@ where
 {
     pub(crate) fn build(self) -> color_eyre::Result<Tracker<'a, T, GeometryDim, BandDim>> {
         let potential = Potential::from_vector(DVector::zeros(self.mesh.vertices().len()));
-        let empty_vector: DVector<T> = DVector::zeros(self.mesh.elements().len());
+        let empty_vector: DVector<T> = DVector::zeros(self.mesh.vertices().len());
         let charge_densities: Charge<T, BandDim> = Charge::new(
             OVector::<DVector<T>, BandDim>::from_element(empty_vector.clone()),
         )?;

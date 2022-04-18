@@ -159,8 +159,24 @@ where
 
         // Multiply by the scalar prefactor in to arrive at a physical quantity
         for (n_band, charge) in charges.iter_mut().enumerate() {
-            for (charge_at_element, element) in charge.iter_mut().zip(mesh.elements()) {
-                let region = element.1;
+            for (idx, (charge_at_element, vertex)) in
+                charge.iter_mut().zip(mesh.vertices()).enumerate()
+            {
+                let assignment = &vertex.1;
+
+                // STRICTLY 1D ONLY - REDO
+                let diameter = if idx == 0 {
+                    [0, 0]
+                } else if idx == mesh.vertices().len() - 1 {
+                    [idx - 1, idx - 1]
+                } else {
+                    [idx, idx - 1]
+                }
+                .into_iter()
+                .fold(T::zero(), |acc, idx| {
+                    acc + mesh.elements()[idx].0.diameter() / (T::one() + T::one())
+                });
+
                 let prefactor = match spectral_space.number_of_wavevector_points() {
                     1 => {
                         T::from_f64(
@@ -173,8 +189,10 @@ where
                         )
                         .unwrap()
                             * self.info_desk.temperature
-                            * self.info_desk.effective_masses[region][n_band][1]
-                            / element.0.diameter()
+                            * self
+                                .info_desk
+                                .effective_mass_from_assignment(assignment, n_band, 1)
+                            / diameter
                     }
                     _ => {
                         T::from_f64(
@@ -183,7 +201,7 @@ where
                                 / std::f64::consts::PI.powi(2),
                         )
                         .unwrap()
-                            / element.0.diameter()
+                            / diameter
                     }
                 };
                 *charge_at_element *= prefactor;
@@ -475,17 +493,6 @@ where
         fermi_functions: &[T],
     ) -> color_eyre::Result<()> {
         // In 1D and for 1 band:
-        let advanced_gf_values = retarded_greens_function
-            .values()
-            .iter()
-            .map(|&x| x.conjugate())
-            .collect::<Vec<_>>();
-        let retarded_gf_pattern = retarded_greens_function.pattern().clone();
-        let advanced_greens_function =
-            CsrMatrix::try_from_pattern_and_values(retarded_gf_pattern, advanced_gf_values)
-                .unwrap()
-                .transpose();
-
         let gamma_values = retarded_self_energy
             .values()
             .iter()

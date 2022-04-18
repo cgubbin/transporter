@@ -1,4 +1,4 @@
-use nalgebra::{allocator::Allocator, DVector, DVectorSliceMut, DefaultAllocator, RealField};
+use nalgebra::{allocator::Allocator, DefaultAllocator, RealField};
 use std::marker::PhantomData;
 use transporter_mesher::{Connectivity, Mesh, SmallDim};
 
@@ -14,7 +14,7 @@ pub trait VertexConnectivityAssembler {
     fn vertex_connection_count(&self, vertex_index: usize) -> usize;
     /// Populates the indices of vertices connected to the vertex at `vertex_index` into the slice `output`. The passed slice
     /// must have length `self.vertex_connection_count(vertex_index)`
-    fn populate_vertex_connections(&self, output: &mut [usize], element_index: usize);
+    fn populate_vertex_connections(&self, output: &mut [usize], vertex_index: usize);
 }
 
 /// Implement `ElementConnectivityAssembler` for the generic `Mesh`
@@ -41,34 +41,6 @@ where
 
     fn populate_vertex_connections(&self, output: &mut [usize], vertex_index: usize) {
         output.copy_from_slice(self.connectivity()[vertex_index])
-    }
-}
-
-/// Helper trait to construct the diagonal elements of a differential operator
-pub(crate) trait AssembleVertexDiagonal<T: RealField>: VertexConnectivityAssembler {
-    /// Assembles the wavevector component into `output` for the element at `element_index`. Takes an output vector of length
-    /// `num_bands` which is enforced by an assertion
-    fn assemble_vertex_diagonal(&self, vertex_index: usize) -> color_eyre::Result<T>;
-}
-
-/// Helper trait to construct the fixed component of the operator (ie: the differential bit)
-pub(crate) trait AssembleVertexMatrix<T: RealField>: VertexConnectivityAssembler {
-    /// Takes an output matrix of dimension `num_bands` * `num_connections + 1` which is enforced by an assertion, and fills with the fixed
-    ///  component of the Hamiltonian
-    fn assemble_vertex_matrix_into(
-        &self,
-        vertex_index: usize,
-        output: DVectorSliceMut<T>,
-    ) -> color_eyre::Result<()>;
-
-    fn assemble_vertex_matrix(
-        &self,
-        vertex_index: usize,
-        num_connections: usize,
-    ) -> color_eyre::Result<DVector<T>> {
-        let mut output = DVector::zeros(num_connections + 1);
-        self.assemble_vertex_matrix_into(vertex_index, DVectorSliceMut::from(&mut output))?;
-        Ok(output)
     }
 }
 
@@ -257,35 +229,5 @@ where
             &self.assemblers[assembler_idx],
             self.vertex_offsets[assembler_idx],
         )
-    }
-}
-
-impl<'a, T, VertexAssembler> AssembleVertexMatrix<T>
-    for AggregateVertexAssembler<'a, VertexAssembler>
-where
-    T: RealField,
-    VertexAssembler: AssembleVertexMatrix<T>,
-{
-    fn assemble_vertex_matrix_into(
-        &self,
-        aggregate_vertex_index: usize,
-        output: DVectorSliceMut<T>,
-    ) -> color_eyre::Result<()> {
-        let (assembler, vertex_offset) =
-            self.find_assembler_and_offset_for_vertex_index(aggregate_vertex_index);
-        assembler.assemble_vertex_matrix_into(aggregate_vertex_index - vertex_offset, output)
-    }
-}
-
-impl<'a, T, VertexAssembler> AssembleVertexDiagonal<T>
-    for AggregateVertexAssembler<'a, VertexAssembler>
-where
-    T: RealField,
-    VertexAssembler: AssembleVertexDiagonal<T>,
-{
-    fn assemble_vertex_diagonal(&self, aggregate_vertex_index: usize) -> color_eyre::Result<T> {
-        let (assembler, vertex_offset) =
-            self.find_assembler_and_offset_for_vertex_index(aggregate_vertex_index);
-        assembler.assemble_vertex_diagonal(aggregate_vertex_index - vertex_offset)
     }
 }

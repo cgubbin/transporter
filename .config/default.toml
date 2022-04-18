@@ -17,7 +17,7 @@ maximum_growth_rate = 1.2
 [spectral]
 number_of_energy_points = 1000
 minimum_energy = 0.0
-maximum_energy = 0.25
+maximum_energy = 0.3
 energy_integration_rule = "ThreePoint"
 number_of_wavevector_points = 100
 maximum_wavevector = 1e9

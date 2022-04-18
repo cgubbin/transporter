@@ -4,171 +4,53 @@
 //! for a single element of the mesh, over `NumBands` (ie: the number of carrier bands in the problem).
 use super::HamiltonianInfoDesk;
 use crate::constants::{ELECTRON_CHARGE, ELECTRON_MASS, HBAR};
+use crate::utilities::assemblers::{VertexAssembler, VertexConnectivityAssembler};
 use nalgebra::{
-    allocator::Allocator, DMatrix, DMatrixSliceMut, DVectorSliceMut, DefaultAllocator, OPoint,
-    OVector, RealField,
+    allocator::Allocator, DMatrix, DMatrixSliceMut, DVector, DVectorSliceMut, DefaultAllocator,
+    OPoint, OVector, RealField,
 };
-use std::marker::PhantomData;
-use transporter_mesher::{Connectivity, Mesh, SmallDim};
+use transporter_mesher::{Assignment, Connectivity, Mesh, SmallDim};
 
-/// Trait giving the information necessary to construct the Hamiltonian differential operator for a given local element
-pub trait ElementConnectivityAssembler {
-    /// Returns the dimension of the solution as a `usize`: for our problems this is always 1 so we can probably delete the method
-    fn solution_dim(&self) -> usize;
-    /// The number of elements contained in the entire mesh
-    fn num_elements(&self) -> usize;
-    /// The number of vertices, or nodes contained in the entire mesh
-    fn num_nodes(&self) -> usize;
-    /// The number of elements connected to the element at `element_index`
-    fn element_connection_count(&self, elelment_index: usize) -> usize;
-    fn element_vertex_count(&self, element_index: usize) -> usize;
-    /// Populates the indices of elements connected to the element at `element_index` into the slice `output`. The passed slice
-    /// must have length `self.element_connection_count(element_index)`
-    fn populate_element_connections(&self, output: &mut [usize], element_index: usize);
-    /// Populates the output with the vertices contained in the element
-    fn populate_element_vertices(&self, output: &mut [usize], element_index: usize);
-}
-
-/// Implement `ElementConnectivityAssembler` for the generic `Mesh`
-impl<T, GeometryDim, C> ElementConnectivityAssembler for Mesh<T, GeometryDim, C>
-where
-    T: Copy + RealField,
-    GeometryDim: SmallDim,
-    C: Connectivity<T, GeometryDim>,
-    DefaultAllocator: Allocator<T, GeometryDim>,
-{
-    fn solution_dim(&self) -> usize {
-        1
-    }
-    fn num_elements(&self) -> usize {
-        self.elements().len()
-    }
-    fn num_nodes(&self) -> usize {
-        self.vertices().len()
-    }
-
-    fn element_connection_count(&self, element_index: usize) -> usize {
-        self.get_element_connectivity(element_index).len()
-    }
-
-    fn element_vertex_count(&self, element_index: usize) -> usize {
-        self.get_vertex_indices_in_element(element_index).len()
-    }
-
-    fn populate_element_connections(&self, output: &mut [usize], element_index: usize) {
-        output.copy_from_slice(self.get_element_connectivity(element_index))
-    }
-    fn populate_element_vertices(&self, output: &mut [usize], element_index: usize) {
-        output.copy_from_slice(self.get_vertex_indices_in_element(element_index))
-    }
-}
-
-/// Helper trait to construct the diagonal elements of the Hamiltonian (the wavevector component).
-pub(crate) trait AssembleElementDiagonal<T: RealField>:
-    ElementConnectivityAssembler
+/// Helper trait to construct the diagonal elements of a differential operator
+pub(crate) trait AssembleVertexHamiltonianDiagonal<T: RealField>:
+    VertexConnectivityAssembler
 {
     /// Assembles the wavevector component into `output` for the element at `element_index`. Takes an output vector of length
     /// `num_bands` which is enforced by an assertion
-    fn assemble_element_diagonal_into(
+    fn assemble_vertex_diagonal_into(
         &self,
-        element_index: usize,
+        vertex_index: usize,
         output: DVectorSliceMut<T>,
     ) -> color_eyre::Result<()>;
 }
 
-/// Helper trait to construct the fixed component of the Hamiltonian, which holds the differential operator and the conduction offsets
-pub(crate) trait AssembleElementMatrix<T: RealField>: ElementConnectivityAssembler {
+/// Helper trait to construct the fixed component of the operator (ie: the differential bit)
+pub(crate) trait AssembleVertexHamiltonianMatrix<T: RealField>:
+    VertexConnectivityAssembler
+{
     /// Takes an output matrix of dimension `num_bands` * `num_connections + 1` which is enforced by an assertion, and fills with the fixed
     ///  component of the Hamiltonian
-    fn assemble_element_matrix_into(
+    fn assemble_vertex_matrix_into(
         &self,
-        element_index: usize,
+        vertex_index: usize,
         output: DMatrixSliceMut<T>,
     ) -> color_eyre::Result<()>;
 
-    fn assemble_element_matrix(
+    fn assemble_vertex_matrix(
         &self,
-        element_index: usize,
-        num_bands: usize,
+        vertex_index: usize,
         num_connections: usize,
+        num_bands: usize,
     ) -> color_eyre::Result<DMatrix<T>> {
-        let mut output = DMatrix::zeros(num_bands, num_connections + 1);
-        self.assemble_element_matrix_into(element_index, DMatrixSliceMut::from(&mut output))?;
+        let mut output = DMatrix::from_element(num_bands, num_connections + 1, T::zero());
+        self.assemble_vertex_matrix_into(vertex_index, DMatrixSliceMut::from(&mut output))?;
         Ok(output)
-    }
-}
-
-#[derive(Debug, Clone)]
-/// An assembler for the Hamiltonian of a single mesh element,
-pub struct ElementHamiltonianAssembler<'a, T, InfoDesk, Mesh> {
-    /// The `InfoDesk` provides all the external information necessary to construct the Hamiltonian
-    info_desk: &'a InfoDesk,
-    /// The `Mesh` tells us which elements our element is connected to, and how far away they are
-    mesh: &'a Mesh,
-    /// A marker so we can be generic over the field `T`. This can probably go away with some forethought
-    __marker: PhantomData<T>,
-}
-
-/// Factory builder for an `ElementHamiltonianAssembler`
-pub struct ElementHamiltonianAssemblerBuilder<T, RefInfoDesk, RefMesh> {
-    /// Reference to an `InfoDesk` which must impl `HamiltonianInfoDesk<T>`
-    info_desk: RefInfoDesk,
-    /// Reference to the structure mesh
-    mesh: RefMesh,
-    /// Marker allowing the structure to be generic over the field `T`
-    marker: PhantomData<T>,
-}
-
-impl<T> ElementHamiltonianAssemblerBuilder<T, (), ()> {
-    /// Initialise the builder
-    pub(crate) fn new() -> Self {
-        Self {
-            info_desk: (),
-            mesh: (),
-            marker: PhantomData,
-        }
-    }
-}
-
-impl<T, RefInfoDesk, RefMesh> ElementHamiltonianAssemblerBuilder<T, RefInfoDesk, RefMesh> {
-    /// Attach the info desk
-    pub(crate) fn with_info_desk<InfoDesk>(
-        self,
-        info_desk: &InfoDesk,
-    ) -> ElementHamiltonianAssemblerBuilder<T, &InfoDesk, RefMesh> {
-        ElementHamiltonianAssemblerBuilder {
-            info_desk,
-            mesh: self.mesh,
-            marker: PhantomData,
-        }
-    }
-    /// Attach the mesh
-    pub(crate) fn with_mesh<Mesh>(
-        self,
-        mesh: &Mesh,
-    ) -> ElementHamiltonianAssemblerBuilder<T, RefInfoDesk, &Mesh> {
-        ElementHamiltonianAssemblerBuilder {
-            info_desk: self.info_desk,
-            mesh,
-            marker: PhantomData,
-        }
-    }
-}
-
-impl<'a, T, InfoDesk, Mesh> ElementHamiltonianAssemblerBuilder<T, &'a InfoDesk, &'a Mesh> {
-    /// Build out the ElementHamiltonianAssembler from the builder
-    pub(crate) fn build(self) -> ElementHamiltonianAssembler<'a, T, InfoDesk, Mesh> {
-        ElementHamiltonianAssembler {
-            info_desk: self.info_desk,
-            mesh: self.mesh,
-            __marker: PhantomData,
-        }
     }
 }
 
 /// Implement the `HamiltonianInfoDesk` trait for the element assembler to reduce verbiosity
 impl<T, Conn, InfoDesk> HamiltonianInfoDesk<T>
-    for ElementHamiltonianAssembler<'_, T, InfoDesk, Mesh<T, InfoDesk::GeometryDim, Conn>>
+    for VertexAssembler<'_, T, InfoDesk, Mesh<T, InfoDesk::GeometryDim, Conn>>
 where
     T: RealField,
     Conn: Connectivity<T, InfoDesk::GeometryDim>,
@@ -186,7 +68,7 @@ where
 }
 
 impl<T, GeometryDim: SmallDim, Conn, InfoDesk> super::PotentialInfoDesk<T>
-    for ElementHamiltonianAssembler<'_, T, InfoDesk, Mesh<T, GeometryDim, Conn>>
+    for VertexAssembler<'_, T, InfoDesk, Mesh<T, GeometryDim, Conn>>
 where
     T: RealField,
     Conn: Connectivity<T, GeometryDim>,
@@ -194,45 +76,8 @@ where
     DefaultAllocator: Allocator<T, GeometryDim> + Allocator<T, InfoDesk::BandDim>,
 {
     type BandDim = InfoDesk::BandDim;
-    fn potential(&self, vertex_indices: &[usize]) -> T {
-        self.info_desk.potential(vertex_indices)
-    }
-}
-
-/// Inplement `ElementConnectivityAssembler` for the element assembler to reduce verbiosity.
-impl<'a, T: RealField, InfoDesk, Mesh> ElementConnectivityAssembler
-    for ElementHamiltonianAssembler<'a, T, InfoDesk, Mesh>
-where
-    InfoDesk: super::PotentialInfoDesk<T>,
-    Mesh: ElementConnectivityAssembler,
-    DefaultAllocator: Allocator<T, InfoDesk::BandDim>,
-{
-    fn solution_dim(&self) -> usize {
-        1
-    }
-
-    fn num_elements(&self) -> usize {
-        self.mesh.num_elements()
-    }
-    fn num_nodes(&self) -> usize {
-        self.mesh.num_nodes()
-    }
-
-    fn element_connection_count(&self, element_index: usize) -> usize {
-        self.mesh.element_connection_count(element_index)
-    }
-
-    fn element_vertex_count(&self, element_index: usize) -> usize {
-        self.mesh.element_vertex_count(element_index)
-    }
-
-    fn populate_element_connections(&self, output: &mut [usize], element_index: usize) {
-        self.mesh
-            .populate_element_connections(output, element_index)
-    }
-
-    fn populate_element_vertices(&self, output: &mut [usize], element_index: usize) {
-        self.mesh.populate_element_vertices(output, element_index)
+    fn potential(&self, vertex_index: usize) -> T {
+        self.info_desk.potential(vertex_index)
     }
 }
 
@@ -242,31 +87,31 @@ where
 /// This allows us to define element specific methods, which contrast the generic methods
 /// in the assembly traits above
 /// TODO is this true? What does this really gain us?
-pub(crate) struct ElementInMesh<'a, InfoDesk, Mesh> {
+pub(crate) struct VertexInMesh<'a, InfoDesk, Mesh> {
     /// A reference to an impl of `HamiltonianInfoDesk`
     info_desk: &'a InfoDesk,
     /// A reference to the mesh used in the calculation
     mesh: &'a Mesh,
-    /// The index of the element in the mesh
-    element_index: usize,
+    /// The index of the vertex in the mesh
+    vertex_index: usize,
 }
 
-impl<'a, InfoDesk, Mesh> ElementInMesh<'a, InfoDesk, Mesh> {
+impl<'a, InfoDesk, Mesh> VertexInMesh<'a, InfoDesk, Mesh> {
     /// Construct the ElementInMesh at `element_index` from the mesh and info_desk
-    fn from_mesh_element_index_and_info_desk(
+    fn from_mesh_vertex_index_and_info_desk(
         mesh: &'a Mesh,
         info_desk: &'a InfoDesk,
-        element_index: usize,
+        vertex_index: usize,
     ) -> Self {
         Self {
             info_desk,
             mesh,
-            element_index,
+            vertex_index,
         }
     }
 }
 
-impl<'a, T, InfoDesk, Conn> ElementInMesh<'a, InfoDesk, Mesh<T, InfoDesk::GeometryDim, Conn>>
+impl<'a, T, InfoDesk, Conn> VertexInMesh<'a, InfoDesk, Mesh<T, InfoDesk::GeometryDim, Conn>>
 where
     T: Copy + RealField,
     InfoDesk: HamiltonianInfoDesk<T>,
@@ -275,11 +120,11 @@ where
 {
     /// The index of the `ElementInMesh`
     fn index(&self) -> usize {
-        self.element_index
+        self.vertex_index
     }
     /// A slice, returning the indices of the elements connected to `ElementInMesh`
     fn connections(&self) -> &[usize] {
-        self.mesh.get_element_connectivity(self.element_index)
+        self.mesh.connectivity()[self.vertex_index]
     }
     /// The number of elements connected to `ElementInMesh`
     fn connection_count(&self) -> usize {
@@ -287,7 +132,7 @@ where
     }
     /// The central coordinate of `ElementInMesh`
     fn coordinate(&self) -> OPoint<T, InfoDesk::GeometryDim> {
-        self.mesh.get_element_midpoint(self.element_index)
+        self.mesh.vertices()[self.index()].0.clone()
     }
     /// The central coordinate of an element at `other_index`
     fn other_coordinate(&self, other_index: usize) -> OPoint<T, InfoDesk::GeometryDim> {
@@ -302,28 +147,53 @@ where
     /// Walk over the connectivity in the square mesh by Cartesian dimension
     fn connectivity_by_dimension(&self) -> Vec<&[usize]> {
         self.mesh
-            .element_connectivity_by_dimension(self.element_index)
+            .vertex_connectivity_by_dimension(self.vertex_index)
     }
     /// Walk over the distances to connected elements in the square mesh by Cartesian dimension
     fn deltas_by_dimension(&self) -> Vec<Vec<T>> {
-        self.mesh.deltas_by_dimension(self.element_index)
+        self.mesh.vertex_deltas_by_dimension(self.vertex_index)
     }
-    /// The region in the simulation `Device` to which `ElementInMesh` is assigned
-    fn get_region_of_element(&self) -> usize {
-        self.mesh.get_region_of_element(self.element_index)
-    }
+
     /// The region in the simulation `Device` to which the element at `other_element_index` is assigned
-    fn get_region_of_other(&self, other_element_index: usize) -> usize {
-        self.mesh.get_region_of_element(other_element_index)
+    fn get_region_of_other(&self, other_vertex_index: usize) -> &Assignment {
+        &self.mesh.vertices()[other_vertex_index].1
     }
+
     /// The band offset for `ElementInMesh` in carrier band `band_index`
     fn conduction_offset(&self, band_index: usize) -> T {
-        self.info_desk.get_band_levels(self.get_region_of_element())[band_index]
+        match self.get_region_of_other(self.vertex_index) {
+            Assignment::Core(x) => self.info_desk.get_band_levels(*x)[band_index],
+            Assignment::Boundary(x) => {
+                let n_points = T::from_usize(x.len()).unwrap();
+                x.iter().fold(T::zero(), |acc, &region| {
+                    let value = self.info_desk.get_band_levels(region);
+                    acc + value[band_index] / n_points
+                })
+            }
+        }
+    }
+
+    /// The band offset for `ElementInMesh` in carrier band `band_index`
+    fn effective_mass(&self, vertex_index: usize, band_index: usize) -> [T; 3] {
+        match self.get_region_of_other(vertex_index) {
+            Assignment::Core(x) => *self.info_desk.get_effective_mass(*x, band_index),
+            Assignment::Boundary(x) => {
+                let n_points = T::from_usize(x.len()).unwrap();
+                x.iter().fold([T::zero(); 3], |acc, &region| {
+                    let values = self.info_desk.get_effective_mass(region, band_index);
+                    [
+                        acc[0] + values[0] / n_points,
+                        acc[1] + values[1] / n_points,
+                        acc[2] + values[2] / n_points,
+                    ]
+                })
+            }
+        }
     }
 }
 
-impl<'a, T, Conn, InfoDesk> AssembleElementMatrix<T>
-    for ElementHamiltonianAssembler<'a, T, InfoDesk, Mesh<T, InfoDesk::GeometryDim, Conn>>
+impl<'a, T, Conn, InfoDesk> AssembleVertexHamiltonianMatrix<T>
+    for VertexAssembler<'a, T, InfoDesk, Mesh<T, InfoDesk::GeometryDim, Conn>>
 where
     T: Copy + RealField,
     InfoDesk: HamiltonianInfoDesk<T>,
@@ -332,28 +202,28 @@ where
 {
     /// Assembles the cell matrix, forming an `num_bands` row array with
     /// `num_connections * num_nearest_neighbours + 1` columns in each row
-    fn assemble_element_matrix_into(
+    fn assemble_vertex_matrix_into(
         &self,
-        element_index: usize,
+        vertex_index: usize,
         output: DMatrixSliceMut<T>,
     ) -> color_eyre::Result<()> {
         // Construct the element at `element_index`
-        let element = ElementInMesh::from_mesh_element_index_and_info_desk(
+        let vertex = VertexInMesh::from_mesh_vertex_index_and_info_desk(
             self.mesh,
             self.info_desk,
-            element_index,
+            vertex_index,
         );
         // Assemble the differential operator into `output`
-        assemble_element_differential_operator(output, &element, self.info_desk.number_of_bands())
+        assemble_vertex_differential_operator(output, &vertex, self.info_desk.number_of_bands())
     }
 }
 
-/// Fills the differential operator in the Hamiltonian for a single element. The elements in `output` are sorted in the order of
+/// Fills the differential operator in the Hamiltonian for a single vertex. The vertices in `output` are sorted in the order of
 /// their column indices in the final hamiltonian matrix. In one spatial dimension the differential operator is given by
 /// ' - \hbar^2 \left[d / dz 1/m_{\parallel} d/dz + 1/m_{\parallel} d^2/dz^2\right]'
-fn assemble_element_differential_operator<T, InfoDesk, Conn>(
+fn assemble_vertex_differential_operator<T, InfoDesk, Conn>(
     mut output: DMatrixSliceMut<T>,
-    element: &ElementInMesh<InfoDesk, Mesh<T, InfoDesk::GeometryDim, Conn>>,
+    vertex: &VertexInMesh<InfoDesk, Mesh<T, InfoDesk::GeometryDim, Conn>>,
     num_bands: usize,
 ) -> color_eyre::Result<()>
 where
@@ -366,7 +236,7 @@ where
 
     assert_eq!(
         shape.1,
-        element.connection_count() + 1,
+        vertex.connection_count() + 1,
         "Output matrix should have `n_conns * n_neighbour + 1` columns"
     );
     assert_eq!(
@@ -379,25 +249,22 @@ where
         .expect("Prefactor must fit in T");
     for (band_index, mut row) in output.row_iter_mut().enumerate() {
         // Get the indices of the elements connected to `element` and their displacements from `element`
-        let deltas = element.deltas_by_dimension();
-        let connections = element.connectivity_by_dimension();
+        let deltas = vertex.deltas_by_dimension();
+        let connections = vertex.connectivity_by_dimension();
 
         // Initialize the diagonal component for `band_index`
         let mut diagonal = T::zero();
         // Holding vector for the values in the band `band_index`
-        let mut single_band_values = Vec::with_capacity(element.connection_count() + 1);
+        let mut single_band_values = Vec::with_capacity(vertex.connection_count() + 1);
 
-        let region_index = element.get_region_of_element();
-        let effective_masses = element
-            .info_desk
-            .get_effective_mass(region_index, band_index);
+        // let region_index = element.get_region_of_element();
+        // let effective_masses = element
+        //     .info_desk
+        //     .get_effective_mass(region_index, band_index);
 
         // Walk over the Cartesian axis in the mesh -> For each axis we add their components to `single_band_values`
-        for (spatial_idx, ((indices, delta_row), &mass)) in connections
-            .into_iter()
-            .zip(deltas.into_iter())
-            .zip(effective_masses.iter())
-            .enumerate()
+        for (spatial_idx, (indices, delta_row)) in
+            connections.into_iter().zip(deltas.into_iter()).enumerate()
         {
             assert!(delta_row.len() <= 2, "The mesh should be square");
 
@@ -412,12 +279,9 @@ where
             // masses is an element containing the masses in the connected elements, followed by that in the current element
             let mut masses = indices
                 .iter()
-                .map(|&i| element.get_region_of_other(i))
-                .map(|region_i| {
-                    element.info_desk.get_effective_mass(region_i, band_index)[spatial_idx]
-                })
+                .map(|&i| vertex.effective_mass(i, band_index)[spatial_idx])
                 .collect::<Vec<_>>();
-            masses.push(mass);
+            masses.push(vertex.effective_mass(vertex.index(), band_index)[spatial_idx]);
 
             // The epsilon on the elements adjoining in our staggered grid
             let inverse_masses = if masses.len() == 3 {
@@ -443,8 +307,8 @@ where
             diagonal += elements[1];
         }
         single_band_values.push((
-            diagonal + element.conduction_offset(band_index),
-            element.index(),
+            diagonal + vertex.conduction_offset(band_index),
+            vertex.index(),
         ));
         // Sort `single_band_values` by the index of the element so it can be quickly added to the `CsrMatrix`
         single_band_values.sort_unstable_by(|&a, &b| a.1.cmp(&b.1));
@@ -528,8 +392,8 @@ fn first_derivative<T: Copy + RealField>(delta_m: T, delta_p: T, prefactor: T) -
     [minus_term, central_term, plus_term]
 }
 
-impl<'a, T, Conn, InfoDesk> AssembleElementDiagonal<T>
-    for ElementHamiltonianAssembler<'a, T, InfoDesk, Mesh<T, InfoDesk::GeometryDim, Conn>>
+impl<'a, T, Conn, InfoDesk> AssembleVertexHamiltonianDiagonal<T>
+    for VertexAssembler<'a, T, InfoDesk, Mesh<T, InfoDesk::GeometryDim, Conn>>
 where
     T: Copy + RealField,
     InfoDesk: HamiltonianInfoDesk<T>,
@@ -538,24 +402,24 @@ where
 {
     /// Assembles the cell matrix, forming an `num_bands` row array with
     /// `num_connections * num_nearest_neighbours + 1` columns in each row
-    fn assemble_element_diagonal_into(
+    fn assemble_vertex_diagonal_into(
         &self,
-        element_index: usize,
+        vertex_index: usize,
         output: DVectorSliceMut<T>,
     ) -> color_eyre::Result<()> {
-        let element = ElementInMesh::from_mesh_element_index_and_info_desk(
+        let vertex = VertexInMesh::from_mesh_vertex_index_and_info_desk(
             self.mesh,
             self.info_desk,
-            element_index,
+            vertex_index,
         );
-        assemble_element_diagonal(output, &element, self.info_desk.number_of_bands())
+        assemble_vertex_diagonal(output, &vertex, self.info_desk.number_of_bands())
     }
 }
 
 /// Assembles the wavevector component along the element diagonal
-fn assemble_element_diagonal<T, InfoDesk, Conn>(
+fn assemble_vertex_diagonal<T, InfoDesk, Conn>(
     mut output: DVectorSliceMut<T>,
-    element: &ElementInMesh<InfoDesk, Mesh<T, InfoDesk::GeometryDim, Conn>>,
+    vertex: &VertexInMesh<InfoDesk, Mesh<T, InfoDesk::GeometryDim, Conn>>,
     num_bands: usize,
 ) -> color_eyre::Result<()>
 where
@@ -578,10 +442,7 @@ where
     let prefactor =
         T::from_f64(HBAR * HBAR / ELECTRON_CHARGE / 2.).expect("Prefactor must fit in T");
     for (band_index, mut row) in output.row_iter_mut().enumerate() {
-        let region_index = element.get_region_of_element();
-        let effective_masses = element
-            .info_desk
-            .get_effective_mass(region_index, band_index);
+        let effective_masses = vertex.effective_mass(vertex.index(), band_index);
 
         //TODO For brevity this is a one-dimensional implementation. We can improve this at a later date if we want to
         let parallel_mass =
@@ -590,146 +451,6 @@ where
         *ele = prefactor / parallel_mass;
     }
     Ok(())
-}
-
-#[derive(Debug)]
-/// Struct to
-pub struct AggregateElementAssembler<'a, ElementAssembler> {
-    assemblers: &'a [ElementAssembler],
-    solution_dim: usize,
-    num_elements: usize,
-    num_nodes: usize,
-    element_offsets: Vec<usize>,
-}
-
-impl<'a, ElementAssembler> ElementConnectivityAssembler
-    for AggregateElementAssembler<'a, ElementAssembler>
-where
-    ElementAssembler: ElementConnectivityAssembler,
-{
-    fn solution_dim(&self) -> usize {
-        self.solution_dim
-    }
-
-    fn num_elements(&self) -> usize {
-        self.num_elements
-    }
-
-    fn num_nodes(&self) -> usize {
-        self.num_nodes
-    }
-
-    fn element_connection_count(&self, aggregate_element_index: usize) -> usize {
-        let (assembler, cell_offset) =
-            self.find_assembler_and_offset_for_element_index(aggregate_element_index);
-        assembler.element_connection_count(aggregate_element_index - cell_offset)
-    }
-
-    fn element_vertex_count(&self, aggregate_element_index: usize) -> usize {
-        let (assembler, cell_offset) =
-            self.find_assembler_and_offset_for_element_index(aggregate_element_index);
-        assembler.element_vertex_count(aggregate_element_index - cell_offset)
-    }
-
-    fn populate_element_connections(&self, output: &mut [usize], aggregate_element_index: usize) {
-        let (assembler, element_offset) =
-            self.find_assembler_and_offset_for_element_index(aggregate_element_index);
-        assembler.populate_element_connections(output, aggregate_element_index - element_offset)
-    }
-
-    fn populate_element_vertices(&self, output: &mut [usize], aggregate_element_index: usize) {
-        let (assembler, element_offset) =
-            self.find_assembler_and_offset_for_element_index(aggregate_element_index);
-        assembler.populate_element_vertices(output, aggregate_element_index - element_offset)
-    }
-}
-
-impl<'a, CellAssembler> AggregateElementAssembler<'a, CellAssembler>
-where
-    CellAssembler: ElementConnectivityAssembler,
-{
-    pub fn from_assemblers(assemblers: &'a [CellAssembler]) -> Self {
-        assert!(
-            !assemblers.is_empty(),
-            "The aggregate Hamiltonian must have at least one (1) assembler."
-        );
-        let solution_dim = assemblers[0].solution_dim();
-        let num_nodes = assemblers[0].num_nodes();
-        assert!(
-            assemblers
-                .iter()
-                .all(|assembler| assembler.solution_dim() == solution_dim),
-            "All assemblers must have the same solution dimension"
-        );
-        assert!(
-            assemblers
-                .iter()
-                .all(|assembler| assembler.num_nodes() == num_nodes),
-            "All assemblers must have the same node index space (same num_nodes)"
-        );
-        let mut num_total_cells = 0;
-        let mut element_offsets = Vec::with_capacity(assemblers.len());
-        for assembler in assemblers {
-            element_offsets.push(num_total_cells);
-            num_total_cells += assembler.num_elements();
-        }
-        Self {
-            assemblers,
-            solution_dim,
-            num_elements: assemblers[0].num_elements(),
-            num_nodes,
-            element_offsets,
-        }
-    }
-
-    fn find_assembler_and_offset_for_element_index(
-        &self,
-        element_index: usize,
-    ) -> (&CellAssembler, usize) {
-        assert!(element_index <= self.num_elements);
-        let assembler_idx = match self.element_offsets.binary_search(&element_index) {
-            Ok(idx) => idx,
-            Err(idx) => idx - 1,
-        };
-        (
-            &self.assemblers[assembler_idx],
-            self.element_offsets[assembler_idx],
-        )
-    }
-}
-
-impl<'a, T, ElementAssembler> AssembleElementMatrix<T>
-    for AggregateElementAssembler<'a, ElementAssembler>
-where
-    T: RealField,
-    ElementAssembler: AssembleElementMatrix<T>,
-{
-    fn assemble_element_matrix_into(
-        &self,
-        aggregate_element_index: usize,
-        output: DMatrixSliceMut<T>,
-    ) -> color_eyre::Result<()> {
-        let (assembler, element_offset) =
-            self.find_assembler_and_offset_for_element_index(aggregate_element_index);
-        assembler.assemble_element_matrix_into(aggregate_element_index - element_offset, output)
-    }
-}
-
-impl<'a, T, ElementAssembler> AssembleElementDiagonal<T>
-    for AggregateElementAssembler<'a, ElementAssembler>
-where
-    T: RealField,
-    ElementAssembler: AssembleElementDiagonal<T>,
-{
-    fn assemble_element_diagonal_into(
-        &self,
-        aggregate_element_index: usize,
-        output: DVectorSliceMut<T>,
-    ) -> color_eyre::Result<()> {
-        let (assembler, element_offset) =
-            self.find_assembler_and_offset_for_element_index(aggregate_element_index);
-        assembler.assemble_element_diagonal_into(aggregate_element_index - element_offset, output)
-    }
 }
 
 #[cfg(test)]

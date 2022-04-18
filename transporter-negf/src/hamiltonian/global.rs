@@ -3,10 +3,9 @@
 //! This module provides global assemblers for the `Hamiltonian` matrix, taking the elements produced in the
 //! local subcrate and throwing them into a global CsrMatrix
 
-use super::{
-    local::{AssembleElementDiagonal, AssembleElementMatrix, ElementConnectivityAssembler},
-    HamiltonianInfoDesk, PotentialInfoDesk,
-};
+use super::local::{AssembleVertexHamiltonianDiagonal, AssembleVertexHamiltonianMatrix};
+use super::{HamiltonianInfoDesk, PotentialInfoDesk};
+use crate::utilities::assemblers::VertexConnectivityAssembler;
 use color_eyre::eyre::eyre;
 use nalgebra::{
     allocator::Allocator, DMatrix, DVector, DefaultAllocator, Dynamic, Matrix, RealField, Storage,
@@ -30,23 +29,23 @@ struct CsrAssemblerWorkspace<T: RealField> {
     /// The complete SparsityPattern
     full_sparsity_pattern: SparsityPattern,
     /// Scratch space for the element_matrix constructor
-    element_matrix: DMatrix<T>,
+    vertex_matrix: DMatrix<T>,
     /// Scratch space for the element vector constructor
-    element_vector: DVector<T>,
+    vertex_vector: DVector<T>,
 }
 
 impl<T: RealField> CsrAssemblerWorkspace<T> {
-    fn element_matrix(&self) -> &DMatrix<T> {
-        &self.element_matrix
+    fn vertex_matrix(&self) -> &DMatrix<T> {
+        &self.vertex_matrix
     }
-    fn element_matrix_mut(&mut self) -> &mut DMatrix<T> {
-        &mut self.element_matrix
+    fn vertex_matrix_mut(&mut self) -> &mut DMatrix<T> {
+        &mut self.vertex_matrix
     }
-    fn element_vector(&self) -> &DVector<T> {
-        &self.element_vector
+    fn vertex_vector(&self) -> &DVector<T> {
+        &self.vertex_vector
     }
-    fn element_vector_mut(&mut self) -> &mut DVector<T> {
-        &mut self.element_vector
+    fn vertex_vector_mut(&mut self) -> &mut DVector<T> {
+        &mut self.vertex_vector
     }
 }
 
@@ -55,57 +54,52 @@ impl<T: RealField> CsrAssemblerWorkspace<T> {
 /// Constructs a CsrAssembler from the element assembler, initialising the scratch space and
 /// sparsity patterns
 impl<T: Copy + RealField> CsrAssembler<T> {
-    pub(crate) fn from_element_assembler<Assembler>(
-        element_assembler: &Assembler,
+    pub(crate) fn from_vertex_assembler<Assembler>(
+        vertex_assembler: &Assembler,
     ) -> color_eyre::Result<Self>
     where
-        Assembler: ElementConnectivityAssembler + HamiltonianInfoDesk<T>,
+        Assembler: VertexConnectivityAssembler + HamiltonianInfoDesk<T>,
         DefaultAllocator: Allocator<T, Assembler::GeometryDim> + Allocator<T, Assembler::BandDim>,
     {
-        let full_sparsity_pattern =
-            CsrAssembler::assemble_full_sparsity_pattern(element_assembler)?;
+        let full_sparsity_pattern = CsrAssembler::assemble_full_sparsity_pattern(vertex_assembler)?;
         let diagonal_sparsity_pattern =
-            CsrAssembler::assemble_diagonal_sparsity_pattern(element_assembler)?;
+            CsrAssembler::assemble_diagonal_sparsity_pattern(vertex_assembler)?;
 
         Ok(Self {
             workspace: RefCell::new(CsrAssemblerWorkspace {
                 diagonal_sparsity_pattern,
                 full_sparsity_pattern,
-                element_matrix: DMatrix::from_element(
-                    element_assembler.number_of_bands(),
-                    element_assembler.element_connection_count(1) + 1,
+                vertex_matrix: DMatrix::from_element(
+                    vertex_assembler.number_of_bands(),
+                    vertex_assembler.vertex_connection_count(1) + 1,
                     T::zero(),
                 ),
-                element_vector: DVector::from_element(
-                    element_assembler.number_of_bands(),
-                    T::zero(),
-                ),
+                vertex_vector: DVector::from_element(vertex_assembler.number_of_bands(), T::zero()),
             }),
         })
     }
 
     /// Construct the full CsrMatrix sparsity pattern from the element assembler -
     fn assemble_full_sparsity_pattern<Assembler>(
-        element_assembler: &Assembler,
+        vertex_assembler: &Assembler,
     ) -> color_eyre::Result<SparsityPattern>
     where
-        Assembler: ElementConnectivityAssembler + HamiltonianInfoDesk<T>,
+        Assembler: VertexConnectivityAssembler + HamiltonianInfoDesk<T>,
         DefaultAllocator: Allocator<T, Assembler::GeometryDim> + Allocator<T, Assembler::BandDim>,
     {
-        let sdim = element_assembler.solution_dim();
-        let n_cells = element_assembler.num_elements() + 1;
-        let num_rows =
-            sdim * element_assembler.num_elements() * element_assembler.number_of_bands();
+        let sdim = vertex_assembler.solution_dim();
+        let n_cells = vertex_assembler.num_elements() + 1;
+        let num_rows = sdim * vertex_assembler.num_vertices() * vertex_assembler.number_of_bands();
 
-        let mut element_connections = Vec::new();
+        let mut vertex_connections = Vec::new();
         let mut matrix_entries = std::collections::BTreeSet::new();
-        for i in 0..element_assembler.num_elements() {
-            let element_connection_count = element_assembler.element_connection_count(i);
-            element_connections.resize(element_connection_count, usize::MAX);
-            element_assembler.populate_element_connections(&mut element_connections, i);
-            for n_band in 0..element_assembler.number_of_bands() {
+        for i in 0..vertex_assembler.num_vertices() {
+            let vertex_connection_count = vertex_assembler.vertex_connection_count(i);
+            vertex_connections.resize(vertex_connection_count, usize::MAX);
+            vertex_assembler.populate_vertex_connections(&mut vertex_connections, i);
+            for n_band in 0..vertex_assembler.number_of_bands() {
                 matrix_entries.insert((n_band * n_cells + i, n_band * n_cells + i)); // The diagonal element
-                for j in &element_connections {
+                for j in &vertex_connections {
                     matrix_entries.insert((n_band * n_cells + i, n_band * n_cells + j));
                     // The hopping elements
                 }
@@ -132,15 +126,14 @@ impl<T: Copy + RealField> CsrAssembler<T> {
 
     /// Assemble the sparsity pattern for the diagonal of the CsrMatrix
     fn assemble_diagonal_sparsity_pattern<Assembler>(
-        element_assembler: &Assembler,
+        vertex_assembler: &Assembler,
     ) -> color_eyre::Result<SparsityPattern>
     where
-        Assembler: ElementConnectivityAssembler + HamiltonianInfoDesk<T>,
+        Assembler: VertexConnectivityAssembler + HamiltonianInfoDesk<T>,
         DefaultAllocator: Allocator<T, Assembler::GeometryDim> + Allocator<T, Assembler::BandDim>,
     {
-        let sdim = element_assembler.solution_dim();
-        let num_rows =
-            sdim * element_assembler.num_elements() * element_assembler.number_of_bands();
+        let sdim = vertex_assembler.solution_dim();
+        let num_rows = sdim * vertex_assembler.num_vertices() * vertex_assembler.number_of_bands();
 
         let offsets = (0..num_rows + 1).collect::<Vec<_>>();
         let column_indices = (0..num_rows).collect::<Vec<_>>();
@@ -155,64 +148,64 @@ impl<T: Copy + RealField> CsrAssembler<T> {
     /// Assembles the fixed component of the Hamiltonian: ie that which is independent of potential and wavevector
     pub(crate) fn assemble_fixed<Assembler>(
         &self,
-        element_assembler: &Assembler,
+        vertex_assembler: &Assembler,
     ) -> color_eyre::Result<CsrMatrix<T>>
     where
-        Assembler: AssembleElementMatrix<T> + HamiltonianInfoDesk<T>,
+        Assembler: AssembleVertexHamiltonianMatrix<T> + HamiltonianInfoDesk<T>,
         DefaultAllocator: Allocator<T, Assembler::GeometryDim> + Allocator<T, Assembler::BandDim>,
     {
         let pattern = self.workspace.borrow().full_sparsity_pattern.clone();
         let initial_matrix_values = vec![T::zero(); pattern.nnz()];
         let mut matrix = CsrMatrix::try_from_pattern_and_values(pattern, initial_matrix_values)
             .expect("CSR data must be valid by definition");
-        self.assemble_into_csr(&mut matrix, element_assembler)?;
+        self.assemble_into_csr(&mut matrix, vertex_assembler)?;
         Ok(matrix)
     }
 
     /// Assembles the component of the Hamiltonian proportional to the transverse wavevector
     pub(crate) fn assemble_wavevector<Assembler>(
         &self,
-        element_assembler: &Assembler,
+        vertex_assembler: &Assembler,
     ) -> color_eyre::Result<CsrMatrix<T>>
     where
-        Assembler: AssembleElementDiagonal<T> + HamiltonianInfoDesk<T>,
+        Assembler: AssembleVertexHamiltonianDiagonal<T> + HamiltonianInfoDesk<T>,
         DefaultAllocator: Allocator<T, Assembler::GeometryDim> + Allocator<T, Assembler::BandDim>,
     {
         let pattern = self.workspace.borrow().diagonal_sparsity_pattern.clone();
         let initial_matrix_values = vec![T::zero(); pattern.nnz()];
         let mut matrix = CsrMatrix::try_from_pattern_and_values(pattern, initial_matrix_values)
             .expect("CSR data must be valid by definition");
-        self.assemble_into_csr_diagonal(&mut matrix, element_assembler)?;
+        self.assemble_into_csr_diagonal(&mut matrix, vertex_assembler)?;
         Ok(matrix)
     }
 
     /// Assembles the potential into a diagonal CsrMatrix: This method is only called in the constructor
     pub(crate) fn assemble_potential<Assembler>(
         &self,
-        element_assembler: &Assembler,
+        vertex_assembler: &Assembler,
     ) -> color_eyre::Result<CsrMatrix<T>>
     where
-        Assembler: ElementConnectivityAssembler + PotentialInfoDesk<T>,
+        Assembler: VertexConnectivityAssembler + PotentialInfoDesk<T>,
         DefaultAllocator: Allocator<T, Assembler::BandDim>,
     {
         let pattern = self.workspace.borrow().diagonal_sparsity_pattern.clone();
         let initial_matrix_values = vec![T::zero(); pattern.nnz()];
         let mut matrix = CsrMatrix::try_from_pattern_and_values(pattern, initial_matrix_values)
             .expect("CSR data must be valid by definition");
-        CsrAssembler::assemble_potential_into_csr_diagonal(&mut matrix, element_assembler)?;
+        CsrAssembler::assemble_potential_into_csr_diagonal(&mut matrix, vertex_assembler)?;
         Ok(matrix)
     }
 
     /// Assemble the potential into a pre-initialised CsrMatrix -> This method is called after each update of the potential
     pub(crate) fn assemble_potential_into<Assembler>(
-        element_assembler: &Assembler,
+        vertex_assembler: &Assembler,
         potential: &mut CsrMatrix<T>,
     ) -> color_eyre::Result<()>
     where
-        Assembler: ElementConnectivityAssembler + PotentialInfoDesk<T>,
+        Assembler: VertexConnectivityAssembler + PotentialInfoDesk<T>,
         DefaultAllocator: Allocator<T, Assembler::BandDim>,
     {
-        CsrAssembler::assemble_potential_into_csr_diagonal(potential, element_assembler)?;
+        CsrAssembler::assemble_potential_into_csr_diagonal(potential, vertex_assembler)?;
         Ok(())
     }
 }
@@ -223,14 +216,14 @@ impl<T: Copy + RealField> CsrAssembler<T> {
     fn assemble_into_csr<Assembler>(
         &self,
         csr: &mut CsrMatrix<T>,
-        element_assembler: &Assembler,
+        vertex_assembler: &Assembler,
     ) -> color_eyre::Result<()>
     where
-        Assembler: AssembleElementMatrix<T> + HamiltonianInfoDesk<T>,
+        Assembler: AssembleVertexHamiltonianMatrix<T> + HamiltonianInfoDesk<T>,
         DefaultAllocator: Allocator<T, Assembler::GeometryDim> + Allocator<T, Assembler::BandDim>,
     {
-        let sdim = element_assembler.solution_dim();
-        let num_single_band_rows = sdim * element_assembler.num_elements(); // We have an issue with cells and nodes, this needs to be pinned down
+        let sdim = vertex_assembler.solution_dim();
+        let num_single_band_rows = sdim * vertex_assembler.num_vertices(); // We have an issue with cells and nodes, this needs to be pinned down
 
         let mut workspace = self.workspace.borrow_mut();
 
@@ -238,15 +231,15 @@ impl<T: Copy + RealField> CsrAssembler<T> {
         for n_row in 0..num_single_band_rows {
             // This is still annoying because we have less connections at the edges so have to
             // re-initialise this matrix on every loop. Can we refactor the mesh to avoid this problem
-            let num_connections = element_assembler.element_connection_count(n_row);
+            let num_connections = vertex_assembler.vertex_connection_count(n_row);
             // The element matrix has `num_connections + 1` elements for each band in a nearest-neighbour model
             // This is mainly just a pull from the `workspace`, the size only changes for the edge elements
             // let mut element_matrix = self.workspace.into_inner().element_matrix.resize(
-            let element_matrix = workspace.element_matrix_mut();
-            let matrix_slice = element_matrix.columns_mut(0, num_connections + 1);
-            element_assembler.assemble_element_matrix_into(n_row, matrix_slice)?;
-            for n_band in 0..element_assembler.number_of_bands() {
-                let band_row = workspace.element_matrix().row(n_band);
+            let vertex_matrix = workspace.vertex_matrix_mut();
+            let matrix_slice = vertex_matrix.columns_mut(0, num_connections + 1);
+            vertex_assembler.assemble_vertex_matrix_into(n_row, matrix_slice)?;
+            for n_band in 0..vertex_assembler.number_of_bands() {
+                let band_row = workspace.vertex_matrix().row(n_band);
                 let mut csr_row = csr.row_mut(n_row + n_row * n_band);
                 let values = csr_row.values_mut();
                 add_row_to_csr_row(values, band_row);
@@ -259,24 +252,24 @@ impl<T: Copy + RealField> CsrAssembler<T> {
     fn assemble_into_csr_diagonal<Assembler>(
         &self,
         csr: &mut CsrMatrix<T>,
-        element_assembler: &Assembler,
+        vertex_assembler: &Assembler,
     ) -> color_eyre::Result<()>
     where
-        Assembler: AssembleElementDiagonal<T> + HamiltonianInfoDesk<T>,
+        Assembler: AssembleVertexHamiltonianDiagonal<T> + HamiltonianInfoDesk<T>,
         DefaultAllocator: Allocator<T, Assembler::GeometryDim> + Allocator<T, Assembler::BandDim>,
     {
-        let sdim = element_assembler.solution_dim();
-        let num_single_band_rows = sdim * element_assembler.num_elements(); // We have an issue with cells and nodes, this needs to be pinned down
+        let sdim = vertex_assembler.solution_dim();
+        let num_single_band_rows = sdim * vertex_assembler.num_vertices(); // We have an issue with cells and nodes, this needs to be pinned down
 
         let mut workspace = self.workspace.borrow_mut();
 
         // Assemble the differential operator for the Hamiltonian
         for n_row in 0..num_single_band_rows {
-            let element_vector = workspace.element_vector_mut();
-            let vector_slice = nalgebra::DVectorSliceMut::from(element_vector);
-            element_assembler.assemble_element_diagonal_into(n_row, vector_slice)?;
-            for n_band in 0..element_assembler.number_of_bands() {
-                let band_row = workspace.element_vector().row(n_band)[0];
+            let vertex_vector = workspace.vertex_vector_mut();
+            let vector_slice = nalgebra::DVectorSliceMut::from(vertex_vector);
+            vertex_assembler.assemble_vertex_diagonal_into(n_row, vector_slice)?;
+            for n_band in 0..vertex_assembler.number_of_bands() {
+                let band_row = workspace.vertex_vector().row(n_band)[0];
                 let mut csr_row = csr.row_mut(n_row + n_row * n_band);
                 let values = csr_row.values_mut(); //t
                 add_element_to_csr_row_diagonal(values, band_row);
@@ -289,21 +282,20 @@ impl<T: Copy + RealField> CsrAssembler<T> {
     /// TODO -> This will panic when the diagonal contains zeros, which it may well do
     fn assemble_potential_into_csr_diagonal<Assembler>(
         csr: &mut CsrMatrix<T>,
-        element_assembler: &Assembler,
+        vertex_assembler: &Assembler,
     ) -> color_eyre::Result<()>
     where
-        Assembler: ElementConnectivityAssembler + PotentialInfoDesk<T>,
+        Assembler: VertexConnectivityAssembler + PotentialInfoDesk<T>,
         DefaultAllocator: Allocator<T, Assembler::BandDim>,
     {
-        let sdim = element_assembler.solution_dim();
-        let num_single_band_rows = sdim * element_assembler.num_elements(); // We have an issue with cells and nodes, this needs to be pinned down
-        let mut scratch = vec![0_usize; element_assembler.element_vertex_count(1)]; // Hacky, add a method;
+        let sdim = vertex_assembler.solution_dim();
+        let num_single_band_rows = sdim * vertex_assembler.num_vertices(); // We have an issue with cells and nodes, this needs to be pinned down
+        let mut scratch = vec![0_usize; 1]; // Hacky, add a method;
 
         // Assemble the potential into a diagonal
         for n_row in 0..num_single_band_rows {
-            element_assembler.populate_element_vertices(&mut scratch, n_row);
-            let potential = element_assembler.potential(&scratch);
-            for n_band in 0..element_assembler.number_of_bands() {
+            let potential = vertex_assembler.potential(n_row);
+            for n_band in 0..vertex_assembler.number_of_bands() {
                 let mut csr_row = csr.row_mut(n_row + n_row * n_band);
                 let diagonal_entry = csr_row
                     .get_entry_mut(n_row)

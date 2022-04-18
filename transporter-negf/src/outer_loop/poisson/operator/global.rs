@@ -3,10 +3,9 @@
 //! This module provides global assemblers for the `Hamiltonian` matrix, taking the elements produced in the
 //! local subcrate and throwing them into a global CsrMatrix
 
+use super::local::{AssembleVertexPoissonDiagonal, AssembleVertexPoissonMatrix};
 use super::PoissonInfoDesk;
-use crate::utilities::assemblers::{
-    AssembleVertexDiagonal, AssembleVertexMatrix, VertexConnectivityAssembler,
-};
+use crate::utilities::assemblers::VertexConnectivityAssembler;
 use color_eyre::eyre::eyre;
 use nalgebra::{allocator::Allocator, DVector, DefaultAllocator, RealField};
 use nalgebra_sparse::{pattern::SparsityPattern, CsrMatrix};
@@ -136,7 +135,7 @@ impl<T: Copy + RealField> CsrAssembler<T> {
         vertex_assembler: &Assembler,
     ) -> color_eyre::Result<CsrMatrix<T>>
     where
-        Assembler: AssembleVertexMatrix<T> + PoissonInfoDesk<T>,
+        Assembler: AssembleVertexPoissonMatrix<T> + PoissonInfoDesk<T>,
         DefaultAllocator: Allocator<T, Assembler::GeometryDim> + Allocator<T, Assembler::BandDim>,
     {
         let pattern = self.workspace.borrow().full_sparsity_pattern.clone();
@@ -153,7 +152,7 @@ impl<T: Copy + RealField> CsrAssembler<T> {
         vertex_assembler: &Assembler,
     ) -> color_eyre::Result<DVector<T>>
     where
-        Assembler: AssembleVertexDiagonal<T> + PoissonInfoDesk<T>,
+        Assembler: AssembleVertexPoissonDiagonal<T> + PoissonInfoDesk<T>,
         DefaultAllocator: Allocator<T, Assembler::GeometryDim> + Allocator<T, Assembler::BandDim>,
     {
         let pattern = self.workspace.borrow().diagonal_sparsity_pattern.clone();
@@ -169,7 +168,7 @@ impl<T: Copy + RealField> CsrAssembler<T> {
         vertex_assembler: &Assembler,
     ) -> color_eyre::Result<CsrMatrix<T>>
     where
-        Assembler: AssembleVertexMatrix<T> + PoissonInfoDesk<T>,
+        Assembler: AssembleVertexPoissonMatrix<T> + PoissonInfoDesk<T>,
         DefaultAllocator: Allocator<T, Assembler::GeometryDim> + Allocator<T, Assembler::BandDim>,
     {
         let pattern = self.workspace.borrow().diagonal_sparsity_pattern.clone();
@@ -186,7 +185,7 @@ impl<T: Copy + RealField> CsrAssembler<T> {
         quantity: &mut CsrMatrix<T>,
     ) -> color_eyre::Result<()>
     where
-        Assembler: AssembleVertexMatrix<T> + PoissonInfoDesk<T>,
+        Assembler: AssembleVertexPoissonMatrix<T> + PoissonInfoDesk<T>,
         DefaultAllocator: Allocator<T, Assembler::GeometryDim> + Allocator<T, Assembler::BandDim>,
     {
         CsrAssembler::assemble_into_csr_diagonal(quantity, element_assembler)?;
@@ -203,7 +202,7 @@ impl<T: Copy + RealField> CsrAssembler<T> {
         vertex_assembler: &Assembler,
     ) -> color_eyre::Result<()>
     where
-        Assembler: AssembleVertexMatrix<T> + PoissonInfoDesk<T>,
+        Assembler: AssembleVertexPoissonMatrix<T> + PoissonInfoDesk<T>,
         DefaultAllocator: Allocator<T, Assembler::GeometryDim> + Allocator<T, Assembler::BandDim>,
     {
         let sdim = vertex_assembler.solution_dim();
@@ -238,7 +237,7 @@ impl<T: Copy + RealField> CsrAssembler<T> {
         vertex_assembler: &Assembler,
     ) -> color_eyre::Result<()>
     where
-        Assembler: AssembleVertexDiagonal<T> + PoissonInfoDesk<T>,
+        Assembler: AssembleVertexPoissonDiagonal<T> + PoissonInfoDesk<T>,
         DefaultAllocator: Allocator<T, Assembler::GeometryDim> + Allocator<T, Assembler::BandDim>,
     {
         // Assemble the differential operator for the Hamiltonian
@@ -256,7 +255,7 @@ impl<T: Copy + RealField> CsrAssembler<T> {
         vertex_assembler: &Assembler,
     ) -> color_eyre::Result<()>
     where
-        Assembler: AssembleVertexMatrix<T> + PoissonInfoDesk<T>,
+        Assembler: AssembleVertexPoissonMatrix<T> + PoissonInfoDesk<T>,
         DefaultAllocator: Allocator<T, Assembler::GeometryDim> + Allocator<T, Assembler::BandDim>,
     {
         let sdim = vertex_assembler.solution_dim();

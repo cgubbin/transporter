@@ -8,10 +8,8 @@ use crate::postprocessor::Charge;
 use argmin::core::{Error, Jacobian, Operator};
 use nalgebra::{allocator::Allocator, DMatrix, DVector, DefaultAllocator, RealField};
 use nalgebra_sparse::CsrMatrix;
-use std::{marker::PhantomData, ops::SubAssign};
+use std::marker::PhantomData;
 use transporter_mesher::{Connectivity, Mesh, SmallDim};
-
-use std::io::Write;
 
 pub(crate) struct PoissonProblemBuilder<
     T: Copy + RealField,
@@ -203,7 +201,7 @@ where
         }
 
         // Set the third element to zero...
-        let mut operator = self.operator.clone();
+        let operator = self.operator.clone();
         //operator.values_mut()[5] = T::zero();
         //operator.values_mut()[6] = T::one();
         //operator.values_mut()[7] = T::zero();
@@ -255,7 +253,7 @@ where
         jacobian_csr.values_mut()[jacobian_diagonal.len() - 1] /= T::one() + T::one();
 
         // Set the third element to zero...
-        let mut operator = self.operator.clone();
+        let operator = self.operator.clone();
         // operator.values_mut()[5] = T::zero();
         // operator.values_mut()[6] = T::one();
         // operator.values_mut()[7] = T::zero();
