@@ -267,13 +267,19 @@ where
     ) -> color_eyre::Result<
         AggregateGreensFunctions<'a, T, DMatrix<Complex<T>>, GeometryDim, BandDim>,
     > {
+        let matrix = GreensFunction {
+            matrix: DMatrix::zeros(self.mesh.vertices().len(), self.mesh.vertices().len()),
+            marker: std::marker::PhantomData,
+        };
+
+        let num_spectral_points = self.spectral.total_number_of_points();
         Ok(AggregateGreensFunctions {
             //    spectral: self.spectral,
             info_desk: self.info_desk,
-            retarded: Vec::with_capacity(self.spectral.total_number_of_points()),
-            advanced: Vec::with_capacity(self.spectral.total_number_of_points()),
-            lesser: Vec::with_capacity(self.spectral.total_number_of_points()),
-            greater: Vec::with_capacity(self.spectral.total_number_of_points()),
+            retarded: vec![matrix.clone(); num_spectral_points],
+            advanced: Vec::new(),
+            lesser: vec![matrix; num_spectral_points],
+            greater: Vec::new(),
         })
     }
 }

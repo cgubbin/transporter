@@ -1,3 +1,4 @@
+use crate::app::Calculation;
 use argmin::core::Operator;
 use conflux::core::FixedPointSolver;
 use conflux::solvers::anderson::Type1AndersonMixer;
@@ -59,6 +60,7 @@ where
     fn single_iteration(&mut self, potential: &DVector<T>) -> color_eyre::Result<DVector<T>>;
     /// Run the self-consistent inner loop to convergence
     fn run_loop(&mut self, potential: Potential<T>) -> color_eyre::Result<()>;
+    fn potential_owned(&self) -> Potential<T>;
 }
 
 impl<T, GeometryDim, Conn, BandDim> Outer<T>
@@ -122,7 +124,7 @@ where
         let mut self_energies = SelfEnergyBuilder::new()
             .with_mesh(self.mesh)
             .with_spectral_discretisation(self.spectral)
-            .build()
+            .build_coherent()
             .expect("Self energy build failed");
         let mut inner_loop =
             self.build_coherent_inner_loop(&mut greens_functions, &mut self_energies);
@@ -166,8 +168,13 @@ where
 
         let solution = DVector::from(solution.get_param().iter().map(|x| *x).collect::<Vec<_>>());
         potential = Potential::from_vector(solution);
+        self.tracker.update_potential(potential);
         //// A single iteration before the loop to avoid updating the potential with an empty charge vector
         Ok(())
+    }
+
+    fn potential_owned(&self) -> Potential<T> {
+        self.tracker.potential.clone()
     }
 }
 
@@ -221,25 +228,54 @@ where
 
         // TODO Building the gfs and SE here is a bad idea, we should do this else where so it is not redone on every iteration
         tracing::trace!("Initialising Greens Functions");
-        let mut greens_functions = GreensFunctionBuilder::new()
-            .with_info_desk(self.info_desk)
-            .with_mesh(self.mesh)
-            .with_spectral_discretisation(self.spectral)
-            .build()
-            .expect("Gf build failed");
-        tracing::trace!("Initialising Self Energies");
-        let mut self_energies = SelfEnergyBuilder::new()
-            .with_mesh(self.mesh)
-            .with_spectral_discretisation(self.spectral)
-            .build()
-            .expect("Self energy build failed");
-        let mut inner_loop =
-            self.build_coherent_inner_loop(&mut greens_functions, &mut self_energies);
-        let mut charge_and_currents = self.tracker.charge_and_currents.clone();
-        inner_loop
-            .run_loop(&mut charge_and_currents)
-            .expect("Inner loop failed");
-        let _ = std::mem::replace(self.tracker.charge_and_currents_mut(), charge_and_currents);
+        match self.tracker.calculation {
+            Calculation::Coherent => {
+                dbg!("Coherent Path");
+                let mut greens_functions = GreensFunctionBuilder::new()
+                    .with_info_desk(self.info_desk)
+                    .with_mesh(self.mesh)
+                    .with_spectral_discretisation(self.spectral)
+                    .build()
+                    .expect("Gf build failed");
+                tracing::trace!("Initialising Self Energies");
+                let mut self_energies = SelfEnergyBuilder::new()
+                    .with_mesh(self.mesh)
+                    .with_spectral_discretisation(self.spectral)
+                    .build_coherent()
+                    .expect("Self energy build failed");
+                let mut inner_loop =
+                    self.build_coherent_inner_loop(&mut greens_functions, &mut self_energies);
+                let mut charge_and_currents = self.tracker.charge_and_currents.clone();
+                inner_loop
+                    .run_loop(&mut charge_and_currents)
+                    .expect("Inner loop failed");
+                let _ =
+                    std::mem::replace(self.tracker.charge_and_currents_mut(), charge_and_currents);
+            }
+            Calculation::Incoherent => {
+                let mut greens_functions = GreensFunctionBuilder::new()
+                    .with_info_desk(self.info_desk)
+                    .with_mesh(self.mesh)
+                    .with_spectral_discretisation(self.spectral)
+                    .incoherent_calculation(&self.tracker.calculation)
+                    .build()
+                    .expect("Gf build failed");
+                tracing::trace!("Initialising Self Energies");
+                let mut self_energies = SelfEnergyBuilder::new()
+                    .with_mesh(self.mesh)
+                    .with_spectral_discretisation(self.spectral)
+                    .build_incoherent()
+                    .expect("Self energy build failed");
+                let mut inner_loop =
+                    self.build_incoherent_inner_loop(&mut greens_functions, &mut self_energies);
+                let mut charge_and_currents = self.tracker.charge_and_currents.clone();
+                inner_loop
+                    .run_loop(&mut charge_and_currents)
+                    .expect("Inner loop failed");
+                let _ =
+                    std::mem::replace(self.tracker.charge_and_currents_mut(), charge_and_currents);
+            }
+        }
 
         // Update the Fermi level in the device
         self.tracker.fermi_level = DVector::from(self.info_desk.determine_fermi_level(
@@ -272,9 +308,14 @@ where
 
         let solution = DVector::from(solution.get_param().iter().map(|x| *x).collect::<Vec<_>>());
         potential = Potential::from_vector(solution);
+        self.tracker.update_potential(potential);
         // potential = Potential::from_vector(solution.get_param());
         //// A single iteration before the loop to avoid updating the potential with an empty charge vector
         Ok(())
+    }
+
+    fn potential_owned(&self) -> Potential<T> {
+        self.tracker.potential.clone()
     }
 }
 
@@ -339,7 +380,7 @@ where
 
         // Run solver
         let res = Executor::new(cost, solver)
-            .configure(|state| state.param(init_param).max_iters(20))
+            .configure(|state| state.param(init_param).max_iters(200))
             //.add_observer(SlogLogger::term(), ObserverMode::Never)
             .run()
             .map_err(|e| color_eyre::eyre::eyre!("Failed to optimize poisson system {:?}", e))?;
@@ -376,6 +417,14 @@ where
         //println!("{:?}", self.tracker.charge_as_ref());
 
         Ok(Potential::from_vector(output))
+    }
+
+    pub(crate) fn scattering_scaling(&self) -> T {
+        self.tracker.scattering_scaling
+    }
+
+    pub(crate) fn increment_scattering_scaling(&mut self) {
+        self.tracker.scattering_scaling += T::from_f64(0.1).unwrap();
     }
 }
 
@@ -446,7 +495,7 @@ where
             GeometryDim,
             BandDim,
         >,
-        self_energies: &'a mut SelfEnergy<T, GeometryDim, Conn, CsrMatrix<Complex<T>>>,
+        self_energies: &'a mut SelfEnergy<T, GeometryDim, Conn>,
     ) -> InnerLoop<'a, T, GeometryDim, Conn, CsrMatrix<Complex<T>>, SpectralSpace<T, ()>, BandDim>
     {
         InnerLoopBuilder::new()
@@ -491,7 +540,7 @@ where
             GeometryDim,
             BandDim,
         >,
-        self_energies: &'a mut SelfEnergy<T, GeometryDim, Conn, CsrMatrix<Complex<T>>>,
+        self_energies: &'a mut SelfEnergy<T, GeometryDim, Conn>,
     ) -> InnerLoop<
         'a,
         T,
@@ -543,7 +592,7 @@ where
             GeometryDim,
             BandDim,
         >,
-        self_energies: &'a mut SelfEnergy<T, GeometryDim, Conn, DMatrix<Complex<T>>>,
+        self_energies: &'a mut SelfEnergy<T, GeometryDim, Conn>,
     ) -> InnerLoop<
         'a,
         T,
@@ -560,6 +609,7 @@ where
             .with_hamiltonian(self.hamiltonian)
             .with_greens_functions(greens_functions)
             .with_self_energies(self_energies)
+            .with_scattering_scaling(self.tracker.scattering_scaling)
             .build()
     }
 }

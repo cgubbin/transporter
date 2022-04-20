@@ -33,14 +33,8 @@ where
 }
 
 impl<T, GeometryDim, Conn, BandDim, Spectral>
-    PostProcess<
-        T,
-        BandDim,
-        GeometryDim,
-        Conn,
-        Spectral,
-        SelfEnergy<T, GeometryDim, Conn, CsrMatrix<Complex<T>>>,
-    > for PostProcessor<'_, T, GeometryDim, Conn>
+    PostProcess<T, BandDim, GeometryDim, Conn, Spectral, SelfEnergy<T, GeometryDim, Conn>>
+    for PostProcessor<'_, T, GeometryDim, Conn>
 where
     T: RealField + Copy,
     Conn: Connectivity<T, GeometryDim>,
@@ -56,7 +50,7 @@ where
     fn recompute_currents_and_densities<AggregateGreensFunctions>(
         &self,
         greens_functions: &AggregateGreensFunctions,
-        self_energy: &SelfEnergy<T, GeometryDim, Conn, CsrMatrix<Complex<T>>>,
+        self_energy: &SelfEnergy<T, GeometryDim, Conn>,
         spectral_discretisation: &Spectral,
     ) -> color_eyre::Result<ChargeAndCurrent<T, BandDim>>
     where
@@ -66,7 +60,7 @@ where
             GeometryDim,
             Conn,
             Spectral,
-            SelfEnergy<T, GeometryDim, Conn, CsrMatrix<Complex<T>>>,
+            SelfEnergy<T, GeometryDim, Conn>,
         >,
     {
         //todo Do we want to get the LDOS or are we ok with doing this inside the Greens funciton itself

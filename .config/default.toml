@@ -15,11 +15,11 @@ elements_per_unit = 4
 maximum_growth_rate = 1.2
 
 [spectral]
-number_of_energy_points = 1000
+number_of_energy_points = 100
 minimum_energy = 0.0
-maximum_energy = 0.3
+maximum_energy = 0.25
 energy_integration_rule = "ThreePoint"
-number_of_wavevector_points = 100
+number_of_wavevector_points = 50
 maximum_wavevector = 1e9
 wavevector_integration_rule = "ThreePoint"
 

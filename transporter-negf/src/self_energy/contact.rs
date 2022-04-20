@@ -3,11 +3,10 @@ use crate::{hamiltonian::Hamiltonian, spectral::SpectralDiscretisation};
 use console::Term;
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use nalgebra::{allocator::Allocator, ComplexField, DefaultAllocator, RealField};
-use nalgebra_sparse::CsrMatrix;
 use num_complex::Complex;
 use transporter_mesher::{Connectivity, Mesh, SmallDim};
 
-impl<T, GeometryDim, Conn> SelfEnergy<T, GeometryDim, Conn, CsrMatrix<Complex<T>>>
+impl<T, GeometryDim, Conn> SelfEnergy<T, GeometryDim, Conn>
 where
     T: RealField + Copy,
     GeometryDim: SmallDim,
@@ -73,12 +72,12 @@ where
                             let t = -boundary_element;
                             let z = Complex::from((d - energy) / (t + t));
                             if ind == 0 {
-                                self.retarded
+                                self.contact_retarded
                                     [idx * spectral_space.number_of_energy_points() + jdx]
                                     .values_mut()[0] =
                                     -Complex::from(t) * (imaginary_unit * z.acos()).exp();
                             } else {
-                                self.retarded
+                                self.contact_retarded
                                     [idx * spectral_space.number_of_energy_points() + jdx]
                                     .values_mut()[1] =
                                     -Complex::from(t) * (imaginary_unit * z.acos()).exp();

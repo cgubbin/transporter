@@ -46,6 +46,9 @@ rand = "0.8.5"
 # simba = { version = "0.7.1", features = ["packed_simd"] }
 utilities = { path = "utilities" }
 
+[profile.release]
+codegen-units = 1
+
 [profile.bench]
 debug = true
 codegen-units = 1 

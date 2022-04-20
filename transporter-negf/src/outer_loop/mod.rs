@@ -290,6 +290,21 @@ where
             info_desk: self.info_desk,
         })
     }
+
+    pub(crate) fn build_coherent(
+        self,
+    ) -> color_eyre::Result<OuterLoop<'a, T, GeometryDim, Conn, BandDim, SpectralSpace>> {
+        let mut tracker = LoopTracker::from_global_tracker(self.tracker);
+        tracker.calculation = Calculation::Coherent;
+        Ok(OuterLoop {
+            convergence_settings: self.convergence_settings,
+            mesh: self.mesh,
+            hamiltonian: self.hamiltonian,
+            spectral: self.spectral,
+            tracker,
+            info_desk: self.info_desk,
+        })
+    }
 }
 
 use crate::app::Calculation;
@@ -313,6 +328,7 @@ where
     fermi_level: DVector<T>,
     iteration: usize,
     calculation: Calculation,
+    scattering_scaling: T,
 }
 
 impl<T: Copy + RealField, BandDim: SmallDim> LoopTracker<T, BandDim>
@@ -349,6 +365,7 @@ where
             ),
             calculation: global_tracker.calculation(),
             iteration: 0,
+            scattering_scaling: T::from_f64(0.1).unwrap(),
         }
     }
 
@@ -374,6 +391,10 @@ where
 
     pub(crate) fn fermi_level_mut(&mut self) -> &mut DVector<T> {
         &mut self.fermi_level
+    }
+
+    pub(crate) fn scattering_scaling(&self) -> T {
+        self.scattering_scaling
     }
 }
 

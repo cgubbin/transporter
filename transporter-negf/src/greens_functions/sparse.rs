@@ -70,7 +70,7 @@ impl<T, BandDim, GeometryDim, Conn, Spectral>
         GeometryDim,
         Conn,
         Spectral,
-        SelfEnergy<T, GeometryDim, Conn, CsrMatrix<Complex<T>>>,
+        SelfEnergy<T, GeometryDim, Conn>,
     > for AggregateGreensFunctions<'_, T, CsrMatrix<Complex<T>>, GeometryDim, BandDim>
 where
     T: RealField + Copy,
@@ -216,7 +216,7 @@ where
     fn accumulate_into_current_density_vector(
         &self,
         mesh: &Mesh<T, GeometryDim, Conn>,
-        self_energy: &SelfEnergy<T, GeometryDim, Conn, CsrMatrix<Complex<T>>>,
+        self_energy: &SelfEnergy<T, GeometryDim, Conn>,
         spectral_space: &Spectral,
     ) -> color_eyre::Result<Current<T, BandDim>> {
         let mut currents: Vec<DVector<T>> = Vec::with_capacity(BandDim::dim());
@@ -224,7 +224,7 @@ where
         let summed_current = self
             .retarded
             .iter()
-            .zip(self_energy.retarded.iter())
+            .zip(self_energy.contact_retarded.iter())
             .zip(spectral_space.iter_energy_weights())
             .zip(spectral_space.iter_energy_widths())
             .zip(spectral_space.iter_energies())
@@ -296,20 +296,19 @@ where
 
 // TODO This is a single band implementation
 /// Implementation of the aggregate update methods for coherent transport
-impl<'a, T, GeometryDim, BandDim, Matrix>
-    AggregateGreensFunctions<'a, T, Matrix, GeometryDim, BandDim>
+impl<'a, T, GeometryDim, BandDim>
+    AggregateGreensFunctions<'a, T, CsrMatrix<Complex<T>>, GeometryDim, BandDim>
 where
     T: RealField + Copy + Clone + Send + Sync,
     GeometryDim: SmallDim + Send + Sync,
     BandDim: SmallDim,
-    Matrix: GreensFunctionMethods<T> + Send + Sync,
     DefaultAllocator: Allocator<T, BandDim> + Allocator<[T; 3], BandDim>,
 {
     #[tracing::instrument(name = "Updating Greens Functions", skip_all)]
     pub(crate) fn update_greens_functions<Conn, Spectral>(
         &mut self,
         hamiltonian: &Hamiltonian<T>,
-        self_energy: &SelfEnergy<T, GeometryDim, Conn, Matrix>,
+        self_energy: &SelfEnergy<T, GeometryDim, Conn>,
         spectral_space: &Spectral,
     ) -> color_eyre::Result<()>
     where
@@ -329,7 +328,7 @@ where
     pub(crate) fn update_aggregate_retarded_greens_function<Conn, Spectral>(
         &mut self,
         hamiltonian: &Hamiltonian<T>,
-        self_energy: &SelfEnergy<T, GeometryDim, Conn, Matrix>,
+        self_energy: &SelfEnergy<T, GeometryDim, Conn>,
         spectral_space: &Spectral,
     ) -> color_eyre::Result<()>
     where
@@ -367,7 +366,7 @@ where
                     energy,
                     wavevector,
                     hamiltonian,
-                    &self_energy.retarded[index],
+                    &self_energy.contact_retarded[index],
                 )
             })?;
         Ok(())
@@ -375,7 +374,7 @@ where
 
     pub(crate) fn update_aggregate_lesser_greens_function<Conn, Spectral>(
         &mut self,
-        self_energy: &SelfEnergy<T, GeometryDim, Conn, Matrix>,
+        self_energy: &SelfEnergy<T, GeometryDim, Conn>,
         spectral_space: &Spectral,
     ) -> color_eyre::Result<()>
     where
@@ -425,7 +424,7 @@ where
                 };
                 gf.as_mut().generate_lesser_into(
                     &self.retarded[index].matrix,
-                    &self_energy.retarded[index],
+                    &self_energy.contact_retarded[index],
                     &[source, drain],
                 )
             })?;

@@ -28,6 +28,8 @@ pub(crate) trait SpectralDiscretisation<T: RealField + Send>: Send + Sync {
     fn iter_wavevector_weights(&self) -> Self::Iter;
     fn iter_energy_widths(&self) -> Self::Iter;
     fn iter_wavevector_widths(&self) -> Self::Iter;
+    fn identify_bracketing_weights(&self, target_energy: T) -> color_eyre::Result<[T; 2]>;
+    fn identify_bracketing_indices(&self, target_energy: T) -> color_eyre::Result<[usize; 2]>;
 }
 
 /// A general `SpectralSpace` which contains the wavevector and energy discretisation and associated integration rules
@@ -151,6 +153,35 @@ where
         let x = self.wavevector.weights().map(|x| *x).collect::<Vec<_>>();
         x.into_iter()
     }
+
+    fn identify_bracketing_weights(&self, target_energy: T) -> color_eyre::Result<[T; 2]> {
+        let idx_upper = self
+            .iter_energies()
+            .position(|energy| energy > target_energy);
+        if let Some(idx_upper) = idx_upper {
+            let idx_lower = idx_upper - 1;
+            let delta_upper = (self.energy_at(idx_upper) - target_energy).abs();
+            let delta_lower = (self.energy_at(idx_lower) - target_energy).abs();
+            let delta = delta_upper + delta_lower;
+            return Ok([delta - delta_lower, delta - delta_upper]);
+        }
+        Err(color_eyre::eyre::eyre!(
+            "Failed to find a bracketed value, the passed energy cannot be in the mesh"
+        ))
+    }
+
+    fn identify_bracketing_indices(&self, target_energy: T) -> color_eyre::Result<[usize; 2]> {
+        let idx_upper = self
+            .iter_energies()
+            .position(|energy| energy > target_energy);
+        if let Some(idx_upper) = idx_upper {
+            let idx_lower = idx_upper - 1;
+            return Ok([idx_lower, idx_upper]);
+        }
+        Err(color_eyre::eyre::eyre!(
+            "Failed to find a bracketed value, the passed energy cannot be in the mesh"
+        ))
+    }
 }
 
 impl<T: RealField + Copy> SpectralDiscretisation<T> for SpectralSpace<T, ()> {
@@ -219,6 +250,35 @@ impl<T: RealField + Copy> SpectralDiscretisation<T> for SpectralSpace<T, ()> {
     }
     fn iter_wavevector_weights(&self) -> Self::Iter {
         vec![T::one(); 1].into_iter()
+    }
+
+    fn identify_bracketing_weights(&self, target_energy: T) -> color_eyre::Result<[T; 2]> {
+        let idx_upper = self
+            .iter_energies()
+            .position(|energy| energy > target_energy);
+        if let Some(idx_upper) = idx_upper {
+            let idx_lower = idx_upper - 1;
+            let delta_upper = (self.energy_at(idx_upper) - target_energy).abs();
+            let delta_lower = (self.energy_at(idx_lower) - target_energy).abs();
+            let delta = delta_upper + delta_lower;
+            return Ok([delta - delta_lower, delta - delta_upper]);
+        }
+        Err(color_eyre::eyre::eyre!(
+            "Failed to find a bracketed value, the passed energy cannot be in the mesh"
+        ))
+    }
+
+    fn identify_bracketing_indices(&self, target_energy: T) -> color_eyre::Result<[usize; 2]> {
+        let idx_upper = self
+            .iter_energies()
+            .position(|energy| energy > target_energy);
+        if let Some(idx_upper) = idx_upper {
+            let idx_lower = idx_upper - 1;
+            return Ok([idx_lower, idx_upper]);
+        }
+        Err(color_eyre::eyre::eyre!(
+            "Failed to find a bracketed value, the passed energy cannot be in the mesh"
+        ))
     }
 }
 

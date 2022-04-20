@@ -28,6 +28,7 @@ pub(crate) struct InnerLoopBuilder<
     hamiltonian: RefHamiltonian,
     greens_functions: RefGreensFunctions,
     self_energies: RefSelfEnergies,
+    scattering_scaling: T,
     marker: PhantomData<T>,
 }
 
@@ -43,6 +44,7 @@ where
             hamiltonian: (),
             greens_functions: (),
             self_energies: (),
+            scattering_scaling: T::one(),
             marker: PhantomData,
         }
     }
@@ -88,6 +90,7 @@ where
             hamiltonian: self.hamiltonian,
             greens_functions: self.greens_functions,
             self_energies: self.self_energies,
+            scattering_scaling: self.scattering_scaling,
             marker: PhantomData,
         }
     }
@@ -111,6 +114,7 @@ where
             hamiltonian: self.hamiltonian,
             greens_functions: self.greens_functions,
             self_energies: self.self_energies,
+            scattering_scaling: self.scattering_scaling,
             marker: PhantomData,
         }
     }
@@ -134,6 +138,7 @@ where
             hamiltonian: self.hamiltonian,
             greens_functions: self.greens_functions,
             self_energies: self.self_energies,
+            scattering_scaling: self.scattering_scaling,
             marker: PhantomData,
         }
     }
@@ -157,6 +162,7 @@ where
             hamiltonian,
             greens_functions: self.greens_functions,
             self_energies: self.self_energies,
+            scattering_scaling: self.scattering_scaling,
             marker: PhantomData,
         }
     }
@@ -180,6 +186,7 @@ where
             hamiltonian: self.hamiltonian,
             greens_functions,
             self_energies: self.self_energies,
+            scattering_scaling: self.scattering_scaling,
             marker: PhantomData,
         }
     }
@@ -203,6 +210,31 @@ where
             hamiltonian: self.hamiltonian,
             greens_functions: self.greens_functions,
             self_energies,
+            scattering_scaling: self.scattering_scaling,
+            marker: PhantomData,
+        }
+    }
+
+    pub(crate) fn with_scattering_scaling(
+        self,
+        scattering_scaling: T,
+    ) -> InnerLoopBuilder<
+        T,
+        RefConvergenceSettings,
+        RefMesh,
+        RefSpectral,
+        RefHamiltonian,
+        RefGreensFunctions,
+        RefSelfEnergies,
+    > {
+        InnerLoopBuilder {
+            convergence_settings: self.convergence_settings,
+            mesh: self.mesh,
+            spectral: self.spectral,
+            hamiltonian: self.hamiltonian,
+            greens_functions: self.greens_functions,
+            self_energies: self.self_energies,
+            scattering_scaling,
             marker: PhantomData,
         }
     }
@@ -223,8 +255,9 @@ where
     spectral: &'a SpectralSpace,
     hamiltonian: &'a Hamiltonian<T>,
     greens_functions: &'a mut AggregateGreensFunctions<'a, T, Matrix, GeometryDim, BandDim>,
-    self_energies: &'a mut SelfEnergy<T, GeometryDim, Conn, Matrix>,
+    self_energies: &'a mut SelfEnergy<T, GeometryDim, Conn>,
     convergence_settings: &'a Convergence<T>,
+    scattering_scaling: T,
 }
 
 impl<'a, T, GeometryDim, Conn, Matrix, SpectralSpace, BandDim>
@@ -235,7 +268,7 @@ impl<'a, T, GeometryDim, Conn, Matrix, SpectralSpace, BandDim>
         &'a SpectralSpace,
         &'a Hamiltonian<T>,
         &'a mut AggregateGreensFunctions<'a, T, Matrix, GeometryDim, BandDim>,
-        &'a mut SelfEnergy<T, GeometryDim, Conn, Matrix>,
+        &'a mut SelfEnergy<T, GeometryDim, Conn>,
     >
 where
     T: RealField + Copy,
@@ -257,6 +290,7 @@ where
             greens_functions: self.greens_functions,
             self_energies: self.self_energies,
             convergence_settings: self.convergence_settings,
+            scattering_scaling: self.scattering_scaling,
         }
     }
 }

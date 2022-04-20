@@ -28,6 +28,10 @@ where
     fn as_mut(&mut self) -> &mut Matrix {
         &mut self.matrix
     }
+
+    pub(crate) fn as_ref(&self) -> &Matrix {
+        &self.matrix
+    }
 }
 
 pub(crate) trait GreensFunctionMethods<T>
@@ -205,30 +209,6 @@ mod test {
         }
     }
 
-    /// Helper function to convert sparse self energies to their dense equivalents to enable comparative testing
-    /// of sparse and dense implementations
-    fn convert_sparse_self_energy_to_dense<T: Copy + RealField, GeometryDim, Conn>(
-        sparse_self_energy: SelfEnergy<T, GeometryDim, Conn, CsrMatrix<Complex<T>>>,
-    ) -> SelfEnergy<T, GeometryDim, Conn, DMatrix<Complex<T>>>
-    where
-        GeometryDim: SmallDim,
-        Conn: Connectivity<T, GeometryDim>,
-        DefaultAllocator: Allocator<T, GeometryDim>,
-    {
-        // Take the sparse self-energy matrix and re-serialize to a DMatrix
-        let retarded_se_matrices = sparse_self_energy
-            .retarded
-            .iter()
-            .map(nalgebra_sparse::convert::serial::convert_csr_dense)
-            .collect::<Vec<_>>();
-        SelfEnergy {
-            ma: sparse_self_energy.ma,
-            mc: sparse_self_energy.mc,
-            marker: sparse_self_energy.marker,
-            retarded: retarded_se_matrices,
-        }
-    }
-
     use crate::app::Calculation;
     use crate::app::{tracker::TrackerBuilder, Configuration};
     use crate::device::{info_desk::BuildInfoDesk, Device};
@@ -277,7 +257,7 @@ mod test {
         let mut self_energy = crate::self_energy::SelfEnergyBuilder::new()
             .with_mesh(&mesh)
             .with_spectral_discretisation(&spectral_space)
-            .build()
+            .build_coherent()
             .unwrap();
         self_energy
             .recalculate_contact_self_energy(&mesh, &hamiltonian, &spectral_space)
@@ -293,10 +273,8 @@ mod test {
             .build_dense()
             .unwrap();
 
-        let dense_se = convert_sparse_self_energy_to_dense(self_energy);
-
         dense_gf
-            .update_aggregate_retarded_greens_function(&hamiltonian, &dense_se, &spectral_space)
+            .update_aggregate_retarded_greens_function(&hamiltonian, &self_energy, &spectral_space)
             .unwrap();
 
         for ((sparse, dense), _energy) in gf
@@ -369,7 +347,7 @@ mod test {
         let mut self_energy = crate::self_energy::SelfEnergyBuilder::new()
             .with_mesh(&mesh)
             .with_spectral_discretisation(&spectral_space)
-            .build()
+            .build_coherent()
             .unwrap();
         self_energy
             .recalculate_contact_self_energy(&mesh, &hamiltonian, &spectral_space)
@@ -385,10 +363,8 @@ mod test {
             .build_dense()
             .unwrap();
 
-        let dense_se = convert_sparse_self_energy_to_dense(self_energy);
-
         dense_gf
-            .update_aggregate_retarded_greens_function(&hamiltonian, &dense_se, &spectral_space)
+            .update_aggregate_retarded_greens_function(&hamiltonian, &self_energy, &spectral_space)
             .unwrap();
 
         for ((sparse, dense), _energy) in gf
@@ -459,7 +435,7 @@ mod test {
         let mut self_energy = crate::self_energy::SelfEnergyBuilder::new()
             .with_mesh(&mesh)
             .with_spectral_discretisation(&spectral_space)
-            .build()
+            .build_coherent()
             .unwrap();
         self_energy
             .recalculate_contact_self_energy(&mesh, &hamiltonian, &spectral_space)
@@ -475,10 +451,8 @@ mod test {
             .build_dense()
             .unwrap();
 
-        let dense_se = convert_sparse_self_energy_to_dense(self_energy);
-
         dense_gf
-            .update_aggregate_retarded_greens_function(&hamiltonian, &dense_se, &spectral_space)
+            .update_aggregate_retarded_greens_function(&hamiltonian, &self_energy, &spectral_space)
             .unwrap();
 
         for ((sparse, dense), _energy) in gf
@@ -549,7 +523,7 @@ mod test {
         let mut self_energy = crate::self_energy::SelfEnergyBuilder::new()
             .with_mesh(&mesh)
             .with_spectral_discretisation(&spectral_space)
-            .build()
+            .build_coherent()
             .unwrap();
         self_energy
             .recalculate_contact_self_energy(&mesh, &hamiltonian, &spectral_space)
@@ -568,14 +542,12 @@ mod test {
             .build_dense()
             .unwrap();
 
-        let dense_se = convert_sparse_self_energy_to_dense(self_energy);
-
         dense_gf
-            .update_aggregate_retarded_greens_function(&hamiltonian, &dense_se, &spectral_space)
+            .update_aggregate_retarded_greens_function(&hamiltonian, &self_energy, &spectral_space)
             .unwrap();
 
         dense_gf
-            .update_aggregate_lesser_greens_function(&dense_se, &spectral_space)
+            .update_aggregate_lesser_greens_function(&self_energy, &spectral_space)
             .unwrap();
 
         for ((sparse, dense), _energy) in gf
@@ -655,7 +627,7 @@ mod test {
         let mut self_energy = crate::self_energy::SelfEnergyBuilder::new()
             .with_mesh(&mesh)
             .with_spectral_discretisation(&spectral_space)
-            .build()
+            .build_coherent()
             .unwrap();
         self_energy
             .recalculate_contact_self_energy(&mesh, &hamiltonian, &spectral_space)
