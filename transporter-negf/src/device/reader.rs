@@ -17,6 +17,7 @@ where
 {
     pub(crate) voltage_offsets: Vec<T>,
     pub(crate) temperature: T,
+    pub(crate) lead_length: Option<T>,
     pub(crate) layers: Vec<Layer<T, GeometryDim>>,
 }
 
@@ -50,10 +51,13 @@ where
     DefaultAllocator: Allocator<T, GeometryDim>,
     <DefaultAllocator as Allocator<T, GeometryDim>>::Buffer: Deserialize<'static>,
 {
-    pub(crate) fn build(path: PathBuf) -> color_eyre::Result<Self> {
-        let s = Config::builder().add_source(File::from(path)).build()?;
+    pub(crate) fn build(path: PathBuf) -> miette::Result<Self> {
+        let s = Config::builder()
+            .add_source(File::from(path))
+            .build()
+            .map_err(|e| miette::miette!("Device file path not read {:?}", e))?;
         s.try_deserialize()
-            .map_err(|e| eyre!("Failed to deserialize device: {:?}", e))
+            .map_err(|e| miette::miette!("Failed to deserialize device: {:?}", e))
     }
 }
 

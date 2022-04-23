@@ -3,7 +3,7 @@ mod dense;
 pub mod recursive;
 mod sparse;
 
-use crate::{device::info_desk::DeviceInfoDesk, Hamiltonian};
+use crate::{device::info_desk::DeviceInfoDesk, hamiltonian::Hamiltonian};
 pub(crate) use aggregate::{
     AggregateGreensFunctionMethods, AggregateGreensFunctions, GreensFunctionBuilder,
 };
@@ -48,6 +48,9 @@ where
     ) -> color_eyre::Result<()>;
     fn generate_lesser_into(
         &mut self,
+        energy: T,
+        wavevector: T,
+        hamiltonian: &Hamiltonian<T>,
         retarded_greens_function: &Self,
         retarded_self_energy: &Self,
         fermi_levels: &[T],
@@ -188,7 +191,7 @@ mod test {
             AggregateGreensFunctions<'a, T, DMatrix<Complex<T>>, GeometryDim, BandDim>,
         > {
             // A 1D implementation. All 2D should redirect to the dense method
-            let dmatrix = DMatrix::zeros(self.mesh.elements().len(), self.mesh.elements().len());
+            let dmatrix = DMatrix::zeros(self.mesh.vertices().len(), self.mesh.vertices().len());
 
             let spectrum_of_dmatrix = (0..self.spectral.total_number_of_points())
                 .map(|_| GreensFunction {
@@ -209,6 +212,66 @@ mod test {
         }
     }
 
+    impl<'a, T, GeometryDim, Conn>
+        crate::self_energy::SelfEnergyBuilder<
+            T,
+            &'a SpectralSpace<T, ()>,
+            &'a Mesh<T, GeometryDim, Conn>,
+        >
+    where
+        T: RealField + Copy,
+        GeometryDim: SmallDim,
+        Conn: Connectivity<T, GeometryDim> + Send + Sync,
+        <Conn as Connectivity<T, GeometryDim>>::Element: Send + Sync,
+        DefaultAllocator: Allocator<T, GeometryDim>,
+        <DefaultAllocator as Allocator<T, GeometryDim>>::Buffer: Send + Sync,
+    {
+        pub(crate) fn build_incoherent_b(
+            self,
+        ) -> color_eyre::Result<SelfEnergy<T, GeometryDim, Conn>> {
+            // Collect the indices of all elements at the boundaries
+            let vertices_at_boundary: Vec<usize> = self
+                .mesh
+                .connectivity()
+                .iter()
+                .enumerate()
+                .filter_map(|(vertex_index, vertex_connectivity)| {
+                    if vertex_connectivity.len() == 1 {
+                        Some(vertex_index)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            let pattern = crate::self_energy::construct_csr_pattern_from_vertices(
+                &vertices_at_boundary,
+                self.mesh.vertices().len(),
+            )?;
+            let initial_values = vertices_at_boundary
+                .iter()
+                .map(|_| Complex::from(T::zero()))
+                .collect::<Vec<_>>();
+            let csrmatrix = CsrMatrix::try_from_pattern_and_values(pattern, initial_values)
+                .map_err(|e| {
+                    color_eyre::eyre::eyre!("Failed to initialise sparse self energy matrix {}", e)
+                })?;
+
+            let dmatrix = DMatrix::zeros(self.mesh.vertices().len(), self.mesh.vertices().len());
+            let num_spectral_points = self.spectral.number_of_wavevector_points()
+                * self.spectral.number_of_energy_points();
+
+            Ok(SelfEnergy {
+                ma: std::marker::PhantomData,
+                mc: std::marker::PhantomData,
+                marker: std::marker::PhantomData,
+                contact_retarded: vec![csrmatrix.clone(); num_spectral_points],
+                contact_lesser: Some(vec![csrmatrix; num_spectral_points]),
+                incoherent_retarded: Some(vec![dmatrix.clone(); num_spectral_points]),
+                incoherent_lesser: Some(vec![dmatrix; num_spectral_points]),
+            })
+        }
+    }
+
     use crate::app::Calculation;
     use crate::app::{tracker::TrackerBuilder, Configuration};
     use crate::device::{info_desk::BuildInfoDesk, Device};
@@ -218,7 +281,6 @@ mod test {
     fn diagonal_elements_of_retarded_csr_match_dense() {
         let path = std::path::PathBuf::try_from("../.config/structure.toml").unwrap();
         let device: Device<f64, U1> = crate::device::Device::build(path).unwrap();
-        // TODO Info_desk is currently always U1 because it is informed by the device dimension right now, this is no good. We need n_bands to be in-play here.
         let info_desk = device.build_device_info_desk().unwrap();
 
         let config: Configuration<f64> = Configuration::build().unwrap();
@@ -271,6 +333,113 @@ mod test {
             .with_mesh(&mesh)
             .with_spectral_discretisation(&spectral_space)
             .build_dense()
+            .unwrap();
+        let mut self_energy = crate::self_energy::SelfEnergyBuilder::new()
+            .with_mesh(&mesh)
+            .with_spectral_discretisation(&spectral_space)
+            .build_incoherent_b()
+            .unwrap();
+
+        self_energy
+            .recalculate_contact_self_energy(&mesh, &hamiltonian, &spectral_space)
+            .unwrap();
+
+        dense_gf
+            .update_aggregate_retarded_greens_function(&hamiltonian, &self_energy, &spectral_space)
+            .unwrap();
+
+        for ((sparse, dense), _energy) in gf
+            .retarded
+            .iter()
+            .zip(dense_gf.retarded.iter())
+            .zip(spectral_space.energy.points())
+        {
+            let sparse_diagonal = sparse.matrix.diagonal_as_csr();
+            let dense_diagonal = dense.matrix.diagonal();
+            for (sparse_value, dense_value) in sparse_diagonal
+                .values()
+                .iter()
+                .zip(dense_diagonal.into_iter())
+            {
+                approx::assert_relative_eq!(
+                    sparse_value.re,
+                    dense_value.re,
+                    epsilon = std::f64::EPSILON * 10000000_f64
+                );
+                approx::assert_relative_eq!(
+                    sparse_value.im,
+                    dense_value.im,
+                    epsilon = std::f64::EPSILON * 10000000_f64
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn diagonal_elements_of_retarded_csr_match_dense_with_internal_leads() {
+        let path = std::path::PathBuf::try_from("../.config/structureinternal.toml").unwrap();
+        let device: Device<f64, U1> = crate::device::Device::build(path).unwrap();
+        let info_desk = device.build_device_info_desk().unwrap();
+
+        let config: Configuration<f64> = Configuration::build().unwrap();
+        let mesh: transporter_mesher::Mesh1d<f64> =
+            crate::app::build_mesh_with_config(&config, device).unwrap();
+        let tracker = TrackerBuilder::new(Calculation::Coherent)
+            .with_mesh(&mesh)
+            .with_info_desk(&info_desk)
+            .build()
+            .unwrap();
+
+        let hamiltonian = crate::hamiltonian::HamiltonianBuilder::new()
+            .with_mesh(&mesh)
+            .with_info_desk(&tracker)
+            .build()
+            .unwrap();
+
+        // Begin by building a coherent spectral space, regardless of calculation we begin with a coherent loop
+        let spectral_space_builder = crate::spectral::constructors::SpectralSpaceBuilder::new()
+            .with_number_of_energy_points(config.spectral.number_of_energy_points)
+            .with_energy_range(std::ops::Range {
+                start: config.spectral.minimum_energy,
+                end: config.spectral.maximum_energy,
+            })
+            .with_energy_integration_method(config.spectral.energy_integration_rule);
+
+        let spectral_space = spectral_space_builder.build_coherent();
+
+        let mut gf = super::GreensFunctionBuilder::new()
+            .with_info_desk(&info_desk)
+            .with_mesh(&mesh)
+            .with_spectral_discretisation(&spectral_space)
+            .build()
+            .unwrap();
+
+        let mut self_energy = crate::self_energy::SelfEnergyBuilder::new()
+            .with_mesh(&mesh)
+            .with_spectral_discretisation(&spectral_space)
+            .build_coherent()
+            .unwrap();
+        self_energy
+            .recalculate_contact_self_energy(&mesh, &hamiltonian, &spectral_space)
+            .unwrap();
+
+        gf.update_aggregate_retarded_greens_function(&hamiltonian, &self_energy, &spectral_space)
+            .unwrap();
+
+        let mut dense_gf = super::GreensFunctionBuilder::new()
+            .with_info_desk(&info_desk)
+            .with_mesh(&mesh)
+            .with_spectral_discretisation(&spectral_space)
+            .build_dense()
+            .unwrap();
+        let mut self_energy = crate::self_energy::SelfEnergyBuilder::new()
+            .with_mesh(&mesh)
+            .with_spectral_discretisation(&spectral_space)
+            .build_incoherent_b()
+            .unwrap();
+
+        self_energy
+            .recalculate_contact_self_energy(&mesh, &hamiltonian, &spectral_space)
             .unwrap();
 
         dense_gf
@@ -356,6 +525,16 @@ mod test {
         gf.update_aggregate_retarded_greens_function(&hamiltonian, &self_energy, &spectral_space)
             .unwrap();
 
+        let mut self_energy = crate::self_energy::SelfEnergyBuilder::new()
+            .with_mesh(&mesh)
+            .with_spectral_discretisation(&spectral_space)
+            .build_incoherent_b()
+            .unwrap();
+
+        self_energy
+            .recalculate_contact_self_energy(&mesh, &hamiltonian, &spectral_space)
+            .unwrap();
+
         let mut dense_gf = super::GreensFunctionBuilder::new()
             .with_info_desk(&info_desk)
             .with_mesh(&mesh)
@@ -378,6 +557,116 @@ mod test {
                 sparse.matrix.row_iter().zip(dense_diagonal.into_iter())
             {
                 let sparse_value = sparse_row.values()[0];
+                approx::assert_relative_eq!(
+                    sparse_value.re,
+                    dense_value.re,
+                    epsilon = std::f64::EPSILON * 10000000_f64
+                );
+                approx::assert_relative_eq!(
+                    sparse_value.im,
+                    dense_value.im,
+                    epsilon = std::f64::EPSILON * 10000000_f64
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn left_column_elements_of_retarded_csr_match_dense_with_internal_leads() {
+        let path = std::path::PathBuf::try_from("../.config/structureinternal.toml").unwrap();
+        let device: Device<f64, U1> = crate::device::Device::build(path).unwrap();
+        // TODO Info_desk is currently always U1 because it is informed by the device dimension right now, this is no good. We need n_bands to be in-play here.
+        let info_desk = device.build_device_info_desk().unwrap();
+
+        let config: Configuration<f64> = Configuration::build().unwrap();
+        let mesh: transporter_mesher::Mesh1d<f64> =
+            crate::app::build_mesh_with_config(&config, device).unwrap();
+        let tracker = TrackerBuilder::new(Calculation::Coherent)
+            .with_mesh(&mesh)
+            .with_info_desk(&info_desk)
+            .build()
+            .unwrap();
+
+        let hamiltonian = crate::hamiltonian::HamiltonianBuilder::new()
+            .with_mesh(&mesh)
+            .with_info_desk(&tracker)
+            .build()
+            .unwrap();
+
+        // Begin by building a coherent spectral space, regardless of calculation we begin with a coherent loop
+        let spectral_space_builder = crate::spectral::constructors::SpectralSpaceBuilder::new()
+            .with_number_of_energy_points(config.spectral.number_of_energy_points)
+            .with_energy_range(std::ops::Range {
+                start: config.spectral.minimum_energy,
+                end: config.spectral.maximum_energy,
+            })
+            .with_energy_integration_method(config.spectral.energy_integration_rule);
+
+        let spectral_space = spectral_space_builder.build_coherent();
+
+        let mut gf = super::GreensFunctionBuilder::new()
+            .with_info_desk(&info_desk)
+            .with_mesh(&mesh)
+            .with_spectral_discretisation(&spectral_space)
+            .build()
+            .unwrap();
+
+        let mut self_energy = crate::self_energy::SelfEnergyBuilder::new()
+            .with_mesh(&mesh)
+            .with_spectral_discretisation(&spectral_space)
+            .build_coherent()
+            .unwrap();
+        self_energy
+            .recalculate_contact_self_energy(&mesh, &hamiltonian, &spectral_space)
+            .unwrap();
+
+        gf.update_aggregate_retarded_greens_function(&hamiltonian, &self_energy, &spectral_space)
+            .unwrap();
+
+        let mut self_energy = crate::self_energy::SelfEnergyBuilder::new()
+            .with_mesh(&mesh)
+            .with_spectral_discretisation(&spectral_space)
+            .build_incoherent_b()
+            .unwrap();
+
+        self_energy
+            .recalculate_contact_self_energy(&mesh, &hamiltonian, &spectral_space)
+            .unwrap();
+
+        let mut dense_gf = super::GreensFunctionBuilder::new()
+            .with_info_desk(&info_desk)
+            .with_mesh(&mesh)
+            .with_spectral_discretisation(&spectral_space)
+            .build_dense()
+            .unwrap();
+
+        dense_gf
+            .update_aggregate_retarded_greens_function(&hamiltonian, &self_energy, &spectral_space)
+            .unwrap();
+
+        let number_of_vertices_in_internal_lead =
+            (3 * gf.retarded[0].matrix.nrows() - gf.retarded[0].matrix.nnz() - 2) / 4;
+        let number_of_filled_rows =
+            gf.retarded[0].matrix.nrows() - 2 * number_of_vertices_in_internal_lead;
+
+        for ((sparse, dense), _energy) in gf
+            .retarded
+            .iter()
+            .zip(dense_gf.retarded.iter())
+            .zip(spectral_space.energy.points())
+        {
+            let dense_column = dense.matrix.column(number_of_vertices_in_internal_lead);
+            for (sparse_row, dense_value) in sparse
+                .matrix
+                .row_iter()
+                .zip(dense_column.into_iter())
+                .skip(number_of_vertices_in_internal_lead)
+                .take(number_of_filled_rows)
+            {
+                let sparse_value = sparse_row
+                    .get_entry(number_of_vertices_in_internal_lead)
+                    .unwrap()
+                    .into_value();
                 approx::assert_relative_eq!(
                     sparse_value.re,
                     dense_value.re,
@@ -444,6 +733,16 @@ mod test {
         gf.update_aggregate_retarded_greens_function(&hamiltonian, &self_energy, &spectral_space)
             .unwrap();
 
+        let mut self_energy = crate::self_energy::SelfEnergyBuilder::new()
+            .with_mesh(&mesh)
+            .with_spectral_discretisation(&spectral_space)
+            .build_incoherent_b()
+            .unwrap();
+
+        self_energy
+            .recalculate_contact_self_energy(&mesh, &hamiltonian, &spectral_space)
+            .unwrap();
+
         let mut dense_gf = super::GreensFunctionBuilder::new()
             .with_info_desk(&info_desk)
             .with_mesh(&mesh)
@@ -466,6 +765,118 @@ mod test {
                 sparse.matrix.row_iter().zip(dense_diagonal.into_iter())
             {
                 let sparse_value = sparse_row.values()[sparse_row.values().len() - 1];
+                approx::assert_relative_eq!(
+                    sparse_value.re,
+                    dense_value.re,
+                    epsilon = std::f64::EPSILON * 10000000_f64
+                );
+                approx::assert_relative_eq!(
+                    sparse_value.im,
+                    dense_value.im,
+                    epsilon = std::f64::EPSILON * 10000000_f64
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn right_column_elements_of_retarded_csr_match_dense_with_internal_leads() {
+        let path = std::path::PathBuf::try_from("../.config/structureinternal.toml").unwrap();
+        let device: Device<f64, U1> = crate::device::Device::build(path).unwrap();
+        // TODO Info_desk is currently always U1 because it is informed by the device dimension right now, this is no good. We need n_bands to be in-play here.
+        let info_desk = device.build_device_info_desk().unwrap();
+
+        let config: Configuration<f64> = Configuration::build().unwrap();
+        let mesh: transporter_mesher::Mesh1d<f64> =
+            crate::app::build_mesh_with_config(&config, device).unwrap();
+        let tracker = TrackerBuilder::new(Calculation::Coherent)
+            .with_mesh(&mesh)
+            .with_info_desk(&info_desk)
+            .build()
+            .unwrap();
+
+        let hamiltonian = crate::hamiltonian::HamiltonianBuilder::new()
+            .with_mesh(&mesh)
+            .with_info_desk(&tracker)
+            .build()
+            .unwrap();
+
+        // Begin by building a coherent spectral space, regardless of calculation we begin with a coherent loop
+        let spectral_space_builder = crate::spectral::constructors::SpectralSpaceBuilder::new()
+            .with_number_of_energy_points(config.spectral.number_of_energy_points)
+            .with_energy_range(std::ops::Range {
+                start: config.spectral.minimum_energy,
+                end: config.spectral.maximum_energy,
+            })
+            .with_energy_integration_method(config.spectral.energy_integration_rule);
+
+        let spectral_space = spectral_space_builder.build_coherent();
+
+        let mut gf = super::GreensFunctionBuilder::new()
+            .with_info_desk(&info_desk)
+            .with_mesh(&mesh)
+            .with_spectral_discretisation(&spectral_space)
+            .build()
+            .unwrap();
+
+        let mut self_energy = crate::self_energy::SelfEnergyBuilder::new()
+            .with_mesh(&mesh)
+            .with_spectral_discretisation(&spectral_space)
+            .build_coherent()
+            .unwrap();
+        self_energy
+            .recalculate_contact_self_energy(&mesh, &hamiltonian, &spectral_space)
+            .unwrap();
+
+        gf.update_aggregate_retarded_greens_function(&hamiltonian, &self_energy, &spectral_space)
+            .unwrap();
+
+        let mut self_energy = crate::self_energy::SelfEnergyBuilder::new()
+            .with_mesh(&mesh)
+            .with_spectral_discretisation(&spectral_space)
+            .build_incoherent_b()
+            .unwrap();
+
+        self_energy
+            .recalculate_contact_self_energy(&mesh, &hamiltonian, &spectral_space)
+            .unwrap();
+
+        let mut dense_gf = super::GreensFunctionBuilder::new()
+            .with_info_desk(&info_desk)
+            .with_mesh(&mesh)
+            .with_spectral_discretisation(&spectral_space)
+            .build_dense()
+            .unwrap();
+
+        dense_gf
+            .update_aggregate_retarded_greens_function(&hamiltonian, &self_energy, &spectral_space)
+            .unwrap();
+
+        let number_of_vertices_in_internal_lead =
+            (3 * gf.retarded[0].matrix.nrows() - gf.retarded[0].matrix.nnz() - 2) / 4;
+        let number_of_filled_rows =
+            gf.retarded[0].matrix.nrows() - 2 * number_of_vertices_in_internal_lead;
+
+        for ((sparse, dense), _energy) in gf
+            .retarded
+            .iter()
+            .zip(dense_gf.retarded.iter())
+            .zip(spectral_space.energy.points())
+        {
+            let dense_column = dense
+                .matrix
+                .column(dense.matrix.ncols() - 1 - number_of_vertices_in_internal_lead);
+            for (sparse_row, dense_value) in sparse
+                .matrix
+                .row_iter()
+                .zip(dense_column.into_iter())
+                .skip(number_of_vertices_in_internal_lead)
+                .take(number_of_filled_rows)
+            {
+                let sparse_value = sparse_row
+                    .get_entry(dense.matrix.ncols() - 1 - number_of_vertices_in_internal_lead)
+                    .unwrap()
+                    .into_value();
                 approx::assert_relative_eq!(
                     sparse_value.re,
                     dense_value.re,
@@ -532,7 +943,17 @@ mod test {
         // Act
         gf.update_aggregate_retarded_greens_function(&hamiltonian, &self_energy, &spectral_space)
             .unwrap();
-        gf.update_aggregate_lesser_greens_function(&self_energy, &spectral_space)
+        gf.update_aggregate_lesser_greens_function(&hamiltonian, &self_energy, &spectral_space)
+            .unwrap();
+
+        let mut self_energy = crate::self_energy::SelfEnergyBuilder::new()
+            .with_mesh(&mesh)
+            .with_spectral_discretisation(&spectral_space)
+            .build_incoherent_b()
+            .unwrap();
+
+        self_energy
+            .recalculate_contact_self_energy(&mesh, &hamiltonian, &spectral_space)
             .unwrap();
 
         let mut dense_gf = super::GreensFunctionBuilder::new()
@@ -547,7 +968,121 @@ mod test {
             .unwrap();
 
         dense_gf
-            .update_aggregate_lesser_greens_function(&self_energy, &spectral_space)
+            .update_aggregate_lesser_greens_function(&hamiltonian, &self_energy, &spectral_space)
+            .unwrap();
+
+        for ((sparse, dense), _energy) in gf
+            .retarded
+            .iter()
+            .zip(dense_gf.retarded.iter())
+            .zip(spectral_space.energy.points())
+        {
+            let sparse_diagonal = sparse.matrix.diagonal_as_csr();
+            let dense_diagonal = dense.matrix.diagonal();
+            for (sparse_value, dense_value) in sparse_diagonal
+                .values()
+                .iter()
+                .zip(dense_diagonal.into_iter())
+            {
+                approx::assert_relative_eq!(
+                    sparse_value.re,
+                    dense_value.re,
+                    epsilon = std::f64::EPSILON * 10000000_f64
+                );
+                approx::assert_relative_eq!(
+                    sparse_value.im,
+                    dense_value.im,
+                    epsilon = std::f64::EPSILON * 10000000_f64
+                );
+            }
+        }
+    }
+
+    use rand::{thread_rng, Rng};
+    #[test]
+    fn diagonal_elements_of_lesser_csr_match_dense_with_internal_leads() {
+        let path = std::path::PathBuf::try_from("../.config/structureinternal.toml").unwrap();
+        let device: Device<f64, U1> = crate::device::Device::build(path).unwrap();
+        // TODO Info_desk is currently always U1 because it is informed by the device dimension right now, this is no good. We need n_bands to be in-play here.
+        let info_desk = device.build_device_info_desk().unwrap();
+
+        let config: Configuration<f64> = Configuration::build().unwrap();
+        let mesh: transporter_mesher::Mesh1d<f64> =
+            crate::app::build_mesh_with_config(&config, device).unwrap();
+        let mut tracker = TrackerBuilder::new(Calculation::Coherent)
+            .with_mesh(&mesh)
+            .with_info_desk(&info_desk)
+            .build()
+            .unwrap();
+
+        let mut hamiltonian = crate::hamiltonian::HamiltonianBuilder::new()
+            .with_mesh(&mesh)
+            .with_info_desk(&tracker)
+            .build()
+            .unwrap();
+        let mut rng = thread_rng();
+        let potential = crate::outer_loop::Potential::from_vector(nalgebra::DVector::from_vec(
+            (0..mesh.vertices().len()).map(|_| rng.gen()).collect(),
+        ));
+        tracker.update_potential(potential);
+        hamiltonian.update_potential(&tracker, &mesh).unwrap();
+
+        // Begin by building a coherent spectral space, regardless of calculation we begin with a coherent loop
+        let spectral_space_builder = crate::spectral::constructors::SpectralSpaceBuilder::new()
+            .with_number_of_energy_points(config.spectral.number_of_energy_points)
+            .with_energy_range(std::ops::Range {
+                start: config.spectral.minimum_energy,
+                end: config.spectral.maximum_energy,
+            })
+            .with_energy_integration_method(config.spectral.energy_integration_rule);
+
+        let spectral_space = spectral_space_builder.build_coherent();
+
+        let mut gf = super::GreensFunctionBuilder::new()
+            .with_info_desk(&info_desk)
+            .with_mesh(&mesh)
+            .with_spectral_discretisation(&spectral_space)
+            .build()
+            .unwrap();
+
+        let mut self_energy = crate::self_energy::SelfEnergyBuilder::new()
+            .with_mesh(&mesh)
+            .with_spectral_discretisation(&spectral_space)
+            .build_coherent()
+            .unwrap();
+        self_energy
+            .recalculate_contact_self_energy(&mesh, &hamiltonian, &spectral_space)
+            .unwrap();
+
+        // Act
+        gf.update_aggregate_retarded_greens_function(&hamiltonian, &self_energy, &spectral_space)
+            .unwrap();
+        gf.update_aggregate_lesser_greens_function(&hamiltonian, &self_energy, &spectral_space)
+            .unwrap();
+
+        let mut self_energy = crate::self_energy::SelfEnergyBuilder::new()
+            .with_mesh(&mesh)
+            .with_spectral_discretisation(&spectral_space)
+            .build_incoherent_b()
+            .unwrap();
+
+        self_energy
+            .recalculate_contact_self_energy(&mesh, &hamiltonian, &spectral_space)
+            .unwrap();
+
+        let mut dense_gf = super::GreensFunctionBuilder::new()
+            .with_info_desk(&info_desk)
+            .with_mesh(&mesh)
+            .with_spectral_discretisation(&spectral_space)
+            .build_dense()
+            .unwrap();
+
+        dense_gf
+            .update_aggregate_retarded_greens_function(&hamiltonian, &self_energy, &spectral_space)
+            .unwrap();
+
+        dense_gf
+            .update_aggregate_lesser_greens_function(&hamiltonian, &self_energy, &spectral_space)
             .unwrap();
 
         for ((sparse, dense), _energy) in gf
@@ -635,7 +1170,7 @@ mod test {
 
         gf.update_aggregate_retarded_greens_function(&hamiltonian, &self_energy, &spectral_space)
             .unwrap();
-        gf.update_aggregate_lesser_greens_function(&self_energy, &spectral_space)
+        gf.update_aggregate_lesser_greens_function(&hamiltonian, &self_energy, &spectral_space)
             .unwrap();
 
         let charge = gf

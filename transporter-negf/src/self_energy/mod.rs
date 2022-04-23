@@ -29,8 +29,8 @@ where
 }
 
 pub(crate) struct SelfEnergyBuilder<T, RefSpectral, RefMesh> {
-    spectral: RefSpectral,
-    mesh: RefMesh,
+    pub(crate) spectral: RefSpectral,
+    pub(crate) mesh: RefMesh,
     marker: PhantomData<T>,
 }
 
@@ -165,7 +165,7 @@ where
     }
 }
 
-fn construct_csr_pattern_from_vertices(
+pub(crate) fn construct_csr_pattern_from_vertices(
     boundary_vertices: &[usize],
     total_number_of_vertices: usize,
 ) -> color_eyre::Result<SparsityPattern> {

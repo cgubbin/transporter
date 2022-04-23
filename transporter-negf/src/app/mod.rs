@@ -1,11 +1,28 @@
-/// This module governs the high-level implementation of the simulation
+// Copyright 2022 Chris Gubbin
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT or
+// http://opensource.org/licenses/MIT>, at your option. This file may not be
+// copied, modified, or distributed except according to those terms.
+
+//! # App
+//! The command line interface.
+//!
+//! The App module drives the simulation. It hands command-line argument parsing,
+//! parses the configuration files and delegates to the numerical methods in other
+//! sub-modules.
+
+#![warn(missing_docs)]
+
 mod configuration;
+mod error;
 pub(crate) mod styles;
 mod telemetry;
-use telemetry::{get_subscriber, init_subscriber};
-
 pub(crate) mod tracker;
+
 pub(crate) use configuration::Configuration;
+pub(crate) use error::TransporterError;
+use telemetry::{get_subscriber, init_subscriber};
 pub(crate) use tracker::Tracker;
 
 use crate::{
@@ -20,8 +37,7 @@ use nalgebra::{
 };
 use num_traits::{NumCast, ToPrimitive};
 use serde::{de::DeserializeOwned, Deserialize};
-use std::io::Write;
-use std::path::PathBuf;
+use std::{io::Write, path::PathBuf};
 use transporter_mesher::{Mesh, Mesh1d, Segment1dConnectivity, SmallDim};
 
 #[derive(Parser)]
@@ -99,7 +115,13 @@ enum Dimension {
     D2,
 }
 
-pub fn run<T>() -> color_eyre::Result<()>
+use miette::IntoDiagnostic;
+
+/// Top level function to run the application
+///
+/// This parses the configuration, and the device, identifies the calculation type and
+/// attempts to run it to completion.
+pub fn run<T>() -> miette::Result<()>
 where
     T: ArgminFloat
         + Copy
@@ -112,13 +134,16 @@ where
     // Prepare terminal environment
     let term = console::Term::stdout();
     term.set_title("Transporter NEGF Solver");
-    term.hide_cursor()?;
+    term.hide_cursor().into_diagnostic()?;
+    // .map_err(|e| TransporterError::IoError(e))?;
 
     // Parse the global app options
     let cli = App::parse();
 
+    // Initiate the tracing subscriber
     let subscriber = get_subscriber(cli.global_opts.log_level);
     init_subscriber(subscriber);
+
     let __marker: std::marker::PhantomData<T> = std::marker::PhantomData;
 
     let config: Configuration<T::RealField> = Configuration::build()?;
@@ -126,7 +151,9 @@ where
     let path = cli
         .global_opts
         .input
-        .ok_or(eyre!("A file path needs to be passed."))?;
+        .ok_or(TransporterError::ConfigError(anyhow::anyhow!(
+            "A path to a structure file needs to be passed"
+        )))?;
 
     match cli.global_opts.dimension {
         Dimension::D1 => {
@@ -141,18 +168,21 @@ where
             {
                 device_display.colorize();
             }
-            term.write_line(&format!("{device_display}"))?;
+            term.write_line(&format!("{device_display}"))
+                .into_diagnostic()?;
 
             // TODO Info_desk is currently always U1 because it is informed by the device dimension right now, this is no good. We need n_bands to be in-play here.
             let info_desk = device.build_device_info_desk()?;
             tracing::trace!("Initialising mesh");
-            let mesh: Mesh1d<T::RealField> = build_mesh_with_config(&config, device)?;
+            let mesh: Mesh1d<T::RealField> =
+                build_mesh_with_config(&config, device).map_err(|e| miette::miette!("{:?}", e))?;
             tracing::info!("Mesh initialised with {} elements", mesh.elements().len());
 
             let tracker = tracker::TrackerBuilder::new(cli.global_opts.calculation)
                 .with_mesh(&mesh)
                 .with_info_desk(&info_desk)
-                .build()?;
+                .build()
+                .map_err(|e| miette::miette!("{:?}", e))?;
 
             build_and_run(
                 config,
@@ -160,7 +190,8 @@ where
                 &tracker,
                 cli.global_opts.calculation,
                 __marker,
-            )?;
+            )
+            .map_err(|e| miette::miette!("{:?}", e))?;
         }
         Dimension::D2 => {
             unimplemented!()
@@ -379,7 +410,7 @@ where
             let spectral_space = spectral_space_builder.build_incoherent();
 
             let outer_config = crate::outer_loop::Convergence {
-                outer_tolerance: config.outer_loop.tolerance,
+                outer_tolerance: config.outer_loop.tolerance / T::from_f64(100.).unwrap(), // Lowering because the shift may be small -> if the scattering is weak
                 maximum_outer_iterations: config.outer_loop.maximum_iterations,
                 inner_tolerance: config.inner_loop.tolerance,
                 maximum_inner_iterations: config.inner_loop.maximum_iterations,

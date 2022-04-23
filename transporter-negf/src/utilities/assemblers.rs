@@ -1,23 +1,38 @@
+// Copyright 2022 Chris Gubbin
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT or
+// http://opensource.org/licenses/MIT>, at your option. This file may not be
+// copied, modified, or distributed except according to those terms.
+
+//! # Assemblers
+//!
+//! This module defines common traits and methods used to construct differential operators
+//! and source terms over a mesh. These methods are used in the `Hamiltonian` sub-crate, and
+//! in the `outer_loop` sub-crate when constructing the Poisson operator.
+
 use nalgebra::{allocator::Allocator, DefaultAllocator, RealField};
 use std::marker::PhantomData;
 use transporter_mesher::{Connectivity, Mesh, SmallDim};
 
-/// Trait giving the information necessary to construct the row of differential operator for a single vertex in a mesh
+/// Trait to provide the information necessary to construct the row of a differential operator
+/// or source term arising from a single vertex in the mesh
 pub trait VertexConnectivityAssembler {
-    /// Returns the dimension of the solution as a `usize`: for our problems this is always 1 so we can probably delete the method
+    /// Returns the dimension of the solution, for the scalar electric potential this is 1
     fn solution_dim(&self) -> usize;
-    /// The number of elements contained in the entire mesh
+    /// The number of elements in the mesh
     fn num_elements(&self) -> usize;
-    /// The number of vertices, or nodes contained in the entire mesh
+    /// The number of vertices in the mesh
     fn num_vertices(&self) -> usize;
-    /// The number of vertices connected to the vertex at `vertex_index`
+    /// The number of nearest neighbour vertices connected to the vertex at `vertex_index`
     fn vertex_connection_count(&self, vertex_index: usize) -> usize;
-    /// Populates the indices of vertices connected to the vertex at `vertex_index` into the slice `output`. The passed slice
-    /// must have length `self.vertex_connection_count(vertex_index)`
+    /// Populates the indices of vertices connected to the vertex at `vertex_index` into the
+    /// slice `output`. The passed slice must have length `self.vertex_connection_count(vertex_index)`
+    /// or the method will panic
     fn populate_vertex_connections(&self, output: &mut [usize], vertex_index: usize);
 }
 
-/// Implement `ElementConnectivityAssembler` for the generic `Mesh`
+/// Trivial impl of `VertexConnectivityAssembler` for a generic `Mesh`
 impl<T, GeometryDim, C> VertexConnectivityAssembler for Mesh<T, GeometryDim, C>
 where
     T: Copy + RealField,
@@ -51,7 +66,7 @@ pub struct VertexAssembler<'a, T, InfoDesk, Mesh> {
     pub(crate) info_desk: &'a InfoDesk,
     /// The `Mesh` tells us which elements our element is connected to, and how far away they are
     pub(crate) mesh: &'a Mesh,
-    /// A marker so we can be generic over the field `T`. This can probably go away with some forethought
+    /// A marker so we can be generic over the field `T`
     __marker: PhantomData<T>,
 }
 

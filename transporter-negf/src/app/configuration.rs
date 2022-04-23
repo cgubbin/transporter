@@ -1,6 +1,7 @@
 use crate::spectral::IntegrationRule;
 use color_eyre::eyre::eyre;
 use config::{Config, File};
+use miette::IntoDiagnostic;
 use serde::{de::DeserializeOwned, Deserialize};
 use std::env;
 
@@ -53,7 +54,7 @@ pub(crate) struct OuterConfiguration<T> {
 }
 
 impl<T: DeserializeOwned> Configuration<T> {
-    pub(crate) fn build() -> color_eyre::Result<Self> {
+    pub(crate) fn build() -> miette::Result<Self> {
         // If I am running it here we should automatically be more debuggy
         let run_mode = env::var("RUN_MODE").unwrap_or_else(|_| "development".into());
 
@@ -62,9 +63,10 @@ impl<T: DeserializeOwned> Configuration<T> {
             .add_source(File::with_name("../.config/default"))
             // The override settings which may be set by the user, optional
             .add_source(File::with_name(&format!("../.config/{}", run_mode)).required(false))
-            .build()?;
+            .build()
+            .into_diagnostic()?;
 
         s.try_deserialize()
-            .map_err(|e| eyre!(format!("Failed to deserialize the config file: {:?}", e)))
+            .map_err(|e| miette::miette!(format!("Failed to deserialize the config file: {:?}", e)))
     }
 }

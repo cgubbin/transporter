@@ -1,33 +1,44 @@
-//! Module to compute Fermi integrals and their inverses
-//!
-//! To calculate the electronic density it is necessary to fix the chemical potential in the
-//! connecting leads, we do this by assuming that the edge elements are electricially neutral,
-//! having a net carrier charge density equal to the net doping density. The Fermi level is then
-//! computed from the inverse Fermi integral of order 0.5
+// Copyright 2022 Chris Gubbin
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT or
+// http://opensource.org/licenses/MIT>, at your option. This file may not be
+// copied, modified, or distributed except according to those terms.
+
+//! # Fermi
+//! Definition of Fermi integrals and their inverses
+//! 
+//! This module provides fast methods to compute Fermi integrals and inverse Fermi integrals
+//! commonly utilised in the calculation of the electronic density, and in solving Poisson's
+//! equation. Rather than calculating Fermi integrals by direct numerical integration we follow
+//! a [minimax approximation](https://doi.org/10.1016/j.amc.2015.03.015) which allows the values
+//! to be computed to a high degree of accuracy from a single lookup.
+
 use nalgebra::RealField;
 
-/// The inverse Fermi integral of order 0.5.
+/// # Inverse Fermi integral of order 0.5.
 ///
-/// This is the inverse of the Fermi integral of order 0.5, given by
-/// `F\left(\mu\right) = \int_0^{infty} dx x^{0.5} / (\exp(x - \mu) +1)`
-/// using the minimax approximation outlined in DOI: 10.1016/j.amc.2015.03.015
+/// The inverse of the Fermi integral of order 0.5, given by
+/// $$F\left(\mu\right) = \int_0^{\infty} dx \frac{x^{0.5}}{\exp(x - \mu) +1}$$
+/// using a [minimax approximation](https://doi.org/10.1016/j.amc.2015.03.015) to avoid costly
+///  numerical integration. For a given value of F this function returns the chemical potential.
 #[numeric_literals::replace_float_literals(T::from_f64(literal).unwrap())]
-pub(crate) fn inverse_fermi_integral_05<T: Copy + RealField>(u: T) -> T {
-    let u1 = 5.893_676_232_593_605;
-    let u2 = 20.292_139_527_268_84;
-    let u3 = 69.680_386_701_202_79;
-    let u4 = 246.247_415_252_814_4;
-    if u <= u1 {
-        let v = u1 - u;
-        let r = u
+pub(crate) fn inverse_fermi_integral_05<T: Copy + RealField>(mu: T) -> T {
+    let mu1 = 5.893_676_232_593_605;
+    let mu2 = 20.292_139_527_268_84;
+    let mu3 = 69.680_386_701_202_79;
+    let mu4 = 246.247_415_252_814_4;
+    if mu <= mu1 {
+        let v = mu1 - mu;
+        let r = mu
             * (4.422_539_954_384_558e9
-                + u * (1.431_882_653_121_693_1e9
-                    + u * (2.002_451_116_208_425_2e8
-                        + u * (1.577_188_595_334_683_7e7
-                            + u * (7.664_073_281_017_675e5
-                                + u * (2.359_936_249_884_790_2e4
-                                    + u * (4.411_460_174_171_255_6e2
-                                        + u * (3.884_445_127_782_172_8))))))))
+                + mu * (1.431_882_653_121_693_1e9
+                    + mu * (2.002_451_116_208_425_2e8
+                        + mu * (1.577_188_595_334_683_7e7
+                            + mu * (7.664_073_281_017_675e5
+                                + mu * (2.359_936_249_884_790_2e4
+                                    + mu * (4.411_460_174_171_255_6e2
+                                        + mu * (3.884_445_127_782_172_8))))))))
             / (2.448_084_356_710_615_6e9
                 + v * (2.063_907_695_769_060_9e8
                     + v * (6.943_821_586_626_003e6
@@ -35,8 +46,8 @@ pub(crate) fn inverse_fermi_integral_05<T: Copy + RealField>(u: T) -> T {
                             + v * (-1.791_261_676_399_435_1e3
                                 + v * (-7.908_051_927_048_793e1 - v))))));
         r.ln()
-    } else if u <= u2 {
-        let y = u - u1;
+    } else if mu <= mu2 {
+        let y = mu - mu1;
         (5.849_893_914_158_47e14
             + y * (3.353_389_340_896_419e14
                 + y * (7.300_790_845_633_384e13
@@ -51,8 +62,8 @@ pub(crate) fn inverse_fermi_integral_05<T: Copy + RealField>(u: T) -> T {
                                 + y * (2.432_978_289_635_439_8e8
                                     + y * (3.676_866_413_386_036e5
                                         + y * (-5.924_317_283_823_515e2 + y))))))))
-    } else if u <= u3 {
-        let y = u - u2;
+    } else if mu <= mu3 {
+        let y = mu - mu2;
         (6.733_834_344_762_315e18
             + y * (1.138_529_116_708_601_9e18
                 + y * (7.441_797_125_810_403e16
@@ -67,8 +78,8 @@ pub(crate) fn inverse_fermi_integral_05<T: Copy + RealField>(u: T) -> T {
                                 + y * (4.037_404_739_026_029_6e9
                                     + y * (2.312_681_435_753_184e6
                                         + y * (-1.478_829_470_377_447e3 + y))))))))
-    } else if u <= u4 {
-        let y = u - u3;
+    } else if mu <= mu4 {
+        let y = mu - mu3;
         (7.884_494_095_314_25e19
             + y * (3.748_646_557_381_002e18
                 + y * (6.934_193_474_730_825e16
@@ -86,7 +97,7 @@ pub(crate) fn inverse_fermi_integral_05<T: Copy + RealField>(u: T) -> T {
                                     + y * (2.225_254_116_592_023_6e4 + y)))))))
     } else {
         let vc = 1_543.460_693_945_940_2;
-        let t = vc * u.powf(-4. / 3.);
+        let t = vc * mu.powf(-4. / 3.);
         let s = 1. - t;
         let r = (3.433_012_505_914_283_5e7
             + s * (8.713_462_091_032_494e5 + s * (2.424_556_014_825_642e3 + s)))
@@ -96,15 +107,16 @@ pub(crate) fn inverse_fermi_integral_05<T: Copy + RealField>(u: T) -> T {
     }
 }
 
-/// The Fermi integral of order 0.5.
+/// # Fermi integral of order -0.5.
 ///
-/// This is the Fermi integral of order 0.5, given by
-/// `F\left(\mu\right) = \int_0^{infty} dx x^{0.5} / (\exp(x - \mu) +1)`
-/// using the minimax approximation outlined in DOI: 10.1016/j.amc.2015.03.015
+/// The Fermi integral of order -0.5, given by
+/// $$F\left(\mu\right) = \int_0^{\infty} dx \frac{x^{-0.5}}{\exp(x - \mu) +1}$$
+/// using a [minimax approximation](https://doi.org/10.1016/j.amc.2015.03.015) to avoid costly
+///  numerical integration.
 #[numeric_literals::replace_float_literals(T::from_f64(literal).unwrap())]
-pub(crate) fn fermi_integral_m05<T: Copy + RealField>(u: T) -> T {
-    if u <= -2. {
-        let ex = u.exp();
+pub(crate) fn fermi_integral_m05<T: Copy + RealField>(mu: T) -> T {
+    if mu <= -2. {
+        let ex = mu.exp();
         let t = ex * 7.389_056_098_930_65;
         ex * (1.772_453_850_905_516
             - ex * (4.064_145_375_102_844e4
@@ -114,8 +126,8 @@ pub(crate) fn fermi_integral_m05<T: Copy + RealField>(u: T) -> T {
                 / (3.242_718_847_652_929_3e4
                     + t * (1.107_992_056_612_748e4
                         + t * (1.322_966_270_014_788_5e3 + t * (6.373_836_102_933_347e1 + t)))))
-    } else if u <= 0. {
-        let s = -0.5 * u;
+    } else if mu <= 0. {
+        let s = -0.5 * mu;
         let t = 1. - s;
         (2.727_700_921_319_327e2
             + t * (3.088_456_538_446_828_5e1
@@ -133,8 +145,8 @@ pub(crate) fn fermi_integral_m05<T: Copy + RealField>(u: T) -> T {
                             + s * (9.203_848_031_818_518e1
                                 + s * (3.701_649_141_127_912e1
                                     + s * (7.885_009_502_714_205_5 + s)))))))
-    } else if u <= 2. {
-        let t = 0.5 * u;
+    } else if mu <= 2. {
+        let t = 0.5 * mu;
         (3.531_503_605_682_430_6e3
             + t * (6.077_533_965_842_003e3
                 + t * (6.199_770_043_398_133e3
@@ -150,8 +162,8 @@ pub(crate) fn fermi_integral_m05<T: Copy + RealField>(u: T) -> T {
                             + t * (5.742_324_835_403_599e2
                                 + t * (1.328_038_593_206_672_7e2
                                     + t * (2.984_471_665_521_021_3e1 + t)))))))
-    } else if u <= 5. {
-        let t = (u - 2.) / 3.;
+    } else if mu <= 5. {
+        let t = (mu - 2.) / 3.;
         (4.060_707_534_041_182_5e3
             + t * (1.081_272_913_330_527_6e4
                 + t * (1.389_756_494_822_425_9e4
@@ -167,8 +179,8 @@ pub(crate) fn fermi_integral_m05<T: Copy + RealField>(u: T) -> T {
                             + t * (8.280_003_336_918_147e2
                                 + t * (1.814_981_110_895_183_7e2
                                     + t * (3.203_528_577_948_037_5e1 + t)))))))
-    } else if u <= 10. {
-        let t = 0.2 * u - 1.;
+    } else if mu <= 10. {
+        let t = 0.2 * mu - 1.;
         (1.198_417_190_295_575e3
             + t * (3.263_514_545_549_086_5e3
                 + t * (3.874_975_884_713_765e3
@@ -183,8 +195,8 @@ pub(crate) fn fermi_integral_m05<T: Copy + RealField>(u: T) -> T {
                         + t * (3.431_833_027_356_2e2
                             + t * (1.221_876_220_156_957_2e2
                                 + t * (2.090_163_590_798_559_3e1 + t))))))
-    } else if u <= 20. {
-        let t = 0.1 * u - 1.;
+    } else if mu <= 20. {
+        let t = 0.1 * mu - 1.;
         (9.446_001_694_352_377e3
             + t * (3.684_344_484_740_286e4
                 + t * (6.371_011_154_199_262e4
@@ -200,8 +212,8 @@ pub(crate) fn fermi_integral_m05<T: Copy + RealField>(u: T) -> T {
                             + t * (3.338_995_903_008_264e3
                                 + t * (8.604_990_438_868_03e2
                                     + t * (7.885_658_241_869_267e1 + t)))))))
-    } else if u <= 40. {
-        let t = 0.05 * u - 1.;
+    } else if mu <= 40. {
+        let t = 0.05 * mu - 1.;
         (2.297_796_578_553_672_2e4
             + t * (1.234_166_168_138_877_8e5
                 + t * (2.611_537_651_723_551e5
@@ -219,9 +231,9 @@ pub(crate) fn fermi_integral_m05<T: Copy + RealField>(u: T) -> T {
                                     + t * (1.064_752_751_420_766_3e2 + t)))))))
     } else {
         let factor = 2.;
-        let w = u.powi(-2);
+        let w = mu.powi(-2);
         let t = 1600. * w;
-        u.sqrt()
+        mu.sqrt()
             * factor
             * (1.
                 - w * (4.112_335_167_120_099_7e-1
@@ -233,14 +245,16 @@ pub(crate) fn fermi_integral_m05<T: Copy + RealField>(u: T) -> T {
     }
 }
 
-/// A min-max approximation for the Fermi integral of order 0.5
+/// # Fermi integral of order 0.5.
 ///
-/// This function is used for testing, allowing for benchmarking of the
-/// inverse fermi integral of order 0.5 in the upper module
+/// The Fermi integral of order 0.5, given by
+/// $$F\left(\mu\right) = \int_0^{\infty} dx \frac{x^{0.5}}{\exp(x - \mu) +1}$$
+/// using a [minimax approximation](https://doi.org/10.1016/j.amc.2015.03.015) to avoid costly
+/// numerical integration.
 #[numeric_literals::replace_float_literals(T::from_f64(literal).unwrap())]
-pub fn fermi_integral_05<T: Copy + RealField>(u: T) -> T {
-    if u <= -2. {
-        let ex = u.exp();
+pub fn fermi_integral_05<T: Copy + RealField>(mu: T) -> T {
+    if mu <= -2. {
+        let ex = mu.exp();
         let t = ex * 7.389_056_098_930_65;
         ex * (8.862_269_254_527_58e-1
             - ex * (1.989_445_533_869_516_7e4
@@ -250,8 +264,8 @@ pub fn fermi_integral_05<T: Copy + RealField>(u: T) -> T {
                 / (6.349_391_504_130_805e4
                     + t * (1.907_011_782_436_039_4e4
                         + t * (1.962_193_621_412_351e3 + t * (7.925_070_495_864_016e1 + t)))))
-    } else if u <= 0. {
-        let s = -0.5 * u;
+    } else if mu <= 0. {
+        let s = -0.5 * mu;
         let t = 1. - s;
         (1.494_625_877_688_652_3e2
             + t * (2.281_258_898_850_501_6e1
@@ -268,8 +282,8 @@ pub fn fermi_integral_05<T: Copy + RealField>(u: T) -> T {
                         + s * (218.89170769294024e0
                             + s * (102.31331350098315e0
                                 + s * (36.319337289702664e0 + s * (8.331_740_123_138_946 + s)))))))
-    } else if u <= 2. {
-        let t = 0.5 * u;
+    } else if mu <= 2. {
+        let t = 0.5 * mu;
         (7.165_271_711_921_555e4
             + t * (1.349_547_340_702_237_6e5
                 + t * (1.536_938_333_503_156_3e5
@@ -287,8 +301,8 @@ pub fn fermi_integral_05<T: Copy + RealField>(u: T) -> T {
                                 + t * (1.646_982_582_835_279e3
                                     + t * (6.189_069_196_924_941e2
                                         + t * (-3.363_195_917_553_947 + t))))))))
-    } else if u <= 5. {
-        let t = (u - 2.) / 3.;
+    } else if mu <= 5. {
+        let t = (mu - 2.) / 3.;
         (2.374_487_069_933_143e4
             + t * (6.825_785_898_556_23e4
                 + t * (8.932_744_676_833_347e4
@@ -303,8 +317,8 @@ pub fn fermi_integral_05<T: Copy + RealField>(u: T) -> T {
                             + t * (-5.283_948_637_308_382e2
                                 + t * (-6.610_336_339_954_497e2
                                     + t * (-5.144_814_702_509_623e1 + t)))))))
-    } else if u <= 10. {
-        let t = 0.2 * u - 1.;
+    } else if mu <= 10. {
+        let t = 0.2 * mu - 1.;
         (3.113_374_526_615_825_6e5
             + t * (1.112_670_744_166_482e6
                 + t * (1.756_386_288_956_717_4e6
@@ -321,8 +335,8 @@ pub fn fermi_integral_05<T: Copy + RealField>(u: T) -> T {
                                 + t * (2.712_131_708_090_425_5e3
                                     + t * (8.222_058_283_546_29e1 - t)))))))
             * 9.999_999_999_999_999e-1
-    } else if u <= 20. {
-        let t = 0.1 * u - 1.;
+    } else if mu <= 20. {
+        let t = 0.1 * mu - 1.;
         (7.268_700_630_030_598e6
             + t * (2.790_497_348_547_760_4e7
                 + t * (4.427_917_677_597_424e7
@@ -336,8 +350,8 @@ pub fn fermi_integral_05<T: Copy + RealField>(u: T) -> T {
                             + t * (3.928_940_614_005_423_4e4
                                 + t * (5.824_261_381_263_983e2
                                     + t * (1.127_281_945_815_860_3e1 - t)))))))
-    } else if u <= 40. {
-        let t = 0.05 * u - 1.;
+    } else if mu <= 40. {
+        let t = 0.05 * mu - 1.;
         (4.814_497_975_419_631e6
             + t * (1.851_628_507_131_276e7
                 + t * (2.776_309_675_225_744_4e7
@@ -351,9 +365,9 @@ pub fn fermi_integral_05<T: Copy + RealField>(u: T) -> T {
                             + t * (5.407_088_783_941_806e3
                                 + t * (1.121_950_444_107_755_8e2 - t))))))
     } else {
-        let w = u.powi(-2);
+        let w = mu.powi(-2);
         let s = 1. - 1600. * w;
-        u * u.sqrt()
+        mu * mu.sqrt()
             * 6.666_666_666_666_666e-1
             * (1.
                 + w * (8.109_793_907_444_779_5e3
@@ -366,23 +380,23 @@ pub fn fermi_integral_05<T: Copy + RealField>(u: T) -> T {
 mod test {
     use nalgebra::RealField;
 
-    /// A min-max approximation for the inverse Fermi integral of order 0.5
+    /// # Inverse Fermi integral of order 0.5.
     ///
-    /// This function is used for testing, allowing for benchmarking of the
-    /// inverse fermi integral of order 0.5 in the upper module
+    /// The inverse of the Fermi integral of order 0.5, given by
+    /// $$F\left(\mu\right) = \int_0^{\infty} dx \frac{x^{0.5}}{\exp(x - \mu) +1}$$
+    /// using a [minimax approximation](https://doi.org/10.1016/j.amc.2015.03.015) to avoid costly
+    ///  numerical integration.
     #[numeric_literals::replace_float_literals(T::from_f64(literal).unwrap())]
-    fn inverse_fermi_integral_m05<T: Copy + RealField>(u: T) -> T {
-        // Computes the inverse fermi integral of order -0.5 using the minimax
-        // approximation outlined in DOI: 10.1016/j.amc.2015.03.015
-        assert!(u > 0.);
-        let u1 = 2.344_105_321_212_492_5;
-        let u2 = 3.847_581_046_412_509;
-        let u3 = 5.627_089_693_446_789_6;
-        let u4 = 8.074_771_479_066_275;
-        let u5 = 12.670_348_407_162_363;
-        if u <= u1 {
-            let v = u1 - u;
-            let r = u
+    fn inverse_fermi_integral_m05<T: Copy + RealField>(mu: T) -> T {
+        assert!(mu > 0.);
+        let mu1 = 2.344_105_321_212_492_5;
+        let mu2 = 3.847_581_046_412_509;
+        let mu3 = 5.627_089_693_446_789_6;
+        let mu4 = 8.074_771_479_066_275;
+        let mu5 = 12.670_348_407_162_363;
+        if mu <= mu1 {
+            let v = mu1 - mu;
+            let r = mu
                 * (4.145_586_706_362_006e3
                     + v * (4.649_248_922_882_589e3
                         + v * (2.546_827_947_260_463_6e3
@@ -398,8 +412,8 @@ mod test {
                                     + v * (1.302_243_920_251_478_4e2
                                         + v * (1.679_576_227_495_763_5e1 + v)))))));
             r.ln()
-        } else if u <= u2 {
-            let y = u - u1;
+        } else if mu <= mu2 {
+            let y = mu - mu1;
             (1.000_564_003_768_906e5
                 + y * (9.379_587_690_169_092e4
                     + y * (1.196_843_677_580_723_7e4
@@ -415,8 +429,8 @@ mod test {
                                 + y * (1.666_464_494_929_515_2e2
                                     + y * (-6.113_590_366_933_374e1
                                         + y * (1.713_748_128_878_325_6e1 - y)))))))
-        } else if u <= u3 {
-            let y = u - u2;
+        } else if mu <= mu3 {
+            let y = mu - mu2;
             (7.807_708_032_862_033e5
                 + y * (7.451_198_020_769_327e5
                     + y * (4.857_013_913_509_063e5
@@ -432,8 +446,8 @@ mod test {
                                 + y * (5.143_706_463_450_254e3
                                     + y * (5.459_142_145_070_227e2
                                         + y * (2.546_664_870_149_129_5e1 - y)))))))
-        } else if u <= u4 {
-            let y = u - u3;
+        } else if mu <= mu4 {
+            let y = mu - mu3;
             (9.723_633_697_100_386e7
                 + y * (1.016_454_525_292_165_1e8
                     + y * (5.610_803_657_489_166_4e7
@@ -449,8 +463,8 @@ mod test {
                                 + y * (1.864_575_110_128_001_5e5
                                     + y * (2.335_157_206_436_227e4
                                         + y * (3.637_541_867_888_401e1 - y)))))))
-        } else if u <= u5 {
-            let y = u - u4;
+        } else if mu <= mu5 {
+            let y = mu - mu4;
             (9.859_217_899_528_706e10
                 + y * (9.212_482_052_867_464e10
                     + y * (4.659_030_699_733_764e10
@@ -468,7 +482,7 @@ mod test {
                                         + y * (-7.176_409_041_887_143e1 + y)))))))
         } else {
             let wc = 25_798.742_392_161_876;
-            let t = wc / u.powi(4);
+            let t = wc / mu.powi(4);
             let s = 1. - t;
             let r = (1.517_032_819_953_948e6
                 + s * (1.790_238_358_014_511_2e5 + s * (2.924_085_877_500_064_3e3 + s)))

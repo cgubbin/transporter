@@ -87,6 +87,9 @@ where
 
     fn generate_lesser_into(
         &mut self,
+        _energy: T,
+        _wavevector: T,
+        _hamiltonian: &Hamiltonian<T>,
         retarded_greens_function: &DMatrix<Complex<T>>,
         lesser_self_energy: &Self::SelfEnergy,
         _fermi_functions: &[T],
@@ -340,7 +343,7 @@ where
     {
         // In the coherent transport case we only need the retarded and lesser Greens functions (see Lake 1997)
         self.update_aggregate_retarded_greens_function(hamiltonian, self_energy, spectral_space)?;
-        self.update_aggregate_lesser_greens_function(self_energy, spectral_space)?;
+        self.update_aggregate_lesser_greens_function(hamiltonian, self_energy, spectral_space)?;
         Ok(())
     }
 
@@ -395,6 +398,7 @@ where
 
     pub(crate) fn update_aggregate_lesser_greens_function<Conn, Spectral>(
         &mut self,
+        hamiltonian: &Hamiltonian<T>,
         self_energy: &SelfEnergy<T, GeometryDim, Conn>,
         spectral_space: &Spectral,
     ) -> color_eyre::Result<()>
@@ -445,7 +449,13 @@ where
                 contact_lesser[(0, 0)] *= Complex::new(T::zero(), source);
                 contact_lesser[(n_ele - 1, n_ele - 1)] *= Complex::new(T::zero(), drain);
 
+                let energy = spectral_space.energy_at(index % n_energies);
+                let wavevector = spectral_space.wavevector_at(index / n_energies);
+
                 gf.as_mut().generate_lesser_into(
+                    energy,
+                    wavevector,
+                    hamiltonian,
                     &self.retarded[index].matrix,
                     &(&contact_lesser + &self_energy.incoherent_lesser.as_deref().unwrap()[index]),
                     &[source, drain],

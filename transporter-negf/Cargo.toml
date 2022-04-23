@@ -32,6 +32,9 @@ tracing-slog = "0.1.0"
 slog = "2.7.0"
 itertools = "0.10.3"
 rayon = "1.5.2"
+thiserror = "1.0.30"
+anyhow = "1.0.56"
+miette = { version = "4.5.0", features = ["fancy"] }
 
 [dependencies.conflux]
 git = "https://github.com/cgubbin/conflux"

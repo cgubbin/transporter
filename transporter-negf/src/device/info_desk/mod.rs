@@ -26,6 +26,8 @@ where
     pub(crate) acceptor_densities: Vec<T>,
     pub(crate) temperature: T,
     pub(crate) voltage_offsets: Vec<T>,
+    /// An optional length for the internal leads -> if specified this length on each side of the device is solved for in equilibrium
+    pub(crate) lead_length: Option<T>,
     marker: PhantomData<GeometryDim>,
 }
 
@@ -107,6 +109,7 @@ where
             acceptor_densities: Vec::new(),
             temperature: T::zero(),
             voltage_offsets: Vec::new(),
+            lead_length: None,
             marker: PhantomData,
         }
     }
@@ -129,14 +132,14 @@ pub(crate) trait BuildInfoDesk<T: RealField, GeometryDim: SmallDim, BandDim: Sma
 where
     DefaultAllocator: Allocator<T, BandDim> + Allocator<[T; 3], BandDim>,
 {
-    fn build_device_info_desk(&self)
-        -> color_eyre::Result<DeviceInfoDesk<T, GeometryDim, BandDim>>;
+    fn build_device_info_desk(&self) -> miette::Result<DeviceInfoDesk<T, GeometryDim, BandDim>>;
     fn assemble_from_layers_and_doping_densities(
         layers: Vec<LayerInfoDesk<T, BandDim>>,
         acceptor_density: Vec<T>,
         donor_density: Vec<T>,
         temperature: T,
         voltage_offsets: Vec<T>,
+        lead_length: Option<T>,
     ) -> DeviceInfoDesk<T, GeometryDim, BandDim>;
 }
 
@@ -150,7 +153,7 @@ where
     DefaultAllocator: Allocator<T, U1> + Allocator<T, U1, U3> + Allocator<T, GeometryDim>,
     <DefaultAllocator as Allocator<T, GeometryDim>>::Buffer: serde::Deserialize<'static>,
 {
-    fn build_device_info_desk(&self) -> color_eyre::Result<DeviceInfoDesk<T, GeometryDim, U1>> {
+    fn build_device_info_desk(&self) -> miette::Result<DeviceInfoDesk<T, GeometryDim, U1>> {
         let mut layers = Vec::new();
         let mut acceptor_densities = Vec::new();
         let mut donor_densities = Vec::new();
@@ -165,6 +168,7 @@ where
             donor_densities,
             self.temperature,
             self.voltage_offsets.clone(),
+            self.lead_length,
         ))
     }
 
@@ -174,6 +178,7 @@ where
         donor_densities: Vec<T>,
         temperature: T,
         voltage_offsets: Vec<T>,
+        lead_length: Option<T>,
     ) -> DeviceInfoDesk<T, GeometryDim, U1> {
         // Naive implementation: must be a better way to do this.
         let mut info_desk = DeviceInfoDesk::default();
@@ -192,13 +197,14 @@ where
         }
         info_desk.temperature = temperature;
         info_desk.voltage_offsets = voltage_offsets;
+        info_desk.lead_length = lead_length;
         info_desk
     }
 }
 
 // A single band implementation
 impl Material {
-    fn get_info<T: RealField>(&self) -> color_eyre::Result<LayerInfoDesk<T, U1>>
+    fn get_info<T: RealField>(&self) -> miette::Result<LayerInfoDesk<T, U1>>
     where
         DefaultAllocator: Allocator<T, U1> + Allocator<T, U1, U3>,
     {
@@ -237,7 +243,7 @@ impl<T: RealField> LayerInfoDesk<T, U1> {
     fn sic() -> Self {
         Self {
             effective_mass: nalgebra::Vector1::new([0.25, 0.25, 0.25]),
-            band_offset: Point1::new(0.2),
+            band_offset: Point1::new(0.1999),
             dielectric_constant: [8.5, 8.5, 8.5],
         }
     }

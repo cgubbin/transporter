@@ -154,7 +154,8 @@ where
             potential.as_ref().len(),
             self.convergence_settings.outer_tolerance(),
             self.convergence_settings.maximum_outer_iterations() as u64,
-        );
+        )
+        .beta(T::from_f64(0.1).unwrap());
         let vec_para = potential.as_ref().iter().map(|x| *x).collect::<Vec<_>>();
         let initial_parameter = ndarray::Array1::from(vec_para);
         // let mut solver = FixedPointSolver::new(mixer, potential.as_ref().clone());

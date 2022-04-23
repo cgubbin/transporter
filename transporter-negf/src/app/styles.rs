@@ -1,6 +1,6 @@
 use owo_colors::Style;
 
-// Stylesheet used to colorize MyValueDisplay below.
+// Stylesheet used to colorize prints.
 #[derive(Debug, Default)]
 pub(crate) struct Styles {
     pub device_style: Style,

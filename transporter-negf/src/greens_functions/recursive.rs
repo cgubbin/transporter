@@ -22,7 +22,8 @@ pub fn left_connected_diagonal<T>(
     energy: T::RealField,
     hamiltonian: &CsrMatrix<T::RealField>,
     self_energies: &(T, T),
-    // An optional early termination argument, to go down the whole matrix pass nrows
+    // An optional early termination argument, which is used when we wish to
+    // calculate the extended contact GF. To go down the whole matrix pass nrows
     terminate_after: usize,
 ) -> color_eyre::Result<DVector<T>>
 where

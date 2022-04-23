@@ -49,8 +49,9 @@ where
     /// Returns a chained iterator over both charge and current densities
     fn charge_and_current_iter(
         &self,
-    ) -> std::iter::Chain<impl Iterator<Item = DVector<T>>, impl Iterator<Item = DVector<T>>> {
-        self.charge_iter().chain(self.current_iter())
+        // ) -> std::iter::Chain<impl Iterator<Item = DVector<T>>, impl Iterator<Item = DVector<T>>> {
+    ) -> impl Iterator<Item = DVector<T>> {
+        self.charge_iter() //.chain(self.current_iter())
     }
 
     /// Returns an iterator over the held charge densities

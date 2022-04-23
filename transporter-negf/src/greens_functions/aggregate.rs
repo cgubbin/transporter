@@ -17,7 +17,7 @@ use nalgebra::{
 };
 use nalgebra_sparse::{pattern::SparsityPattern, CsrMatrix};
 use num_complex::Complex;
-use transporter_mesher::{Connectivity, Mesh, SmallDim};
+use transporter_mesher::{Connectivity, ElementMethods, Mesh, SmallDim};
 
 /// Builder struct for aggregated Green's functions
 #[derive(Clone)]
@@ -119,7 +119,7 @@ impl<'a, T, GeometryDim, Conn, BandDim>
         (),
     >
 where
-    T: RealField + Copy,
+    T: RealField + Copy + num_traits::ToPrimitive,
     GeometryDim: SmallDim,
     BandDim: SmallDim,
     Conn: Connectivity<T, GeometryDim>,
@@ -138,7 +138,18 @@ where
         AggregateGreensFunctions<'a, T, CsrMatrix<Complex<T>>, GeometryDim, BandDim>,
     > {
         // Assemble the sparsity pattern for the retarded green's function
-        let sparsity_pattern = assemble_csr_sparsity_for_retarded_gf(self.mesh.vertices().len())?;
+        let number_of_vertices_in_internal_lead =
+            if let Some(lead_length) = self.info_desk.lead_length {
+                (lead_length * T::from_f64(1e-9).unwrap() / self.mesh.elements()[0].0.diameter())
+                    .to_usize()
+                    .unwrap()
+            } else {
+                0
+            };
+        let sparsity_pattern = assemble_csr_sparsity_for_retarded_gf(
+            self.mesh.vertices().len(),
+            number_of_vertices_in_internal_lead,
+        )?;
         // Fill with dummy values
         let initial_values = vec![Complex::from(T::zero()); sparsity_pattern.nnz()];
         let csr = CsrMatrix::try_from_pattern_and_values(sparsity_pattern, initial_values)
@@ -203,7 +214,8 @@ where
         AggregateGreensFunctions<'a, T, CsrMatrix<Complex<T>>, GeometryDim, BandDim>,
     > {
         // Assemble the sparsity pattern for the retarded green's function
-        let sparsity_pattern = assemble_csr_sparsity_for_retarded_gf(self.mesh.vertices().len())?;
+        let sparsity_pattern =
+            assemble_csr_sparsity_for_retarded_gf(self.mesh.vertices().len(), 0)?;
         // Fill with dummy values
         let initial_values = vec![Complex::from(T::zero()); sparsity_pattern.nnz()];
         let csr = CsrMatrix::try_from_pattern_and_values(sparsity_pattern, initial_values)
@@ -340,28 +352,64 @@ pub(crate) trait AggregateGreensFunctionMethods<
 /// and last columns
 pub(crate) fn assemble_csr_sparsity_for_retarded_gf(
     number_of_elements_in_mesh: usize,
+    number_of_elements_in_contacts: usize,
 ) -> color_eyre::Result<SparsityPattern> {
-    let mut col_indices = vec![0, number_of_elements_in_mesh - 1]; // In the first row the first and last columns are occupied
-    let mut row_offsets = vec![0, 2]; // 2 elements in the first row
-                                      // In the core rows of the matrix there are three entries, in the first, last and diagonal columns
-    for idx in 1..number_of_elements_in_mesh - 1 {
+    if number_of_elements_in_contacts == 0 {
+        let mut col_indices = vec![0, number_of_elements_in_mesh - 1]; // In the first row the first and last columns are occupied
+        let mut row_offsets = vec![0, 2]; // 2 elements in the first row
+                                          // In the core rows of the matrix there are three entries, in the first, last and diagonal columns
+        for idx in 1..number_of_elements_in_mesh - 1 {
+            col_indices.push(0);
+            col_indices.push(idx);
+            col_indices.push(number_of_elements_in_mesh - 1);
+            row_offsets.push(row_offsets.last().unwrap() + 3)
+        }
+        // The last row has entries in the first and last column
         col_indices.push(0);
-        col_indices.push(idx);
         col_indices.push(number_of_elements_in_mesh - 1);
-        row_offsets.push(row_offsets.last().unwrap() + 3)
+        row_offsets.push(row_offsets.last().unwrap() + 2);
+        SparsityPattern::try_from_offsets_and_indices(
+            number_of_elements_in_mesh,
+            number_of_elements_in_mesh,
+            row_offsets,
+            col_indices,
+        )
+        .map_err(|e| eyre!("Failed to construct Csr Sparsity pattern {:?}", e))
+    } else {
+        let mut col_indices = vec![0]; // In the first row only the diagonal is occupied
+        let mut row_offsets = vec![0, 1]; // with a single element
+        for idx in 1..number_of_elements_in_contacts {
+            col_indices.push(idx);
+            row_offsets.push(row_offsets.last().unwrap() + 1);
+        }
+        col_indices.push(number_of_elements_in_contacts);
+        col_indices.push(number_of_elements_in_mesh - 1 - number_of_elements_in_contacts);
+        row_offsets.push(row_offsets.last().unwrap() + 2);
+        for idx in (number_of_elements_in_contacts + 1)
+            ..(number_of_elements_in_mesh - number_of_elements_in_contacts - 1)
+        {
+            col_indices.push(number_of_elements_in_contacts);
+            col_indices.push(idx);
+            col_indices.push(number_of_elements_in_mesh - 1 - number_of_elements_in_contacts);
+            row_offsets.push(row_offsets.last().unwrap() + 3)
+        }
+        col_indices.push(number_of_elements_in_contacts);
+        col_indices.push(number_of_elements_in_mesh - 1 - number_of_elements_in_contacts);
+        row_offsets.push(row_offsets.last().unwrap() + 2);
+        for idx in (number_of_elements_in_mesh - number_of_elements_in_contacts)
+            ..number_of_elements_in_mesh
+        {
+            col_indices.push(idx);
+            row_offsets.push(row_offsets.last().unwrap() + 1);
+        }
+        SparsityPattern::try_from_offsets_and_indices(
+            number_of_elements_in_mesh,
+            number_of_elements_in_mesh,
+            row_offsets,
+            col_indices,
+        )
+        .map_err(|e| eyre!("Failed to construct Csr Sparsity pattern {:?}", e))
     }
-    // The last row has entries in the first and last column
-    col_indices.push(0);
-    col_indices.push(number_of_elements_in_mesh - 1);
-    row_offsets.push(row_offsets.last().unwrap() + 2);
-    // Construct the pattern
-    SparsityPattern::try_from_offsets_and_indices(
-        number_of_elements_in_mesh,
-        number_of_elements_in_mesh,
-        row_offsets,
-        col_indices,
-    )
-    .map_err(|e| eyre!("Failed to construct Csr Sparsity pattern {:?}", e))
 }
 
 #[cfg(test)]
@@ -374,55 +422,180 @@ mod test {
     #[test]
     fn test_csr_assemble_of_diagonal_and_left_and_right_columns() {
         use rand::Rng;
-        let nrows = 5;
         let mut rng = rand::thread_rng();
 
-        let left_column: DVector<Complex<f64>> = DVector::from(
-            (0..nrows)
-                .map(|_| rng.gen::<f64>())
-                .map(Complex::from)
-                .collect::<Vec<_>>(),
-        );
-        let right_column: DVector<Complex<f64>> = DVector::from(
-            (0..nrows)
-                .map(|_| rng.gen::<f64>())
-                .map(Complex::from)
-                .collect::<Vec<_>>(),
-        );
-        let mut diagonal: DVector<Complex<f64>> = DVector::from(
-            (0..nrows)
-                .map(|_| rng.gen::<f64>())
-                .map(Complex::from)
-                .collect::<Vec<_>>(),
-        );
-        diagonal[0] = left_column[0];
-        diagonal[nrows - 1] = right_column[nrows - 1];
+        for nrows in 5..20 {
+            let left_column: DVector<Complex<f64>> = DVector::from(
+                (0..nrows)
+                    .map(|_| rng.gen::<f64>())
+                    .map(Complex::from)
+                    .collect::<Vec<_>>(),
+            );
+            let right_column: DVector<Complex<f64>> = DVector::from(
+                (0..nrows)
+                    .map(|_| rng.gen::<f64>())
+                    .map(Complex::from)
+                    .collect::<Vec<_>>(),
+            );
+            let mut diagonal: DVector<Complex<f64>> = DVector::from(
+                (0..nrows)
+                    .map(|_| rng.gen::<f64>())
+                    .map(Complex::from)
+                    .collect::<Vec<_>>(),
+            );
+            diagonal[0] = left_column[0];
+            diagonal[nrows - 1] = right_column[nrows - 1];
 
-        let mut dense_matrix: DMatrix<Complex<f64>> =
-            DMatrix::from_element(nrows, nrows, Complex::from(0f64));
-        for idx in 0..nrows {
-            dense_matrix[(idx, 0)] = left_column[idx];
-            dense_matrix[(idx, nrows - 1)] = right_column[idx];
-            dense_matrix[(idx, idx)] = diagonal[idx];
-        }
+            let mut dense_matrix: DMatrix<Complex<f64>> =
+                DMatrix::from_element(nrows, nrows, Complex::from(0f64));
+            for idx in 0..nrows {
+                dense_matrix[(idx, 0)] = left_column[idx];
+                dense_matrix[(idx, nrows - 1)] = right_column[idx];
+                dense_matrix[(idx, idx)] = diagonal[idx];
+            }
 
-        // Construct the sparsity pattern
-        let number_of_elements_in_mesh = diagonal.len();
-        let pattern =
-            super::assemble_csr_sparsity_for_retarded_gf(number_of_elements_in_mesh).unwrap();
-        let values = vec![Complex::from(0_f64); pattern.nnz()];
-        let mut csr = CsrMatrix::try_from_pattern_and_values(pattern, values).unwrap();
+            // Construct the sparsity pattern
+            let number_of_elements_in_mesh = diagonal.len();
+            let pattern =
+                super::assemble_csr_sparsity_for_retarded_gf(number_of_elements_in_mesh, 0)
+                    .unwrap();
+            let values = vec![Complex::from(0_f64); pattern.nnz()];
+            let mut csr = CsrMatrix::try_from_pattern_and_values(pattern, values).unwrap();
 
-        csr.assemble_retarded_diagonal_and_columns_into_csr(diagonal, left_column, right_column)
+            csr.assemble_retarded_diagonal_and_columns_into_csr(
+                diagonal,
+                left_column,
+                right_column,
+            )
             .unwrap();
 
-        let csr_to_dense = nalgebra_sparse::convert::serial::convert_csr_dense(&csr);
+            let csr_to_dense = nalgebra_sparse::convert::serial::convert_csr_dense(&csr);
 
-        println!("{csr_to_dense}");
-        println!("{dense_matrix}");
+            for (element, other) in dense_matrix.into_iter().zip(csr_to_dense.into_iter()) {
+                assert_eq!(element, other);
+            }
+        }
+    }
 
-        for (element, other) in dense_matrix.into_iter().zip(csr_to_dense.into_iter()) {
-            assert_eq!(element, other);
+    #[test]
+    fn test_csr_sparsity_of_diagonal_and_left_and_right_columns_with_finite_leads() {
+        for nrows in 5..30 {
+            for n_elements_in_contact in 1..(nrows / 2 - 1) {
+                let left_column: DVector<Complex<f64>> = DVector::from(
+                    (0..nrows - 2 * n_elements_in_contact)
+                        .map(|_| 1_f64)
+                        .map(Complex::from)
+                        .collect::<Vec<_>>(),
+                );
+                let right_column: DVector<Complex<f64>> = DVector::from(
+                    (0..nrows - 2 * n_elements_in_contact)
+                        .map(|_| 1_f64)
+                        .map(Complex::from)
+                        .collect::<Vec<_>>(),
+                );
+                let mut diagonal: DVector<Complex<f64>> = DVector::from(
+                    (0..nrows)
+                        .map(|_| 1_f64)
+                        .map(Complex::from)
+                        .collect::<Vec<_>>(),
+                );
+                // Fill the edge elements
+                diagonal[n_elements_in_contact] = left_column[0];
+                diagonal[nrows - 1 - n_elements_in_contact] = right_column[right_column.len() - 1];
+
+                let mut dense_matrix: DMatrix<Complex<f64>> =
+                    DMatrix::from_element(nrows, nrows, Complex::from(0f64));
+                for idx in 0..nrows {
+                    dense_matrix[(idx, idx)] = diagonal[idx];
+                }
+                for idx in 0..(nrows - 2 * n_elements_in_contact) {
+                    dense_matrix[(idx + n_elements_in_contact, n_elements_in_contact)] =
+                        left_column[idx];
+                    dense_matrix[(
+                        idx + n_elements_in_contact,
+                        nrows - 1 - n_elements_in_contact,
+                    )] = right_column[idx];
+                }
+
+                // Construct the sparsity pattern
+                let pattern =
+                    super::assemble_csr_sparsity_for_retarded_gf(nrows, n_elements_in_contact)
+                        .unwrap();
+                let values = vec![Complex::from(1_f64); pattern.nnz()];
+                let csr = CsrMatrix::try_from_pattern_and_values(pattern, values).unwrap();
+
+                let csr_to_dense = nalgebra_sparse::convert::serial::convert_csr_dense(&csr);
+
+                for (element, other) in dense_matrix.into_iter().zip(csr_to_dense.into_iter()) {
+                    assert_eq!(element, other);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_csr_assemble_of_diagonal_and_left_and_right_columns_with_finite_leads() {
+        use rand::Rng;
+        let mut rng = rand::thread_rng();
+
+        for nrows in 5..30 {
+            for n_elements_in_contact in 1..(nrows / 2 - 1) {
+                let left_column: DVector<Complex<f64>> = DVector::from(
+                    (0..nrows - 2 * n_elements_in_contact)
+                        .map(|_| rng.gen::<f64>())
+                        .map(Complex::from)
+                        .collect::<Vec<_>>(),
+                );
+                let right_column: DVector<Complex<f64>> = DVector::from(
+                    (0..nrows - 2 * n_elements_in_contact)
+                        .map(|_| rng.gen::<f64>())
+                        .map(Complex::from)
+                        .collect::<Vec<_>>(),
+                );
+                let mut diagonal: DVector<Complex<f64>> = DVector::from(
+                    (0..nrows)
+                        .map(|_| rng.gen::<f64>())
+                        .map(Complex::from)
+                        .collect::<Vec<_>>(),
+                );
+                // Fill the edge elements
+                diagonal[n_elements_in_contact] = left_column[0];
+                diagonal[nrows - 1 - n_elements_in_contact] = right_column[right_column.len() - 1];
+
+                let mut dense_matrix: DMatrix<Complex<f64>> =
+                    DMatrix::from_element(nrows, nrows, Complex::from(0f64));
+                for idx in 0..nrows {
+                    dense_matrix[(idx, idx)] = diagonal[idx];
+                }
+                for idx in 0..(nrows - 2 * n_elements_in_contact) {
+                    dense_matrix[(idx + n_elements_in_contact, n_elements_in_contact)] =
+                        left_column[idx];
+                    dense_matrix[(
+                        idx + n_elements_in_contact,
+                        nrows - 1 - n_elements_in_contact,
+                    )] = right_column[idx];
+                }
+
+                // Construct the sparsity pattern
+                let pattern =
+                    super::assemble_csr_sparsity_for_retarded_gf(nrows, n_elements_in_contact)
+                        .unwrap();
+                let values = vec![Complex::from(0_f64); pattern.nnz()];
+                let mut csr = CsrMatrix::try_from_pattern_and_values(pattern, values).unwrap();
+
+                csr.assemble_retarded_diagonal_and_columns_into_csr(
+                    diagonal,
+                    left_column,
+                    right_column,
+                )
+                .unwrap();
+
+                let csr_to_dense = nalgebra_sparse::convert::serial::convert_csr_dense(&csr);
+
+                for (element, other) in dense_matrix.into_iter().zip(csr_to_dense.into_iter()) {
+                    assert_eq!(element, other);
+                }
+            }
         }
     }
 }

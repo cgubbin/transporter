@@ -6,7 +6,7 @@
 //! where the Green's functions are stored as sparse CsrMatrix.
 use super::{
     aggregate::{AggregateGreensFunctionMethods, AggregateGreensFunctions},
-    recursive::{build_out_column, diagonal},
+    recursive::{build_out_column, diagonal, left_connected_diagonal, right_connected_diagonal},
     {GreensFunctionInfoDesk, GreensFunctionMethods},
 };
 use crate::{
@@ -49,15 +49,48 @@ impl<T: Copy + RealField> CsrAssembly<T> for CsrMatrix<Complex<T>> {
             n_values,
             diagonal.len() + left_column.len() + right_column.len() - 2
         );
-        self.values_mut()[0] = diagonal[0];
-        self.values_mut()[1] = right_column[0];
-        for row in 1..diagonal.len() - 1 {
-            self.values_mut()[2 + (row - 1) * 3] = left_column[row];
-            self.values_mut()[3 + (row - 1) * 3] = diagonal[row];
-            self.values_mut()[4 + (row - 1) * 3] = right_column[row];
+        assert_eq!(left_column.len(), right_column.len());
+        if diagonal.len() == left_column.len() {
+            self.values_mut()[0] = diagonal[0];
+            self.values_mut()[1] = right_column[0];
+            for row in 1..diagonal.len() - 1 {
+                self.values_mut()[2 + (row - 1) * 3] = left_column[row];
+                self.values_mut()[3 + (row - 1) * 3] = diagonal[row];
+                self.values_mut()[4 + (row - 1) * 3] = right_column[row];
+            }
+            self.values_mut()[n_values - 2] = left_column[left_column.len() - 1];
+            self.values_mut()[n_values - 1] = diagonal[diagonal.len() - 1];
+        } else {
+            assert_eq!(
+                (diagonal.len() - left_column.len()) % 2,
+                0,
+                "There must be equal numbers of elements in each extended contact"
+            );
+            let num_elements_in_contact = (diagonal.len() - left_column.len()) / 2;
+            // Diagonal entries only
+            for row in 0..num_elements_in_contact {
+                self.values_mut()[row] = diagonal[row];
+                self.values_mut()[n_values - num_elements_in_contact + row] =
+                    diagonal[diagonal.len() - num_elements_in_contact + row]
+            }
+            // Rows with two elements
+            self.values_mut()[num_elements_in_contact] = left_column[0];
+            self.values_mut()[num_elements_in_contact + 1] = right_column[0];
+
+            self.values_mut()[n_values - 2 - num_elements_in_contact] =
+                left_column[left_column.len() - 1];
+            self.values_mut()[n_values - 1 - num_elements_in_contact] =
+                right_column[right_column.len() - 1];
+
+            for index in 1..(diagonal.len() - 2 * num_elements_in_contact - 1) {
+                self.values_mut()[num_elements_in_contact + 2 + (index - 1) * 3] =
+                    left_column[index];
+                self.values_mut()[num_elements_in_contact + 3 + (index - 1) * 3] =
+                    diagonal[num_elements_in_contact + index];
+                self.values_mut()[num_elements_in_contact + 4 + (index - 1) * 3] =
+                    right_column[index];
+            }
         }
-        self.values_mut()[n_values - 2] = left_column[left_column.len() - 1];
-        self.values_mut()[n_values - 1] = diagonal[diagonal.len() - 1];
         Ok(())
     }
 }
@@ -118,7 +151,7 @@ where
                 )
                 .values()
                 .iter()
-                .map(|&x| x.real())
+                .map(|&x| -(Complex::new(T::zero(), T::one()) * x).real())
                 .collect::<Vec<_>>(); // The charge in the device is a real quantity
             summed_diagonal
                 .iter_mut()
@@ -321,7 +354,7 @@ where
     {
         // In the coherent transport case we only need the retarded and lesser Greens functions (see Lake 1997)
         self.update_aggregate_retarded_greens_function(hamiltonian, self_energy, spectral_space)?;
-        self.update_aggregate_lesser_greens_function(self_energy, spectral_space)?;
+        self.update_aggregate_lesser_greens_function(hamiltonian, self_energy, spectral_space)?;
         Ok(())
     }
 
@@ -374,6 +407,7 @@ where
 
     pub(crate) fn update_aggregate_lesser_greens_function<Conn, Spectral>(
         &mut self,
+        hamiltonian: &Hamiltonian<T>,
         self_energy: &SelfEnergy<T, GeometryDim, Conn>,
         spectral_space: &Spectral,
     ) -> color_eyre::Result<()>
@@ -422,7 +456,13 @@ where
                         self.info_desk.get_fermi_function_at_drain(energy),
                     ),
                 };
+
+                let energy = spectral_space.energy_at(index % n_energies);
+                let wavevector = spectral_space.wavevector_at(index / n_energies);
                 gf.as_mut().generate_lesser_into(
+                    energy,
+                    wavevector,
+                    hamiltonian,
                     &self.retarded[index].matrix,
                     &self_energy.contact_retarded[index],
                     &[source, drain],
@@ -446,28 +486,50 @@ where
         hamiltonian: &Hamiltonian<T>,
         self_energy: &Self::SelfEnergy,
     ) -> color_eyre::Result<()> {
-        let self_energy_values = self_energy.values();
+        // The number of entries is n_rows + 2 * (n_rows - 2 * n_lead - 1)
+        assert_eq!((3 * self.nrows() - self.nnz() - 2) % 4, 0);
+        let number_of_vertices_in_internal_lead = (3 * self.nrows() - self.nnz() - 2) / 4;
+
+        let self_energy_values_at_contact = self_energy.values();
         assert_eq!(
-            self_energy_values.len(),
+            self_energy_values_at_contact.len(),
             2,
             "In a 1D problem there should be two non-zero elements in the self-energy matrix"
         );
-        let self_energy_values = (self_energy_values[0], self_energy_values[1]);
+        let self_energy_values_at_contact = (
+            self_energy_values_at_contact[0],
+            self_energy_values_at_contact[1],
+        );
         // Get the Hamiltonian at this wavevector
         let hamiltonian = hamiltonian.calculate_total(wavevector); // The hamiltonian is minus itself because we are stupid
                                                                    // Generate the diagonal component of the CSR matrix
-        let g_ii = diagonal(energy, &hamiltonian, &self_energy_values)?;
+        let g_ii = diagonal(energy, &hamiltonian, &self_energy_values_at_contact)?;
         // Generate the top row
-        let g_i0 = build_out_column(energy, &hamiltonian, &g_ii, &self_energy_values, 0)?;
+        let g_i0 = build_out_column(
+            energy,
+            &hamiltonian,
+            &g_ii,
+            &self_energy_values_at_contact,
+            number_of_vertices_in_internal_lead,
+        )?;
+        let g_i0 = g_i0
+            .rows(0, self.nrows() - 2 * number_of_vertices_in_internal_lead)
+            .clone_owned();
 
         // Generate the bottom row
         let g_in = build_out_column(
             energy,
             &hamiltonian,
             &g_ii,
-            &self_energy_values,
-            hamiltonian.nrows() - 1,
+            &self_energy_values_at_contact,
+            hamiltonian.nrows() - 1 - number_of_vertices_in_internal_lead,
         )?;
+        let g_in = g_in
+            .rows(
+                number_of_vertices_in_internal_lead,
+                self.nrows() - 2 * number_of_vertices_in_internal_lead,
+            )
+            .clone_owned();
 
         self.assemble_retarded_diagonal_and_columns_into_csr(g_ii, g_i0, g_in)
     }
@@ -487,27 +549,134 @@ where
 
     fn generate_lesser_into(
         &mut self,
+        energy: T,
+        wavevector: T,
+        hamiltonian: &Hamiltonian<T>,
         retarded_greens_function: &CsrMatrix<Complex<T>>,
         retarded_self_energy: &CsrMatrix<Complex<T>>,
         fermi_functions: &[T],
     ) -> color_eyre::Result<()> {
-        // In 1D and for 1 band:
-        let gamma_values = retarded_self_energy
-            .values()
-            .iter()
-            .zip(fermi_functions)
-            .map(|(&x, &fermi)| Complex::new(T::zero(), fermi * T::one()) * (x - x.conjugate()))
-            .collect::<Vec<_>>();
+        // The number of entries is n_rows + 2 * (n_rows - 2 * n_lead - 1)
+        assert_eq!(
+            (3 * retarded_greens_function.nrows() - retarded_greens_function.nnz() - 2) % 4,
+            0
+        );
+        let number_of_vertices_in_internal_lead =
+            (3 * retarded_greens_function.nrows() - retarded_greens_function.nnz() - 2) / 4;
         let n_ele = self.values().len();
 
-        for (element, value) in self
-            .values_mut()
-            .iter_mut()
-            .zip(retarded_greens_function.row_iter())
-        {
-            let left = Complex::from(value.get_entry(0).unwrap().into_value().simd_abs());
-            let right = Complex::from(value.get_entry(n_ele - 1).unwrap().into_value().simd_abs());
-            *element = left.powi(2) * gamma_values[0] + right.powi(2) * gamma_values[1];
+        if number_of_vertices_in_internal_lead == 0 {
+            // In 1D and for 1 band:
+            let gamma_values = retarded_self_energy
+                .values()
+                .iter()
+                .zip(fermi_functions)
+                .map(|(&x, &fermi)| Complex::new(T::zero(), fermi * T::one()) * (x - x.conjugate()))
+                .collect::<Vec<_>>();
+
+            for (element, value) in self
+                .values_mut()
+                .iter_mut()
+                .zip(retarded_greens_function.row_iter())
+            {
+                let left = Complex::from(value.get_entry(0).unwrap().into_value().simd_abs());
+                let right =
+                    Complex::from(value.get_entry(n_ele - 1).unwrap().into_value().simd_abs());
+                *element = Complex::new(T::zero(), T::one())
+                    * (left.powi(2) * gamma_values[0] + right.powi(2) * gamma_values[1]);
+            }
+        } else {
+            // G^{<} = i f_{e} A
+            for (row, (element, value)) in self
+                .values_mut()
+                .iter_mut()
+                .zip(retarded_greens_function.row_iter())
+                .enumerate()
+                .take(number_of_vertices_in_internal_lead)
+            {
+                let g_r = value.get_entry(row).unwrap().into_value();
+                let spectral_density = Complex::new(T::zero(), T::one()) * (g_r - g_r.conj());
+                *element = Complex::new(T::zero(), fermi_functions[0]) * spectral_density;
+            }
+            let self_energies_at_external_contacts = (
+                retarded_self_energy.values()[0],
+                retarded_self_energy.values()[1],
+            );
+
+            let hamiltonian = hamiltonian.calculate_total(wavevector);
+            let left_internal_self_energy = left_connected_diagonal(
+                energy,
+                &hamiltonian,
+                &self_energies_at_external_contacts,
+                number_of_vertices_in_internal_lead,
+            )?;
+            let left_internal_self_energy = left_internal_self_energy
+                [(left_internal_self_energy.shape().0 - 1, 0)]
+                * hamiltonian
+                    .row(number_of_vertices_in_internal_lead)
+                    .values()[2]
+                    .powi(2);
+
+            let right_internal_self_energy = right_connected_diagonal(
+                energy,
+                &hamiltonian,
+                &self_energies_at_external_contacts,
+                number_of_vertices_in_internal_lead,
+            )?;
+            let right_internal_self_energy = right_internal_self_energy[(0, 0)]
+                * hamiltonian
+                    .row(hamiltonian.nrows() - 1 - number_of_vertices_in_internal_lead)
+                    .values()[2]
+                    .powi(2);
+            // dbg!(
+            //     &self_energies_at_external_contacts,
+            //     left_internal_self_energy,
+            //     right_internal_self_energy
+            // );
+            // std::thread::sleep(std::time::Duration::from_secs(10));
+            let gamma_values = vec![
+                Complex::new(T::zero(), fermi_functions[0])
+                    * (left_internal_self_energy - left_internal_self_energy.conj()),
+                Complex::new(T::zero(), fermi_functions[1])
+                    * (right_internal_self_energy - right_internal_self_energy.conj()),
+            ];
+
+            for (element, value) in self
+                .values_mut()
+                .iter_mut()
+                .zip(retarded_greens_function.row_iter())
+                .skip(number_of_vertices_in_internal_lead)
+                .take(n_ele - 2 * number_of_vertices_in_internal_lead)
+            {
+                let left = Complex::from(
+                    value
+                        .get_entry(number_of_vertices_in_internal_lead)
+                        .unwrap()
+                        .into_value()
+                        .simd_abs(),
+                );
+                let right = Complex::from(
+                    value
+                        .get_entry(n_ele - 1 - number_of_vertices_in_internal_lead)
+                        .unwrap()
+                        .into_value()
+                        .simd_abs(),
+                );
+                *element = Complex::new(T::zero(), T::one())
+                    * (left.powi(2) * gamma_values[0] + right.powi(2) * gamma_values[1]);
+            }
+
+            for (row, (element, value)) in self
+                .values_mut()
+                .iter_mut()
+                .zip(retarded_greens_function.row_iter())
+                .enumerate()
+                .skip(n_ele - number_of_vertices_in_internal_lead)
+            {
+                let g_r = value.get_entry(row).unwrap().into_value();
+                let spectral_density = Complex::new(T::zero(), T::one()) * (g_r - g_r.conj());
+                *element = Complex::new(T::zero(), fermi_functions[1]) * spectral_density;
+            }
         }
         Ok(())
     }
