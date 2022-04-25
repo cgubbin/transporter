@@ -148,35 +148,17 @@ where
                                 / T::from_f64(crate::constants::ELECTRON_CHARGE).unwrap(), // The Green's function is an inverse energy stored in eV
                             )
                     },
-                )
-                .values()
-                .iter()
-                .map(|&x| -(Complex::new(T::zero(), T::one()) * x).real())
-                .collect::<Vec<_>>(); // The charge in the device is a real quantity
+                );
             summed_diagonal
                 .iter_mut()
-                .zip(new_diagonal.into_iter())
+                .zip(
+                    new_diagonal
+                        .values()
+                        .iter()
+                        .map(|&x| -(Complex::new(T::zero(), T::one()) * x).real()),
+                )
                 .for_each(|(ele, new)| *ele += wavevector * weight * width * new);
         }
-        // let summed_diagonal = self
-        //     .lesser
-        //     .iter()
-        //     .zip(spectral_space.iter_energy_weights())
-        //     .zip(spectral_space.iter_energy_widths())
-        //     .fold(
-        //         &self.lesser[0].matrix * Complex::from(T::zero()),
-        //         |sum, ((value, weight), width)| {
-        //             sum + &value.matrix
-        //                 * Complex::from(
-        //                     weight * width // Weighted by the integration weight from the `SpectralSpace` and the diameter of the element in the grid
-        //                         / T::from_f64(crate::constants::ELECTRON_CHARGE).unwrap(), // The Green's function is an inverse energy stored in eV
-        //                 )
-        //         },
-        //     )
-        //     .values()
-        //     .iter()
-        //     .map(|&x| x.real()) // The charge in the device is a real quantity
-        //     .collect::<Vec<_>>();
 
         // Separate out the diagonals for each `BandDim` into their own charge vector
         for band_number in 0..BandDim::dim() {
@@ -248,11 +230,14 @@ where
 
     fn accumulate_into_current_density_vector(
         &self,
+        voltage: T,
         mesh: &Mesh<T, GeometryDim, Conn>,
         self_energy: &SelfEnergy<T, GeometryDim, Conn>,
         spectral_space: &Spectral,
     ) -> color_eyre::Result<Current<T, BandDim>> {
         let mut currents: Vec<DVector<T>> = Vec::with_capacity(BandDim::dim());
+        let number_of_vertices_in_internal_lead =
+            (3 * self.retarded[0].matrix.nrows() - self.retarded[0].matrix.nnz() - 2) / 4;
 
         let summed_current = self
             .retarded
@@ -269,26 +254,21 @@ where
                     let gamma_drain = -(T::one() + T::one()) * se_r.values()[1].im;
                     // Zero order Fermi integrals
                     let fermi_source = self.info_desk.get_fermi_integral_at_source(energy);
-                    let fermi_drain = self.info_desk.get_fermi_integral_at_drain(energy);
+                    let fermi_drain = self.info_desk.get_fermi_integral_at_drain(energy, voltage);
 
-                    let values = gf_r
-                        .matrix
-                        .values()
-                        .iter()
-                        .take(mesh.elements().len() * BandDim::dim());
-                    values
-                        .map(|value| (value * value.conj()).re)
-                        .map(|grga| {
-                            grga * weight
-                                * width
-                                * weight
-                                * gamma_source
-                                * gamma_drain
-                                * (fermi_source - fermi_drain)
-                                / T::from_f64(crate::constants::ELECTRON_CHARGE).unwrap()
-                        })
-                        .zip(sum.into_iter())
-                        .map(|(grga, sum)| sum + grga)
+                    // TODO Handle finite internal leads. This assumes the device continues to the contacts
+                    let gf_r_1n = gf_r.matrix.values()[number_of_vertices_in_internal_lead + 1];
+
+                    let abs_gf_r_1n_with_factor = (gf_r_1n * gf_r_1n.conj()).re
+                        * width
+                        * weight
+                        * gamma_source
+                        * gamma_drain
+                        * (fermi_source - fermi_drain)
+                        * T::from_f64(0.01.powi(2) / 1e5).unwrap(); // Convert to x 10^5 A / cm^2
+
+                    sum.into_iter()
+                        .map(|sum| sum + abs_gf_r_1n_with_factor)
                         .collect()
                 },
             );
@@ -340,6 +320,7 @@ where
     #[tracing::instrument(name = "Updating Greens Functions", skip_all)]
     pub(crate) fn update_greens_functions<Conn, Spectral>(
         &mut self,
+        voltage: T,
         hamiltonian: &Hamiltonian<T>,
         self_energy: &SelfEnergy<T, GeometryDim, Conn>,
         spectral_space: &Spectral,
@@ -354,7 +335,12 @@ where
     {
         // In the coherent transport case we only need the retarded and lesser Greens functions (see Lake 1997)
         self.update_aggregate_retarded_greens_function(hamiltonian, self_energy, spectral_space)?;
-        self.update_aggregate_lesser_greens_function(hamiltonian, self_energy, spectral_space)?;
+        self.update_aggregate_lesser_greens_function(
+            voltage,
+            hamiltonian,
+            self_energy,
+            spectral_space,
+        )?;
         Ok(())
     }
 
@@ -407,6 +393,7 @@ where
 
     pub(crate) fn update_aggregate_lesser_greens_function<Conn, Spectral>(
         &mut self,
+        voltage: T,
         hamiltonian: &Hamiltonian<T>,
         self_energy: &SelfEnergy<T, GeometryDim, Conn>,
         spectral_space: &Spectral,
@@ -449,11 +436,11 @@ where
                 let (source, drain) = match n_wavevectors {
                     1 => (
                         self.info_desk.get_fermi_integral_at_source(energy),
-                        self.info_desk.get_fermi_integral_at_drain(energy),
+                        self.info_desk.get_fermi_integral_at_drain(energy, voltage),
                     ),
                     _ => (
                         self.info_desk.get_fermi_function_at_source(energy),
-                        self.info_desk.get_fermi_function_at_drain(energy),
+                        self.info_desk.get_fermi_function_at_drain(energy, voltage),
                     ),
                 };
 
@@ -503,13 +490,19 @@ where
         // Get the Hamiltonian at this wavevector
         let hamiltonian = hamiltonian.calculate_total(wavevector); // The hamiltonian is minus itself because we are stupid
                                                                    // Generate the diagonal component of the CSR matrix
-        let g_ii = diagonal(energy, &hamiltonian, &self_energy_values_at_contact)?;
+        let g_ii = diagonal(
+            energy,
+            &hamiltonian,
+            &self_energy_values_at_contact,
+            number_of_vertices_in_internal_lead,
+        )?;
         // Generate the top row
         let g_i0 = build_out_column(
             energy,
             &hamiltonian,
             &g_ii,
             &self_energy_values_at_contact,
+            number_of_vertices_in_internal_lead,
             number_of_vertices_in_internal_lead,
         )?;
         let g_i0 = g_i0
@@ -523,6 +516,7 @@ where
             &g_ii,
             &self_energy_values_at_contact,
             hamiltonian.nrows() - 1 - number_of_vertices_in_internal_lead,
+            number_of_vertices_in_internal_lead,
         )?;
         let g_in = g_in
             .rows(
@@ -557,10 +551,6 @@ where
         fermi_functions: &[T],
     ) -> color_eyre::Result<()> {
         // The number of entries is n_rows + 2 * (n_rows - 2 * n_lead - 1)
-        assert_eq!(
-            (3 * retarded_greens_function.nrows() - retarded_greens_function.nnz() - 2) % 4,
-            0
-        );
         let number_of_vertices_in_internal_lead =
             (3 * retarded_greens_function.nrows() - retarded_greens_function.nnz() - 2) / 4;
         let n_ele = self.values().len();
@@ -609,6 +599,7 @@ where
                 &hamiltonian,
                 &self_energies_at_external_contacts,
                 number_of_vertices_in_internal_lead,
+                0,
             )?;
             let left_internal_self_energy = left_internal_self_energy
                 [(left_internal_self_energy.shape().0 - 1, 0)]
@@ -622,18 +613,13 @@ where
                 &hamiltonian,
                 &self_energies_at_external_contacts,
                 number_of_vertices_in_internal_lead,
+                number_of_vertices_in_internal_lead,
             )?;
             let right_internal_self_energy = right_internal_self_energy[(0, 0)]
                 * hamiltonian
                     .row(hamiltonian.nrows() - 1 - number_of_vertices_in_internal_lead)
                     .values()[2]
                     .powi(2);
-            // dbg!(
-            //     &self_energies_at_external_contacts,
-            //     left_internal_self_energy,
-            //     right_internal_self_energy
-            // );
-            // std::thread::sleep(std::time::Duration::from_secs(10));
             let gamma_values = vec![
                 Complex::new(T::zero(), fermi_functions[0])
                     * (left_internal_self_energy - left_internal_self_energy.conj()),

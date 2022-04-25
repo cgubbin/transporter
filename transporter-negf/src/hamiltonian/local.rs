@@ -2,12 +2,12 @@
 //!
 //! This submodule constructs the components of the Hamiltonian differential operator, and diagonal
 //! for a single element of the mesh, over `NumBands` (ie: the number of carrier bands in the problem).
-use super::HamiltonianInfoDesk;
+use super::{BuildError, HamiltonianInfoDesk};
 use crate::constants::{ELECTRON_CHARGE, ELECTRON_MASS, HBAR};
 use crate::utilities::assemblers::{VertexAssembler, VertexConnectivityAssembler};
 use nalgebra::{
-    allocator::Allocator, DMatrix, DMatrixSliceMut, DVector, DVectorSliceMut, DefaultAllocator,
-    OPoint, OVector, RealField,
+    allocator::Allocator, DMatrix, DMatrixSliceMut, DVectorSliceMut, DefaultAllocator, OPoint,
+    OVector, RealField,
 };
 use transporter_mesher::{Assignment, Connectivity, Mesh, SmallDim};
 
@@ -21,7 +21,7 @@ pub(crate) trait AssembleVertexHamiltonianDiagonal<T: RealField>:
         &self,
         vertex_index: usize,
         output: DVectorSliceMut<T>,
-    ) -> color_eyre::Result<()>;
+    ) -> Result<(), BuildError>;
 }
 
 /// Helper trait to construct the fixed component of the operator (ie: the differential bit)
@@ -34,14 +34,14 @@ pub(crate) trait AssembleVertexHamiltonianMatrix<T: RealField>:
         &self,
         vertex_index: usize,
         output: DMatrixSliceMut<T>,
-    ) -> color_eyre::Result<()>;
+    ) -> Result<(), BuildError>;
 
     fn assemble_vertex_matrix(
         &self,
         vertex_index: usize,
         num_connections: usize,
         num_bands: usize,
-    ) -> color_eyre::Result<DMatrix<T>> {
+    ) -> Result<DMatrix<T>, BuildError> {
         let mut output = DMatrix::from_element(num_bands, num_connections + 1, T::zero());
         self.assemble_vertex_matrix_into(vertex_index, DMatrixSliceMut::from(&mut output))?;
         Ok(output)
@@ -206,7 +206,7 @@ where
         &self,
         vertex_index: usize,
         output: DMatrixSliceMut<T>,
-    ) -> color_eyre::Result<()> {
+    ) -> Result<(), BuildError> {
         // Construct the element at `element_index`
         let vertex = VertexInMesh::from_mesh_vertex_index_and_info_desk(
             self.mesh,
@@ -225,7 +225,7 @@ fn assemble_vertex_differential_operator<T, InfoDesk, Conn>(
     mut output: DMatrixSliceMut<T>,
     vertex: &VertexInMesh<InfoDesk, Mesh<T, InfoDesk::GeometryDim, Conn>>,
     num_bands: usize,
-) -> color_eyre::Result<()>
+) -> Result<(), BuildError>
 where
     T: Copy + RealField,
     InfoDesk: super::HamiltonianInfoDesk<T>,
@@ -234,15 +234,17 @@ where
 {
     let shape = output.shape();
 
-    assert_eq!(
-        shape.1,
-        vertex.connection_count() + 1,
-        "Output matrix should have `n_conns * n_neighbour + 1` columns"
-    );
-    assert_eq!(
-        shape.0, num_bands,
-        "Output matrix should have `n_bands` rows"
-    );
+    if shape.1 != vertex.connection_count() + 1 {
+        return Err(BuildError::MissizedAllocator(
+            "Output matrix should have `n_conns * n_neighbour + 1` columns".into(),
+        ));
+    }
+
+    if shape.0 != num_bands {
+        return Err(BuildError::MissizedAllocator(
+            "Output matrix should have `n_bands` rows".into(),
+        ));
+    }
 
     // The position and band independent prefactor
     let prefactor = -T::from_f64(HBAR * HBAR / ELECTRON_CHARGE / ELECTRON_MASS / 2.)
@@ -406,7 +408,7 @@ where
         &self,
         vertex_index: usize,
         output: DVectorSliceMut<T>,
-    ) -> color_eyre::Result<()> {
+    ) -> Result<(), BuildError> {
         let vertex = VertexInMesh::from_mesh_vertex_index_and_info_desk(
             self.mesh,
             self.info_desk,
@@ -421,7 +423,7 @@ fn assemble_vertex_diagonal<T, InfoDesk, Conn>(
     mut output: DVectorSliceMut<T>,
     vertex: &VertexInMesh<InfoDesk, Mesh<T, InfoDesk::GeometryDim, Conn>>,
     num_bands: usize,
-) -> color_eyre::Result<()>
+) -> Result<(), BuildError>
 where
     T: Copy + RealField,
     InfoDesk: super::HamiltonianInfoDesk<T>,
@@ -430,14 +432,16 @@ where
 {
     let shape = output.shape();
 
-    assert_eq!(
-        shape.1, 1,
-        "Output matrix should have `n_conns * n_neighbour + 1` columns"
-    );
-    assert_eq!(
-        shape.0, num_bands,
-        "Output matrix should have `num_bands` rows"
-    );
+    if shape.1 != 1 {
+        return Err(BuildError::MissizedAllocator(
+            "Output matrix should have `n_conns * n_neighbour + 1` columns".into(),
+        ));
+    }
+    if shape.0 != num_bands {
+        return Err(BuildError::MissizedAllocator(
+            "Output matrix should have `num_bands` rows".into(),
+        ));
+    }
 
     let prefactor =
         T::from_f64(HBAR * HBAR / ELECTRON_CHARGE / 2.).expect("Prefactor must fit in T");

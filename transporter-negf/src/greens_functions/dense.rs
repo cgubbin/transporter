@@ -7,7 +7,6 @@ use num_complex::Complex;
 
 use super::{
     aggregate::{AggregateGreensFunctionMethods, AggregateGreensFunctions},
-    recursive::{build_out_column, diagonal},
     GreensFunctionInfoDesk,
 };
 use crate::{
@@ -18,8 +17,7 @@ use crate::{
 use console::Term;
 use indicatif::{ParallelProgressIterator, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use nalgebra::{
-    allocator::Allocator, Const, DVector, DefaultAllocator, Dynamic, Matrix, OVector,
-    SimdComplexField, VecStorage,
+    allocator::Allocator, Const, DVector, DefaultAllocator, Dynamic, Matrix, OVector, VecStorage,
 };
 use rayon::prelude::*;
 use transporter_mesher::{Connectivity, ElementMethods, Mesh, SmallDim};
@@ -162,13 +160,10 @@ where
                                 / T::from_f64(crate::constants::ELECTRON_CHARGE).unwrap(), // The Green's function is an inverse energy stored in eV
                             )
                     },
-                )
-                .iter()
-                .map(|&x| x.real())
-                .collect::<Vec<_>>(); // The charge in the device is a real quantity
+                );
             summed_diagonal
                 .iter_mut()
-                .zip(new_diagonal.into_iter())
+                .zip(new_diagonal.into_iter().map(|&x| x.real()))
                 .for_each(|(ele, new)| *ele += wavevector * weight * width * new);
         }
 
@@ -242,6 +237,7 @@ where
 
     fn accumulate_into_current_density_vector(
         &self,
+        voltage: T,
         mesh: &Mesh<T, GeometryDim, Conn>,
         self_energy: &SelfEnergy<T, GeometryDim, Conn>,
         spectral_space: &Spectral,
@@ -263,7 +259,7 @@ where
                     let gamma_drain = -(T::one() + T::one()) * se_r.values()[1].im;
                     // Zero order Fermi integrals
                     let fermi_source = self.info_desk.get_fermi_integral_at_source(energy);
-                    let fermi_drain = self.info_desk.get_fermi_integral_at_drain(energy);
+                    let fermi_drain = self.info_desk.get_fermi_integral_at_drain(energy, voltage);
 
                     let values = gf_r.matrix.row(0);
                     values
@@ -329,6 +325,7 @@ where
     #[tracing::instrument(name = "Updating Greens Functions", skip_all)]
     pub(crate) fn update_greens_functions<Conn, Spectral>(
         &mut self,
+        voltage: T,
         hamiltonian: &Hamiltonian<T>,
         self_energy: &SelfEnergy<T, GeometryDim, Conn>,
         spectral_space: &Spectral,
@@ -343,7 +340,12 @@ where
     {
         // In the coherent transport case we only need the retarded and lesser Greens functions (see Lake 1997)
         self.update_aggregate_retarded_greens_function(hamiltonian, self_energy, spectral_space)?;
-        self.update_aggregate_lesser_greens_function(hamiltonian, self_energy, spectral_space)?;
+        self.update_aggregate_lesser_greens_function(
+            voltage,
+            hamiltonian,
+            self_energy,
+            spectral_space,
+        )?;
         Ok(())
     }
 
@@ -398,6 +400,7 @@ where
 
     pub(crate) fn update_aggregate_lesser_greens_function<Conn, Spectral>(
         &mut self,
+        voltage: T,
         hamiltonian: &Hamiltonian<T>,
         self_energy: &SelfEnergy<T, GeometryDim, Conn>,
         spectral_space: &Spectral,
@@ -427,7 +430,6 @@ where
         );
         pb.set_style(spinner_style);
 
-        let n_wavevectors = spectral_space.number_of_wavevector_points();
         let n_energies = spectral_space.number_of_energy_points();
         let n_ele = self.lesser[0].as_ref().shape().0;
 
@@ -440,7 +442,7 @@ where
                 let energy = spectral_space.energy_at(index % n_energies);
                 let (source, drain) = (
                     self.info_desk.get_fermi_function_at_source(energy),
-                    self.info_desk.get_fermi_function_at_drain(energy),
+                    self.info_desk.get_fermi_function_at_drain(energy, voltage),
                 );
                 let contact_lesser = nalgebra_sparse::convert::serial::convert_csr_dense(
                     &self_energy.contact_retarded[index],

@@ -1,6 +1,5 @@
 use super::Material;
 use crate::app::styles::Styles;
-use color_eyre::eyre::eyre;
 use config::{Config, File};
 use nalgebra::{allocator::Allocator, DefaultAllocator, RealField, U1};
 use owo_colors::OwoColorize;
@@ -103,11 +102,12 @@ where
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "     {:-^30}", "-".style(self.styles.device_style))?;
         for layer in self.device.layers.iter() {
+            let info = format!("{}: {}nm", layer.material, layer.thickness[0]);
             writeln!(
                 f,
                 "     {}{: ^28}{}",
                 "|".style(self.styles.device_style),
-                format!("{}: {}nm", layer.material, layer.thickness[0]),
+                info,
                 "|".style(self.styles.device_style),
             )?;
             writeln!(f, "     {:-^30}", "-".style(self.styles.device_style))?;

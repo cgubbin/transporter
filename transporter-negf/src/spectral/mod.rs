@@ -115,15 +115,20 @@ where
     fn wavevector_at(&self, index: usize) -> T {
         self.wavevector.grid.vertices()[index].0[0]
     }
+
+    #[allow(clippy::needless_collect)]
     fn iter_energies(&self) -> Self::Iter {
-        let x = self.energy.points().map(|x| *x).collect::<Vec<_>>();
+        let x = self.energy.points().copied().collect::<Vec<_>>();
         x.into_iter()
     }
+
+    #[allow(clippy::needless_collect)]
     fn iter_wavevectors(&self) -> Self::Iter {
         let x = self.wavevector.points().map(|x| x[0]).collect::<Vec<_>>();
         x.into_iter()
     }
 
+    #[allow(clippy::needless_collect)]
     fn iter_energy_widths(&self) -> Self::Iter {
         let x = self
             .energy
@@ -134,6 +139,8 @@ where
             .collect::<Vec<_>>();
         x.into_iter()
     }
+
+    #[allow(clippy::needless_collect)]
     fn iter_wavevector_widths(&self) -> Self::Iter {
         let x = self
             .wavevector
@@ -145,12 +152,15 @@ where
         x.into_iter()
     }
 
+    #[allow(clippy::needless_collect)]
     fn iter_energy_weights(&self) -> Self::Iter {
-        let x = self.energy.weights().map(|x| *x).collect::<Vec<_>>();
+        let x = self.energy.weights().copied().collect::<Vec<_>>();
         x.into_iter()
     }
+
+    #[allow(clippy::needless_collect)]
     fn iter_wavevector_weights(&self) -> Self::Iter {
-        let x = self.wavevector.weights().map(|x| *x).collect::<Vec<_>>();
+        let x = self.wavevector.weights().copied().collect::<Vec<_>>();
         x.into_iter()
     }
 
@@ -222,14 +232,16 @@ impl<T: RealField + Copy> SpectralDiscretisation<T> for SpectralSpace<T, ()> {
         T::zero()
     }
 
+    #[allow(clippy::needless_collect)]
     fn iter_energies(&self) -> Self::Iter {
-        let x = self.energy.points().map(|x| *x).collect::<Vec<_>>();
+        let x = self.energy.points().copied().collect::<Vec<_>>();
         x.into_iter()
     }
     fn iter_wavevectors(&self) -> Self::Iter {
         vec![T::one(); 1].into_iter()
     }
 
+    #[allow(clippy::needless_collect)]
     fn iter_energy_widths(&self) -> Self::Iter {
         let x = self
             .energy
@@ -240,12 +252,14 @@ impl<T: RealField + Copy> SpectralDiscretisation<T> for SpectralSpace<T, ()> {
             .collect::<Vec<_>>();
         x.into_iter()
     }
+
     fn iter_wavevector_widths(&self) -> Self::Iter {
         vec![T::one(); 1].into_iter()
     }
 
+    #[allow(clippy::needless_collect)]
     fn iter_energy_weights(&self) -> Self::Iter {
-        let x = self.energy.weights().map(|x| *x).collect::<Vec<_>>();
+        let x = self.energy.weights().copied().collect::<Vec<_>>();
         x.into_iter()
     }
     fn iter_wavevector_weights(&self) -> Self::Iter {

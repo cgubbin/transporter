@@ -1,12 +1,14 @@
 mod contact;
 mod lo_phonon;
 use crate::{
-    greens_functions::GreensFunctionMethods,
+    error::{BuildError, CsrError},
     spectral::{SpectralDiscretisation, SpectralSpace, WavevectorSpace},
 };
-use color_eyre::eyre::eyre;
 use nalgebra::{allocator::Allocator, ComplexField, DMatrix, DefaultAllocator, RealField};
-use nalgebra_sparse::{pattern::SparsityPattern, CsrMatrix};
+use nalgebra_sparse::{
+    pattern::{SparsityPattern, SparsityPatternFormatError},
+    CsrMatrix,
+};
 use num_complex::Complex;
 use std::marker::PhantomData;
 use transporter_mesher::{Connectivity, Mesh, SmallDim};
@@ -74,7 +76,11 @@ where
     Conn: Connectivity<T, GeometryDim>,
     DefaultAllocator: Allocator<T, GeometryDim>,
 {
-    pub(crate) fn build_coherent(self) -> color_eyre::Result<SelfEnergy<T, GeometryDim, Conn>> {
+    pub(crate) fn build_coherent(self) -> Result<SelfEnergy<T, GeometryDim, Conn>, BuildError> {
+        Ok(self.build_coherent_inner()?)
+    }
+
+    pub(crate) fn build_coherent_inner(self) -> Result<SelfEnergy<T, GeometryDim, Conn>, CsrError> {
         // Collect the indices of all elements at the boundaries
         let vertices_at_boundary: Vec<usize> = self
             .mesh
@@ -95,8 +101,7 @@ where
             .iter()
             .map(|_| Complex::from(T::zero()))
             .collect::<Vec<_>>();
-        let matrix = CsrMatrix::try_from_pattern_and_values(pattern, initial_values)
-            .map_err(|e| eyre!("Failed to initialise sparse self energy matrix {}", e))?;
+        let matrix = CsrMatrix::try_from_pattern_and_values(pattern, initial_values)?;
 
         Ok(SelfEnergy {
             ma: PhantomData,
@@ -125,7 +130,11 @@ where
     DefaultAllocator: Allocator<T, GeometryDim>,
     <DefaultAllocator as Allocator<T, GeometryDim>>::Buffer: Send + Sync,
 {
-    pub(crate) fn build_incoherent(self) -> color_eyre::Result<SelfEnergy<T, GeometryDim, Conn>> {
+    pub(crate) fn build_incoherent(self) -> Result<SelfEnergy<T, GeometryDim, Conn>, BuildError> {
+        Ok(self.build_incoherent_inner()?)
+    }
+
+    fn build_incoherent_inner(self) -> Result<SelfEnergy<T, GeometryDim, Conn>, CsrError> {
         // Collect the indices of all elements at the boundaries
         let vertices_at_boundary: Vec<usize> = self
             .mesh
@@ -146,8 +155,7 @@ where
             .iter()
             .map(|_| Complex::from(T::zero()))
             .collect::<Vec<_>>();
-        let csrmatrix = CsrMatrix::try_from_pattern_and_values(pattern, initial_values)
-            .map_err(|e| eyre!("Failed to initialise sparse self energy matrix {}", e))?;
+        let csrmatrix = CsrMatrix::try_from_pattern_and_values(pattern, initial_values)?;
 
         let dmatrix = DMatrix::zeros(self.mesh.vertices().len(), self.mesh.vertices().len());
         let num_spectral_points =
@@ -168,7 +176,7 @@ where
 pub(crate) fn construct_csr_pattern_from_vertices(
     boundary_vertices: &[usize],
     total_number_of_vertices: usize,
-) -> color_eyre::Result<SparsityPattern> {
+) -> Result<SparsityPattern, SparsityPatternFormatError> {
     let col_indices = boundary_vertices.to_vec(); // The self energies are on the diagonal elements
     let mut count = 0_usize;
     let mut row_offsets = vec![0];
@@ -185,7 +193,6 @@ pub(crate) fn construct_csr_pattern_from_vertices(
         row_offsets,
         col_indices,
     )
-    .map_err(|e| eyre!("Failed to create sparsity pattern {:?}", e))
 }
 
 /// Coherent impl with wavevector dispersion
@@ -203,7 +210,11 @@ where
     DefaultAllocator: Allocator<T, GeometryDim>,
     <DefaultAllocator as Allocator<T, GeometryDim>>::Buffer: Send + Sync,
 {
-    pub(crate) fn build_coherent(self) -> color_eyre::Result<SelfEnergy<T, GeometryDim, Conn>> {
+    pub(crate) fn build_coherent(self) -> Result<SelfEnergy<T, GeometryDim, Conn>, BuildError> {
+        Ok(self.build_coherent_inner()?)
+    }
+
+    fn build_coherent_inner(self) -> Result<SelfEnergy<T, GeometryDim, Conn>, CsrError> {
         // TODO Should take a Vec<DMatrix<T>> -> which corresponds to the spectral space
         // Collect the indices of all elements at the boundaries
         let vertices_at_boundary: Vec<usize> = self
@@ -225,8 +236,7 @@ where
             .iter()
             .map(|_| Complex::from(T::zero()))
             .collect::<Vec<_>>();
-        let matrix = CsrMatrix::try_from_pattern_and_values(pattern, initial_values)
-            .map_err(|e| eyre!("Failed to initialise sparse self energy matrix {}", e))?;
+        let matrix = CsrMatrix::try_from_pattern_and_values(pattern, initial_values)?;
 
         Ok(SelfEnergy {
             ma: PhantomData,

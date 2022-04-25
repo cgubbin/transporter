@@ -39,6 +39,8 @@
 //! where additional layers can be appended with subsequent `layers` fields.
 
 #![warn(missing_docs)]
+#![allow(dead_code)]
+#![allow(clippy::rntype_complexity)]
 
 /// The command line global application, tracing and display primitives
 pub mod app;
@@ -48,6 +50,9 @@ mod constants;
 
 /// Device and geometry
 mod device;
+
+/// Error handling
+mod error;
 
 /// Fermi integrals and their inverses
 pub mod fermi;

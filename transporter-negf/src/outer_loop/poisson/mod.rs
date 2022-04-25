@@ -2,7 +2,7 @@ mod operator;
 
 use operator::PoissonOperator;
 
-use super::methods::OuterLoopInfoDesk;
+use super::{methods::OuterLoopInfoDesk, BuildError};
 use crate::device::info_desk::DeviceInfoDesk;
 use crate::postprocessor::Charge;
 use argmin::core::{Error, Jacobian, Operator};
@@ -115,7 +115,7 @@ where
 {
     pub(crate) fn build(
         self,
-    ) -> color_eyre::Result<PoissonProblem<'a, T, GeometryDim, Conn, BandDim>> {
+    ) -> Result<PoissonProblem<'a, T, GeometryDim, Conn, BandDim>, BuildError> {
         Ok(PoissonProblem {
             charge: self.charge,
             info_desk: self.info_desk,

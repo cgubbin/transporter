@@ -2,7 +2,7 @@
 //!
 //! This submodule constructs the components of the Hamiltonian differential operator, and diagonal
 //! for a single element of the mesh, over `NumBands` (ie: the number of carrier bands in the problem).
-use super::PoissonInfoDesk;
+use super::{BuildError, PoissonInfoDesk};
 use crate::constants::{ELECTRON_CHARGE, EPSILON_0};
 use nalgebra::{
     allocator::Allocator, DVector, DVectorSliceMut, DefaultAllocator, OPoint, OVector, RealField,
@@ -17,7 +17,7 @@ pub(crate) trait AssembleVertexPoissonDiagonal<T: RealField>:
 {
     /// Assembles the wavevector component into `output` for the element at `element_index`. Takes an output vector of length
     /// `num_bands` which is enforced by an assertion
-    fn assemble_vertex_diagonal(&self, vertex_index: usize) -> color_eyre::Result<T>;
+    fn assemble_vertex_diagonal(&self, vertex_index: usize) -> Result<T, BuildError>;
 }
 
 /// Helper trait to construct the fixed component of the operator (ie: the differential bit)
@@ -30,13 +30,13 @@ pub(crate) trait AssembleVertexPoissonMatrix<T: RealField>:
         &self,
         vertex_index: usize,
         output: DVectorSliceMut<T>,
-    ) -> color_eyre::Result<()>;
+    ) -> Result<(), BuildError>;
 
     fn assemble_vertex_matrix(
         &self,
         vertex_index: usize,
         num_connections: usize,
-    ) -> color_eyre::Result<DVector<T>> {
+    ) -> Result<DVector<T>, BuildError> {
         let mut output = DVector::zeros(num_connections + 1);
         self.assemble_vertex_matrix_into(vertex_index, DVectorSliceMut::from(&mut output))?;
         Ok(output)
@@ -204,7 +204,7 @@ where
         &self,
         vertex_index: usize,
         output: DVectorSliceMut<T>,
-    ) -> color_eyre::Result<()> {
+    ) -> Result<(), BuildError> {
         // Construct the element at `element_index`
         let vertex = VertexInMesh::from_mesh_vertex_index_and_info_desk(
             self.mesh,
@@ -222,7 +222,7 @@ where
 fn assemble_vertex_differential_operator<T, InfoDesk, Conn>(
     mut output: DVectorSliceMut<T>,
     vertex: &VertexInMesh<InfoDesk, Mesh<T, InfoDesk::GeometryDim, Conn>>,
-) -> color_eyre::Result<()>
+) -> Result<(), BuildError>
 where
     T: Copy + RealField,
     InfoDesk: PoissonInfoDesk<T>,
@@ -231,11 +231,11 @@ where
 {
     let shape = output.shape();
 
-    assert_eq!(
-        shape.0,
-        vertex.connection_count() + 1,
-        "Output matrix should have `n_conns * n_neighbour + 1` columns"
-    );
+    if shape.0 != vertex.connection_count() + 1 {
+        return Err(BuildError::MissizedAllocator(
+            "Output matrix should have `n_conns * n_neighbour + 1` columns".into(),
+        ));
+    }
 
     // The position and band independent prefactor
     let prefactor = -T::from_f64(EPSILON_0).expect("Prefactor must fit in T");
@@ -253,6 +253,9 @@ where
         connections.into_iter().zip(deltas.into_iter()).enumerate()
     {
         assert!(delta_row.len() <= 2, "The mesh should be square");
+        if delta_row.len() > 2 {
+            return Err(BuildError::Mesh("The provided mesh is not square".into()));
+        }
 
         let delta_m = delta_row[0];
         // If there is only one connected element we are at the edge of the mesh, so we reuse `delta_m` to prevent panics
@@ -372,7 +375,7 @@ where
 {
     /// Assembles the cell matrix, forming an `num_bands` row array with
     /// `num_connections * num_nearest_neighbours + 1` columns in each row
-    fn assemble_vertex_diagonal(&self, vertex_index: usize) -> color_eyre::Result<T> {
+    fn assemble_vertex_diagonal(&self, vertex_index: usize) -> Result<T, BuildError> {
         let vertex = VertexInMesh::from_mesh_vertex_index_and_info_desk(
             self.mesh,
             self.info_desk,
@@ -385,7 +388,7 @@ where
 /// Assembles the wavevector component along the element diagonal
 fn assemble_vertex_diagonal<T, InfoDesk, Conn>(
     vertex: &VertexInMesh<InfoDesk, Mesh<T, InfoDesk::GeometryDim, Conn>>,
-) -> color_eyre::Result<T>
+) -> Result<T, BuildError>
 where
     T: Copy + RealField,
     InfoDesk: PoissonInfoDesk<T>,

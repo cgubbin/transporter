@@ -1,0 +1,22 @@
+use miette::Diagnostic;
+
+#[derive(thiserror::Error, Debug, Diagnostic)]
+pub(crate) enum BuildError {
+    #[error(transparent)]
+    Csr(#[from] CsrError),
+    #[error("{0}")]
+    Mesh(String),
+    #[error("{0}")]
+    MissizedAllocator(String),
+}
+
+#[derive(thiserror::Error, Debug, Diagnostic)]
+/// General error for Csr construction, patterns and element access problems
+pub(crate) enum CsrError {
+    #[error("{0}")]
+    Access(String),
+    #[error(transparent)]
+    Pattern(#[from] nalgebra_sparse::pattern::SparsityPatternFormatError),
+    #[error(transparent)]
+    Construction(#[from] nalgebra_sparse::SparseFormatError),
+}

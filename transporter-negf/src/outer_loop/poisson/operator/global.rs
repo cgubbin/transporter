@@ -4,11 +4,13 @@
 //! local subcrate and throwing them into a global CsrMatrix
 
 use super::local::{AssembleVertexPoissonDiagonal, AssembleVertexPoissonMatrix};
-use super::PoissonInfoDesk;
+use super::{super::super::CsrError, BuildError, PoissonInfoDesk};
 use crate::utilities::assemblers::VertexConnectivityAssembler;
-use color_eyre::eyre::eyre;
 use nalgebra::{allocator::Allocator, DVector, DefaultAllocator, RealField};
-use nalgebra_sparse::{pattern::SparsityPattern, CsrMatrix};
+use nalgebra_sparse::{
+    pattern::{SparsityPattern, SparsityPatternFormatError},
+    CsrMatrix,
+};
 use std::cell::RefCell;
 
 /// An assembler for CSR matrices.
@@ -45,7 +47,7 @@ impl<T: RealField> CsrAssemblerWorkspace<T> {
 impl<T: Copy + RealField> CsrAssembler<T> {
     pub(crate) fn from_vertex_assembler<Assembler>(
         vertex_assembler: &Assembler,
-    ) -> color_eyre::Result<Self>
+    ) -> Result<Self, CsrError>
     where
         Assembler: VertexConnectivityAssembler + PoissonInfoDesk<T>,
         DefaultAllocator: Allocator<T, Assembler::GeometryDim> + Allocator<T, Assembler::BandDim>,
@@ -69,7 +71,7 @@ impl<T: Copy + RealField> CsrAssembler<T> {
     /// Construct the full CsrMatrix sparsity pattern from the element assembler -
     fn assemble_full_sparsity_pattern<Assembler>(
         vertex_assembler: &Assembler,
-    ) -> color_eyre::Result<SparsityPattern>
+    ) -> Result<SparsityPattern, SparsityPatternFormatError>
     where
         Assembler: VertexConnectivityAssembler + PoissonInfoDesk<T>,
         DefaultAllocator: Allocator<T, Assembler::GeometryDim> + Allocator<T, Assembler::BandDim>,
@@ -105,13 +107,12 @@ impl<T: Copy + RealField> CsrAssembler<T> {
         }
 
         SparsityPattern::try_from_offsets_and_indices(num_rows, num_rows, offsets, column_indices)
-            .map_err(|e| eyre!("Pattern data must be valid: {:?}", e))
     }
 
     /// Assemble the sparsity pattern for the diagonal of the CsrMatrix
     fn assemble_diagonal_sparsity_pattern<Assembler>(
         vertex_assembler: &Assembler,
-    ) -> color_eyre::Result<SparsityPattern>
+    ) -> Result<SparsityPattern, SparsityPatternFormatError>
     where
         Assembler: VertexConnectivityAssembler + PoissonInfoDesk<T>,
         DefaultAllocator: Allocator<T, Assembler::GeometryDim> + Allocator<T, Assembler::BandDim>,
@@ -123,7 +124,6 @@ impl<T: Copy + RealField> CsrAssembler<T> {
         let column_indices = (0..num_rows).collect::<Vec<_>>();
 
         SparsityPattern::try_from_offsets_and_indices(num_rows, num_rows, offsets, column_indices)
-            .map_err(|e| eyre!("Pattern data must be valid: {:?}", e))
     }
 }
 
@@ -133,7 +133,7 @@ impl<T: Copy + RealField> CsrAssembler<T> {
     pub(crate) fn assemble_operator<Assembler>(
         &self,
         vertex_assembler: &Assembler,
-    ) -> color_eyre::Result<CsrMatrix<T>>
+    ) -> Result<CsrMatrix<T>, BuildError>
     where
         Assembler: AssembleVertexPoissonMatrix<T> + PoissonInfoDesk<T>,
         DefaultAllocator: Allocator<T, Assembler::GeometryDim> + Allocator<T, Assembler::BandDim>,
@@ -141,7 +141,7 @@ impl<T: Copy + RealField> CsrAssembler<T> {
         let pattern = self.workspace.borrow().full_sparsity_pattern.clone();
         let initial_matrix_values = vec![T::zero(); pattern.nnz()];
         let mut matrix = CsrMatrix::try_from_pattern_and_values(pattern, initial_matrix_values)
-            .expect("CSR data must be valid by definition");
+            .map_err(CsrError::from)?;
         self.assemble_into_csr(&mut matrix, vertex_assembler)?;
         Ok(matrix)
     }
@@ -150,7 +150,7 @@ impl<T: Copy + RealField> CsrAssembler<T> {
     pub(crate) fn assemble_static_source<Assembler>(
         &self,
         vertex_assembler: &Assembler,
-    ) -> color_eyre::Result<DVector<T>>
+    ) -> Result<DVector<T>, BuildError>
     where
         Assembler: AssembleVertexPoissonDiagonal<T> + PoissonInfoDesk<T>,
         DefaultAllocator: Allocator<T, Assembler::GeometryDim> + Allocator<T, Assembler::BandDim>,
@@ -166,7 +166,7 @@ impl<T: Copy + RealField> CsrAssembler<T> {
     pub(crate) fn assemble_diagonal_quantity<Assembler>(
         &self,
         vertex_assembler: &Assembler,
-    ) -> color_eyre::Result<CsrMatrix<T>>
+    ) -> Result<CsrMatrix<T>, BuildError>
     where
         Assembler: AssembleVertexPoissonMatrix<T> + PoissonInfoDesk<T>,
         DefaultAllocator: Allocator<T, Assembler::GeometryDim> + Allocator<T, Assembler::BandDim>,
@@ -183,7 +183,7 @@ impl<T: Copy + RealField> CsrAssembler<T> {
     pub(crate) fn assemble_diagonal_into<Assembler>(
         element_assembler: &Assembler,
         quantity: &mut CsrMatrix<T>,
-    ) -> color_eyre::Result<()>
+    ) -> Result<(), BuildError>
     where
         Assembler: AssembleVertexPoissonMatrix<T> + PoissonInfoDesk<T>,
         DefaultAllocator: Allocator<T, Assembler::GeometryDim> + Allocator<T, Assembler::BandDim>,
@@ -200,7 +200,7 @@ impl<T: Copy + RealField> CsrAssembler<T> {
         &self,
         csr: &mut CsrMatrix<T>,
         vertex_assembler: &Assembler,
-    ) -> color_eyre::Result<()>
+    ) -> Result<(), BuildError>
     where
         Assembler: AssembleVertexPoissonMatrix<T> + PoissonInfoDesk<T>,
         DefaultAllocator: Allocator<T, Assembler::GeometryDim> + Allocator<T, Assembler::BandDim>,
@@ -235,7 +235,7 @@ impl<T: Copy + RealField> CsrAssembler<T> {
         &self,
         csr: &mut DVector<T>,
         vertex_assembler: &Assembler,
-    ) -> color_eyre::Result<()>
+    ) -> Result<(), BuildError>
     where
         Assembler: AssembleVertexPoissonDiagonal<T> + PoissonInfoDesk<T>,
         DefaultAllocator: Allocator<T, Assembler::GeometryDim> + Allocator<T, Assembler::BandDim>,
@@ -253,7 +253,7 @@ impl<T: Copy + RealField> CsrAssembler<T> {
     fn assemble_into_csr_diagonal<Assembler>(
         csr: &mut CsrMatrix<T>,
         vertex_assembler: &Assembler,
-    ) -> color_eyre::Result<()>
+    ) -> Result<(), BuildError>
     where
         Assembler: AssembleVertexPoissonMatrix<T> + PoissonInfoDesk<T>,
         DefaultAllocator: Allocator<T, Assembler::GeometryDim> + Allocator<T, Assembler::BandDim>,
@@ -266,12 +266,16 @@ impl<T: Copy + RealField> CsrAssembler<T> {
             // let potential = vertex_assembler.potential(n_row);
             let value = T::zero(); // TODO get the value
             let mut csr_row = csr.row_mut(n_row);
-            let diagonal_entry = csr_row
-                .get_entry_mut(n_row)
-                .expect("The diagonal should always be filled by the pattern builder");
-            match diagonal_entry {
-                nalgebra_sparse::SparseEntryMut::NonZero(x) => *x = value,
-                _ => unreachable!(),
+            let diagonal_entry = csr_row.get_entry_mut(n_row);
+            if let Some(diagonal_entry) = diagonal_entry {
+                match diagonal_entry {
+                    nalgebra_sparse::SparseEntryMut::NonZero(x) => *x = value,
+                    _ => unreachable!(),
+                }
+            } else {
+                return Err(BuildError::Csr(CsrError::Access(
+                    "Necessary element not present in CSR Matrix".into(),
+                )));
             }
         }
         Ok(())

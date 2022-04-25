@@ -6,8 +6,6 @@ use crate::{
 use nalgebra::{
     allocator::Allocator, Const, DefaultAllocator, Dynamic, Matrix, RealField, VecStorage,
 };
-use nalgebra_sparse::CsrMatrix;
-use num_complex::Complex;
 use transporter_mesher::{Connectivity, SmallDim};
 
 pub(crate) trait PostProcess<T, BandDim: SmallDim, GeometryDim, Conn, Spectral, SelfEnergy>
@@ -23,6 +21,7 @@ where
 {
     fn recompute_currents_and_densities<AggregateGreensFunctions>(
         &self,
+        voltage: T,
         greens_functions: &AggregateGreensFunctions,
         self_energy: &SelfEnergy,
         spectral_discretisation: &Spectral,
@@ -49,6 +48,7 @@ where
 {
     fn recompute_currents_and_densities<AggregateGreensFunctions>(
         &self,
+        voltage: T,
         greens_functions: &AggregateGreensFunctions,
         self_energy: &SelfEnergy<T, GeometryDim, Conn>,
         spectral_discretisation: &Spectral,
@@ -67,6 +67,7 @@ where
         let charge = greens_functions
             .accumulate_into_charge_density_vector(self.mesh, spectral_discretisation)?;
         let current = greens_functions.accumulate_into_current_density_vector(
+            voltage,
             self.mesh,
             self_energy,
             spectral_discretisation,

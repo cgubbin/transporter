@@ -25,7 +25,7 @@ where
     pub(crate) donor_densities: Vec<T>,
     pub(crate) acceptor_densities: Vec<T>,
     pub(crate) temperature: T,
-    pub(crate) voltage_offsets: Vec<T>,
+    // pub(crate) voltage_offsets: Vec<T>,
     /// An optional length for the internal leads -> if specified this length on each side of the device is solved for in equilibrium
     pub(crate) lead_length: Option<T>,
     marker: PhantomData<GeometryDim>,
@@ -108,7 +108,7 @@ where
             donor_densities: Vec::new(),
             acceptor_densities: Vec::new(),
             temperature: T::zero(),
-            voltage_offsets: Vec::new(),
+            // voltage_offsets: Vec::new(),
             lead_length: None,
             marker: PhantomData,
         }
@@ -138,7 +138,7 @@ where
         acceptor_density: Vec<T>,
         donor_density: Vec<T>,
         temperature: T,
-        voltage_offsets: Vec<T>,
+        // voltage_offsets: Vec<T>,
         lead_length: Option<T>,
     ) -> DeviceInfoDesk<T, GeometryDim, BandDim>;
 }
@@ -167,7 +167,7 @@ where
             acceptor_densities,
             donor_densities,
             self.temperature,
-            self.voltage_offsets.clone(),
+            // self.voltage_offsets.clone(),
             self.lead_length,
         ))
     }
@@ -177,7 +177,7 @@ where
         acceptor_densities: Vec<T>,
         donor_densities: Vec<T>,
         temperature: T,
-        voltage_offsets: Vec<T>,
+        // voltage_offsets: Vec<T>,
         lead_length: Option<T>,
     ) -> DeviceInfoDesk<T, GeometryDim, U1> {
         // Naive implementation: must be a better way to do this.
@@ -196,7 +196,7 @@ where
             info_desk.donor_densities.push(donor_density);
         }
         info_desk.temperature = temperature;
-        info_desk.voltage_offsets = voltage_offsets;
+        // info_desk.voltage_offsets = voltage_offsets;
         info_desk.lead_length = lead_length;
         info_desk
     }

@@ -1,3 +1,17 @@
+// Copyright 2022 Chris Gubbin
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT or
+// http://opensource.org/licenses/MIT>, at your option. This file may not be
+// copied, modified, or distributed except according to those terms.
+
+//! # Outer Loop
+//!
+//! The outer loop solves the Poisson equation in the heterostructure
+//! $$ \frac{\mathrm{d}}{\mathrm{d} z} \left[ \epsilon\left(z\right) \frac{\mathrm{d} \phi}{\mathrm{d} z} + q \left[N_D^+ - N_A^- - n \right]$$
+//! which gives the electrostatic potential, and the Schrödinger equation which yields the
+//! carrier density.
+
 mod convergence;
 mod methods;
 mod poisson;
@@ -8,15 +22,39 @@ pub(crate) use methods::{Outer, Potential};
 use crate::{
     app::Tracker,
     device::info_desk::DeviceInfoDesk,
+    error::{BuildError, CsrError},
     hamiltonian::Hamiltonian,
     postprocessor::{Charge, ChargeAndCurrent},
 };
 use argmin::core::ArgminFloat;
+use miette::Diagnostic;
 use nalgebra::{allocator::Allocator, ComplexField, DVector, DefaultAllocator};
+use std::fs::OpenOptions;
+use std::io::Write;
 use std::marker::PhantomData;
 use transporter_mesher::{Connectivity, Mesh, SmallDim};
 
-/// Builder struct for the outer loop allows for polymorphism over the `SpectralSpace`
+///Error for the outer loop
+
+#[derive(thiserror::Error, Debug, Diagnostic)]
+pub(crate) enum OuterLoopError<T: RealField> {
+    #[error(transparent)]
+    BuilderError(#[from] BuildError),
+    // #[error(transparent)]
+    // InnerLoopError,
+    // #[error(transparent)]
+    // OutOfIterations,
+    #[error(transparent)]
+    FixedPoint(#[from] conflux::core::FixedPointError<T>),
+    #[error(transparent)]
+    PoissonError(#[from] argmin::core::Error),
+    // #[error(transparent)]
+    // Stagnation,
+    #[error(transparent)]
+    IoError(#[from] std::io::Error),
+}
+
+/// Builder struct for the outer loop
 pub(crate) struct OuterLoopBuilder<
     T,
     RefConvergenceSettings,
@@ -279,8 +317,9 @@ where
     /// Build out the OuterLoop -> Generic over the SpectralSpace so the OuterLoop can do both coherent and incoherent transport
     pub(crate) fn build(
         self,
+        voltage: T::RealField,
     ) -> color_eyre::Result<OuterLoop<'a, T, GeometryDim, Conn, BandDim, SpectralSpace>> {
-        let tracker = LoopTracker::from_global_tracker(self.tracker);
+        let tracker = LoopTracker::from_global_tracker(self.tracker, voltage);
         Ok(OuterLoop {
             convergence_settings: self.convergence_settings,
             mesh: self.mesh,
@@ -293,8 +332,9 @@ where
 
     pub(crate) fn build_coherent(
         self,
+        voltage: T::RealField,
     ) -> color_eyre::Result<OuterLoop<'a, T, GeometryDim, Conn, BandDim, SpectralSpace>> {
-        let mut tracker = LoopTracker::from_global_tracker(self.tracker);
+        let mut tracker = LoopTracker::from_global_tracker(self.tracker, voltage);
         tracker.calculation = Calculation::Coherent;
         Ok(OuterLoop {
             convergence_settings: self.convergence_settings,
@@ -329,6 +369,7 @@ where
     iteration: usize,
     calculation: Calculation,
     scattering_scaling: T,
+    voltage: T,
 }
 
 impl<T: Copy + RealField, BandDim: SmallDim> LoopTracker<T, BandDim>
@@ -345,6 +386,7 @@ where
 {
     pub(crate) fn from_global_tracker<GeometryDim: SmallDim>(
         global_tracker: &Tracker<'_, T, GeometryDim, BandDim>,
+        voltage: T,
     ) -> Self
     where
         DefaultAllocator: Allocator<T::RealField, GeometryDim>
@@ -366,6 +408,7 @@ where
             calculation: global_tracker.calculation(),
             iteration: 0,
             scattering_scaling: T::from_f64(0.1).unwrap(),
+            voltage,
         }
     }
 
@@ -395,6 +438,52 @@ where
 
     pub(crate) fn scattering_scaling(&self) -> T {
         self.scattering_scaling
+    }
+
+    pub(crate) fn write_to_file(&self) -> Result<(), std::io::Error>
+    where
+        T: argmin::core::ArgminFloat,
+    {
+        // Write potential
+        let mut file = std::fs::File::create(format!(
+            "../results/potential_{}V_{}_scaling.txt",
+            self.voltage, self.scattering_scaling
+        ))?;
+        for value in self.potential.as_ref().row_iter() {
+            let value = value[0].to_f64().unwrap().to_string();
+            writeln!(file, "{}", value)?;
+        }
+
+        // Write net charge
+        let mut file = std::fs::File::create(format!(
+            "../results/charge_{}V_{}_scaling.txt",
+            self.voltage, self.scattering_scaling
+        ))?;
+        for value in self
+            .charge_and_currents
+            .charge_as_ref()
+            .net_charge()
+            .row_iter()
+        {
+            let value = value[0].to_f64().unwrap().to_string();
+            writeln!(file, "{}", value)?;
+        }
+
+        let mut file = OpenOptions::new()
+            .write(true)
+            .append(true)
+            .create(true)
+            .open(format!(
+                "../results/current_{}_scaling.txt",
+                self.scattering_scaling
+            ))
+            .unwrap();
+        writeln!(
+            file,
+            "{}, {}",
+            self.voltage,
+            self.charge_and_currents.current_as_ref().net_current()[0]
+        )
     }
 }
 

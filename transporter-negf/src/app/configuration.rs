@@ -1,5 +1,4 @@
 use crate::spectral::IntegrationRule;
-use color_eyre::eyre::eyre;
 use config::{Config, File};
 use miette::IntoDiagnostic;
 use serde::{de::DeserializeOwned, Deserialize};
@@ -30,8 +29,7 @@ pub(crate) struct SpectralConfiguration<T> {
 #[derive(Debug, Deserialize)]
 pub(crate) struct GlobalConfiguration<T> {
     pub(crate) number_of_bands: usize,
-    #[serde(skip)]
-    pub(crate) marker: std::marker::PhantomData<T>,
+    pub(crate) voltage_step: T,
 }
 
 #[derive(Debug, Deserialize)]

@@ -71,15 +71,15 @@ pub(crate) trait GreensFunctionInfoDesk<T: Copy + RealField> {
     /// The fermi level in the source contact in eV
     fn get_fermi_level_at_source(&self) -> T;
     /// The Fermi level in the drain contact in eV
-    fn get_fermi_level_at_drain(&self) -> T;
+    fn get_fermi_level_at_drain(&self, voltage: T) -> T;
     /// The zero order fermi integral in the source contact
     fn get_fermi_integral_at_source(&self, energy: T) -> T;
     /// The zero order fermi integral in the drain contact
-    fn get_fermi_integral_at_drain(&self, energy: T) -> T;
+    fn get_fermi_integral_at_drain(&self, energy: T, voltage: T) -> T;
     /// The fermi function in the source contact
     fn get_fermi_function_at_source(&self, energy: T) -> T;
     /// The fermi function in the drain contact
-    fn get_fermi_function_at_drain(&self, energy: T) -> T;
+    fn get_fermi_function_at_drain(&self, energy: T, voltage: T) -> T;
 }
 
 impl<'a, T: Copy + RealField, BandDim: SmallDim, GeometryDim: SmallDim> GreensFunctionInfoDesk<T>
@@ -115,8 +115,8 @@ where
         ef_minus_ec + band_offset
     }
 
-    fn get_fermi_level_at_drain(&self) -> T {
-        self.get_fermi_level_at_source() + self.voltage_offsets[1]
+    fn get_fermi_level_at_drain(&self, voltage: T) -> T {
+        self.get_fermi_level_at_source() + voltage //self.voltage_offsets[1]
     }
 
     fn get_fermi_integral_at_source(&self, energy: T) -> T {
@@ -127,8 +127,8 @@ where
         (T::one() + argument.exp()).ln()
     }
 
-    fn get_fermi_integral_at_drain(&self, energy: T) -> T {
-        let fermi_level = self.get_fermi_level_at_drain(); // - T::one() / (T::one() + T::one());
+    fn get_fermi_integral_at_drain(&self, energy: T, voltage: T) -> T {
+        let fermi_level = self.get_fermi_level_at_drain(voltage); // - T::one() / (T::one() + T::one());
         let argument = T::from_f64(crate::constants::ELECTRON_CHARGE).unwrap()
             * (fermi_level - energy)
             / (T::from_f64(crate::constants::BOLTZMANN).unwrap() * self.temperature);
@@ -143,8 +143,8 @@ where
         T::one() / (T::one() + argument.exp())
     }
 
-    fn get_fermi_function_at_drain(&self, energy: T) -> T {
-        let fermi_level = self.get_fermi_level_at_drain(); // - T::one() / (T::one() + T::one());
+    fn get_fermi_function_at_drain(&self, energy: T, voltage: T) -> T {
+        let fermi_level = self.get_fermi_level_at_drain(voltage); // - T::one() / (T::one() + T::one());
         let argument = -T::from_f64(crate::constants::ELECTRON_CHARGE).unwrap()
             * (fermi_level - energy)
             / (T::from_f64(crate::constants::BOLTZMANN).unwrap() * self.temperature);
@@ -943,7 +943,7 @@ mod test {
         // Act
         gf.update_aggregate_retarded_greens_function(&hamiltonian, &self_energy, &spectral_space)
             .unwrap();
-        gf.update_aggregate_lesser_greens_function(&hamiltonian, &self_energy, &spectral_space)
+        gf.update_aggregate_lesser_greens_function(0., &hamiltonian, &self_energy, &spectral_space)
             .unwrap();
 
         let mut self_energy = crate::self_energy::SelfEnergyBuilder::new()
@@ -968,7 +968,12 @@ mod test {
             .unwrap();
 
         dense_gf
-            .update_aggregate_lesser_greens_function(&hamiltonian, &self_energy, &spectral_space)
+            .update_aggregate_lesser_greens_function(
+                0.,
+                &hamiltonian,
+                &self_energy,
+                &spectral_space,
+            )
             .unwrap();
 
         for ((sparse, dense), _energy) in gf
@@ -1057,7 +1062,7 @@ mod test {
         // Act
         gf.update_aggregate_retarded_greens_function(&hamiltonian, &self_energy, &spectral_space)
             .unwrap();
-        gf.update_aggregate_lesser_greens_function(&hamiltonian, &self_energy, &spectral_space)
+        gf.update_aggregate_lesser_greens_function(0., &hamiltonian, &self_energy, &spectral_space)
             .unwrap();
 
         let mut self_energy = crate::self_energy::SelfEnergyBuilder::new()
@@ -1082,7 +1087,12 @@ mod test {
             .unwrap();
 
         dense_gf
-            .update_aggregate_lesser_greens_function(&hamiltonian, &self_energy, &spectral_space)
+            .update_aggregate_lesser_greens_function(
+                0.,
+                &hamiltonian,
+                &self_energy,
+                &spectral_space,
+            )
             .unwrap();
 
         for ((sparse, dense), _energy) in gf
@@ -1170,7 +1180,7 @@ mod test {
 
         gf.update_aggregate_retarded_greens_function(&hamiltonian, &self_energy, &spectral_space)
             .unwrap();
-        gf.update_aggregate_lesser_greens_function(&hamiltonian, &self_energy, &spectral_space)
+        gf.update_aggregate_lesser_greens_function(0., &hamiltonian, &self_energy, &spectral_space)
             .unwrap();
 
         let charge = gf

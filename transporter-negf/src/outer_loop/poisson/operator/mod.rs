@@ -3,7 +3,7 @@ mod local;
 
 use global::CsrAssembler;
 
-use super::PoissonProblemBuilder;
+use super::{BuildError, PoissonProblemBuilder};
 use crate::device::info_desk::DeviceInfoDesk;
 use crate::outer_loop::Potential;
 use crate::postprocessor::Charge;
@@ -16,8 +16,8 @@ use transporter_mesher::{Connectivity, Mesh, SmallDim};
 pub(crate) trait PoissonOperator {
     type Operator;
     type Source;
-    fn build_operator(&self) -> color_eyre::Result<Self::Operator>;
-    fn build_source(&self) -> color_eyre::Result<Self::Source>;
+    fn build_operator(&self) -> Result<Self::Operator, BuildError>;
+    fn build_source(&self) -> Result<Self::Source, BuildError>;
 }
 
 impl<T: Copy + RealField, GeometryDim, Conn, BandDim> PoissonOperator
@@ -42,7 +42,7 @@ where
 {
     type Operator = CsrMatrix<T>;
     type Source = DVector<T>;
-    fn build_operator(&self) -> color_eyre::Result<CsrMatrix<T>> {
+    fn build_operator(&self) -> Result<CsrMatrix<T>, BuildError> {
         // Build out the constructors
         let vertex_assembler = VertexAssemblerBuilder::new()
             .with_info_desk(self.info_desk)
@@ -52,7 +52,7 @@ where
             CsrAssembler::from_vertex_assembler(&vertex_assembler)?;
         poisson_operator_constructor.assemble_operator(&vertex_assembler)
     }
-    fn build_source(&self) -> color_eyre::Result<DVector<T>> {
+    fn build_source(&self) -> Result<DVector<T>, BuildError> {
         // Build out the constructors
         let vertex_assembler = VertexAssemblerBuilder::new()
             .with_info_desk(self.info_desk)

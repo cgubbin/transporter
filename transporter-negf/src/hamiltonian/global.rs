@@ -4,14 +4,16 @@
 //! local subcrate and throwing them into a global CsrMatrix
 
 use super::local::{AssembleVertexHamiltonianDiagonal, AssembleVertexHamiltonianMatrix};
-use super::{HamiltonianInfoDesk, PotentialInfoDesk};
+use super::{BuildError, CsrError, HamiltonianInfoDesk, PotentialInfoDesk};
 use crate::utilities::assemblers::VertexConnectivityAssembler;
-use color_eyre::eyre::eyre;
 use nalgebra::{
     allocator::Allocator, DMatrix, DVector, DefaultAllocator, Dynamic, Matrix, RealField, Storage,
     U1,
 };
-use nalgebra_sparse::{pattern::SparsityPattern, CsrMatrix};
+use nalgebra_sparse::{
+    pattern::{SparsityPattern, SparsityPatternFormatError},
+    CsrMatrix,
+};
 use std::cell::RefCell;
 
 /// An assembler for CSR matrices.
@@ -56,7 +58,7 @@ impl<T: RealField> CsrAssemblerWorkspace<T> {
 impl<T: Copy + RealField> CsrAssembler<T> {
     pub(crate) fn from_vertex_assembler<Assembler>(
         vertex_assembler: &Assembler,
-    ) -> color_eyre::Result<Self>
+    ) -> Result<Self, CsrError>
     where
         Assembler: VertexConnectivityAssembler + HamiltonianInfoDesk<T>,
         DefaultAllocator: Allocator<T, Assembler::GeometryDim> + Allocator<T, Assembler::BandDim>,
@@ -82,7 +84,7 @@ impl<T: Copy + RealField> CsrAssembler<T> {
     /// Construct the full CsrMatrix sparsity pattern from the element assembler -
     fn assemble_full_sparsity_pattern<Assembler>(
         vertex_assembler: &Assembler,
-    ) -> color_eyre::Result<SparsityPattern>
+    ) -> Result<SparsityPattern, SparsityPatternFormatError>
     where
         Assembler: VertexConnectivityAssembler + HamiltonianInfoDesk<T>,
         DefaultAllocator: Allocator<T, Assembler::GeometryDim> + Allocator<T, Assembler::BandDim>,
@@ -121,13 +123,12 @@ impl<T: Copy + RealField> CsrAssembler<T> {
         }
 
         SparsityPattern::try_from_offsets_and_indices(num_rows, num_rows, offsets, column_indices)
-            .map_err(|e| eyre!("Pattern data must be valid: {:?}", e))
     }
 
     /// Assemble the sparsity pattern for the diagonal of the CsrMatrix
     fn assemble_diagonal_sparsity_pattern<Assembler>(
         vertex_assembler: &Assembler,
-    ) -> color_eyre::Result<SparsityPattern>
+    ) -> Result<SparsityPattern, SparsityPatternFormatError>
     where
         Assembler: VertexConnectivityAssembler + HamiltonianInfoDesk<T>,
         DefaultAllocator: Allocator<T, Assembler::GeometryDim> + Allocator<T, Assembler::BandDim>,
@@ -139,7 +140,6 @@ impl<T: Copy + RealField> CsrAssembler<T> {
         let column_indices = (0..num_rows).collect::<Vec<_>>();
 
         SparsityPattern::try_from_offsets_and_indices(num_rows, num_rows, offsets, column_indices)
-            .map_err(|e| eyre!("Pattern data must be valid: {:?}", e))
     }
 }
 
@@ -149,7 +149,7 @@ impl<T: Copy + RealField> CsrAssembler<T> {
     pub(crate) fn assemble_fixed<Assembler>(
         &self,
         vertex_assembler: &Assembler,
-    ) -> color_eyre::Result<CsrMatrix<T>>
+    ) -> Result<CsrMatrix<T>, BuildError>
     where
         Assembler: AssembleVertexHamiltonianMatrix<T> + HamiltonianInfoDesk<T>,
         DefaultAllocator: Allocator<T, Assembler::GeometryDim> + Allocator<T, Assembler::BandDim>,
@@ -166,7 +166,7 @@ impl<T: Copy + RealField> CsrAssembler<T> {
     pub(crate) fn assemble_wavevector<Assembler>(
         &self,
         vertex_assembler: &Assembler,
-    ) -> color_eyre::Result<CsrMatrix<T>>
+    ) -> Result<CsrMatrix<T>, BuildError>
     where
         Assembler: AssembleVertexHamiltonianDiagonal<T> + HamiltonianInfoDesk<T>,
         DefaultAllocator: Allocator<T, Assembler::GeometryDim> + Allocator<T, Assembler::BandDim>,
@@ -183,7 +183,7 @@ impl<T: Copy + RealField> CsrAssembler<T> {
     pub(crate) fn assemble_potential<Assembler>(
         &self,
         vertex_assembler: &Assembler,
-    ) -> color_eyre::Result<CsrMatrix<T>>
+    ) -> Result<CsrMatrix<T>, BuildError>
     where
         Assembler: VertexConnectivityAssembler + PotentialInfoDesk<T>,
         DefaultAllocator: Allocator<T, Assembler::BandDim>,
@@ -200,7 +200,7 @@ impl<T: Copy + RealField> CsrAssembler<T> {
     pub(crate) fn assemble_potential_into<Assembler>(
         vertex_assembler: &Assembler,
         potential: &mut CsrMatrix<T>,
-    ) -> color_eyre::Result<()>
+    ) -> Result<(), BuildError>
     where
         Assembler: VertexConnectivityAssembler + PotentialInfoDesk<T>,
         DefaultAllocator: Allocator<T, Assembler::BandDim>,
@@ -217,7 +217,7 @@ impl<T: Copy + RealField> CsrAssembler<T> {
         &self,
         csr: &mut CsrMatrix<T>,
         vertex_assembler: &Assembler,
-    ) -> color_eyre::Result<()>
+    ) -> Result<(), BuildError>
     where
         Assembler: AssembleVertexHamiltonianMatrix<T> + HamiltonianInfoDesk<T>,
         DefaultAllocator: Allocator<T, Assembler::GeometryDim> + Allocator<T, Assembler::BandDim>,
@@ -253,7 +253,7 @@ impl<T: Copy + RealField> CsrAssembler<T> {
         &self,
         csr: &mut CsrMatrix<T>,
         vertex_assembler: &Assembler,
-    ) -> color_eyre::Result<()>
+    ) -> Result<(), BuildError>
     where
         Assembler: AssembleVertexHamiltonianDiagonal<T> + HamiltonianInfoDesk<T>,
         DefaultAllocator: Allocator<T, Assembler::GeometryDim> + Allocator<T, Assembler::BandDim>,
@@ -283,26 +283,33 @@ impl<T: Copy + RealField> CsrAssembler<T> {
     fn assemble_potential_into_csr_diagonal<Assembler>(
         csr: &mut CsrMatrix<T>,
         vertex_assembler: &Assembler,
-    ) -> color_eyre::Result<()>
+    ) -> Result<(), CsrError>
     where
         Assembler: VertexConnectivityAssembler + PotentialInfoDesk<T>,
         DefaultAllocator: Allocator<T, Assembler::BandDim>,
     {
         let sdim = vertex_assembler.solution_dim();
         let num_single_band_rows = sdim * vertex_assembler.num_vertices(); // We have an issue with cells and nodes, this needs to be pinned down
-        let mut scratch = vec![0_usize; 1]; // Hacky, add a method;
+        let mut _scratch = vec![0_usize; 1]; // Hacky, add a method;
 
         // Assemble the potential into a diagonal
         for n_row in 0..num_single_band_rows {
             let potential = vertex_assembler.potential(n_row);
             for n_band in 0..vertex_assembler.number_of_bands() {
                 let mut csr_row = csr.row_mut(n_row + n_row * n_band);
-                let diagonal_entry = csr_row
-                    .get_entry_mut(n_row)
-                    .expect("The diagonal should always be filled by the pattern builder");
-                match diagonal_entry {
-                    nalgebra_sparse::SparseEntryMut::NonZero(x) => *x = potential,
-                    _ => unreachable!(),
+                if let Some(diagonal_entry) = csr_row.get_entry_mut(n_row) {
+                    match diagonal_entry {
+                        nalgebra_sparse::SparseEntryMut::NonZero(x) => *x = potential,
+                        _ => {
+                            return Err(CsrError::Access(
+                                "The diagonal should always be nonzero if filled".into(),
+                            ));
+                        }
+                    }
+                } else {
+                    return Err(CsrError::Access(
+                        "The diagonal should always be filled by the pattern builder".into(),
+                    ));
                 }
             }
         }

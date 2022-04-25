@@ -258,6 +258,7 @@ where
     self_energies: &'a mut SelfEnergy<T, GeometryDim, Conn>,
     convergence_settings: &'a Convergence<T>,
     scattering_scaling: T,
+    voltage: T,
 }
 
 impl<'a, T, GeometryDim, Conn, Matrix, SpectralSpace, BandDim>
@@ -282,6 +283,7 @@ where
 {
     pub(crate) fn build(
         self,
+        voltage: T,
     ) -> InnerLoop<'a, T, GeometryDim, Conn, Matrix, SpectralSpace, BandDim> {
         InnerLoop {
             mesh: self.mesh,
@@ -291,6 +293,7 @@ where
             self_energies: self.self_energies,
             convergence_settings: self.convergence_settings,
             scattering_scaling: self.scattering_scaling,
+            voltage,
         }
     }
 }

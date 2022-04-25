@@ -7,8 +7,9 @@
 //! - The full diagonal of the Green's function -> This is useful for calculating the charge density in a device
 //! - Any off-diagonal row of the Green's function -> This is useful for bracketing regions in which incoherent modelling is carried out
 //!
-use nalgebra::{ComplexField, DVector};
+use nalgebra::{ComplexField, DVector, RealField};
 use nalgebra_sparse::CsrMatrix;
+use num_complex::Complex;
 
 /// Calculates the left connected diagonal from the Hamiltonian of the system, and the self energy in the left lead.
 ///
@@ -19,21 +20,29 @@ use nalgebra_sparse::CsrMatrix;
 /// g_{ii}^{RL} = (D_{i} - t_{i, i-1} g_{i-1i-1}^{RL} t_{i-1, i})^{-1}
 /// at each layer. Here t_{i, j} are the hopping elements in the Hamiltonian.
 pub fn left_connected_diagonal<T>(
-    energy: T::RealField,
-    hamiltonian: &CsrMatrix<T::RealField>,
-    self_energies: &(T, T),
+    energy: T,
+    hamiltonian: &CsrMatrix<T>,
+    self_energies: &(Complex<T>, Complex<T>),
     // An optional early termination argument, which is used when we wish to
     // calculate the extended contact GF. To go down the whole matrix pass nrows
     terminate_after: usize,
-) -> color_eyre::Result<DVector<T>>
+    number_of_vertices_in_reservoir: usize,
+) -> color_eyre::Result<DVector<Complex<T>>>
 where
-    T: ComplexField + Copy,
-    <T as ComplexField>::RealField: Copy,
+    T: RealField + Copy,
+    // <T as ComplexField>::RealField: Copy,
 {
+    let optical_potential = Complex::new(T::zero(), T::from_f64(0.00001).unwrap());
     let mut diagonal = DVector::zeros(terminate_after);
     // at the left contact g_{00}^{LR} is just the inverse of the diagonal matrix element D_{0}
-    diagonal[0] =
-        T::one() / (T::from_real(energy - hamiltonian.row(0).values()[0]) - self_energies.0);
+    diagonal[0] = Complex::from(T::one())
+        / (Complex::from(energy - hamiltonian.row(0).values()[0])
+            - self_energies.0
+            - if number_of_vertices_in_reservoir != 0 {
+                optical_potential
+            } else {
+                Complex::from(T::zero())
+            });
     let mut previous = diagonal[0]; // g_{00}^{LR}
     let mut previous_hopping_element = T::from_real(hamiltonian.row(0).values()[1]); // t_{0 1}
 
@@ -44,13 +53,22 @@ where
         .enumerate()
     {
         let hopping_element = T::from_real(row.values()[0]); //  t_{i-1, i}
-        let diagonal = T::from_real(energy - row.values()[1])
+        let diagonal = Complex::from(energy - row.values()[1])
             - if idx == hamiltonian.nrows() - 2 {
                 self_energies.1
             } else {
-                T::zero()
+                Complex::from(T::zero())
+            }
+            - if (number_of_vertices_in_reservoir != 0)
+                & ((idx < number_of_vertices_in_reservoir - 1)
+                    | (idx > hamiltonian.nrows() - 2 - number_of_vertices_in_reservoir))
+            {
+                optical_potential
+            } else {
+                Complex::from(T::zero())
             };
-        *element = T::one() / (diagonal - previous * hopping_element * previous_hopping_element); // g_{ii}^{LR}
+        *element = Complex::from(T::one())
+            / (diagonal - previous * hopping_element * previous_hopping_element); // g_{ii}^{LR}
         previous_hopping_element = hopping_element;
         previous = *element;
     }
@@ -58,6 +76,7 @@ where
 }
 
 #[inline]
+/// Calculate the left connected diagonal by solving into the Array1 diagonal, this avoids the allocation
 pub fn left_connected_diagonal_no_alloc<T>(
     energy: T::RealField,
     hamiltonian: &CsrMatrix<T::RealField>,
@@ -104,32 +123,48 @@ where
 /// g_{ii}^{RR} = (D_{i} - t_{i, i+1} g_{i+1i+1}^{RR} t_{i+1, i})^{-1}
 /// at each layer. Here t_{i, j} are the hopping elements in the Hamiltonian.
 pub fn right_connected_diagonal<T>(
-    energy: T::RealField,
-    hamiltonian: &CsrMatrix<T::RealField>,
-    self_energies: &(T, T),
+    energy: T,
+    hamiltonian: &CsrMatrix<T>,
+    self_energies: &(Complex<T>, Complex<T>),
     terminate_after: usize,
-) -> color_eyre::Result<DVector<T>>
+    number_of_vertices_in_reservoir: usize,
+) -> color_eyre::Result<DVector<Complex<T>>>
 where
-    T: ComplexField + Copy,
-    <T as ComplexField>::RealField: Copy,
+    T: RealField + Copy,
 {
+    let optical_potential = Complex::new(T::zero(), T::from_f64(0.00001).unwrap());
     let nrows = hamiltonian.nrows();
-    let mut diagonal = DVector::zeros(terminate_after);
+    let mut diagonal: DVector<Complex<T>> = DVector::zeros(terminate_after);
     // g_{N-1N-1}^{RR} = D_{N-1}^{-1}
-    diagonal[terminate_after - 1] = T::one()
-        / (T::from_real(energy - hamiltonian.row(nrows - 1).values()[1]) - self_energies.1);
+    diagonal[terminate_after - 1] = Complex::from(T::one())
+        / (Complex::from(energy - hamiltonian.row(nrows - 1).values()[1])
+            - self_energies.1
+            - if number_of_vertices_in_reservoir != 0 {
+                optical_potential
+            } else {
+                Complex::from(T::zero())
+            });
     let mut previous = diagonal[terminate_after - 1];
     let mut previous_hopping_element = T::from_real(hamiltonian.row(nrows - 1).values()[0]); // t_{i, i+1}
     for (idx, element) in diagonal.iter_mut().rev().skip(1).enumerate() {
         let row = hamiltonian.row(nrows - 2 - idx);
         let hopping_element = T::from_real(row.values()[row.values().len() - 1]);
-        let diagonal = T::from_real(energy - row.values()[row.values().len() - 2])
+        let diagonal = Complex::from(energy - row.values()[row.values().len() - 2])
             - if idx == hamiltonian.nrows() - 2 {
                 self_energies.1
             } else {
-                T::zero()
+                Complex::from(T::zero())
+            }
+            - if (number_of_vertices_in_reservoir != 0)
+                & ((idx < number_of_vertices_in_reservoir - 1)
+                    | (idx > hamiltonian.nrows() - 2 - number_of_vertices_in_reservoir))
+            {
+                optical_potential
+            } else {
+                Complex::from(T::zero())
             };
-        *element = T::one() / (diagonal - previous * hopping_element * previous_hopping_element);
+        *element = Complex::from(T::one())
+            / (diagonal - previous * hopping_element * previous_hopping_element);
 
         previous_hopping_element = hopping_element;
         previous = *element;
@@ -138,6 +173,7 @@ where
 }
 
 #[inline]
+/// Calculate the right connected diagonal by solving into the Array1 diagonal, this avoids the allocation
 pub fn right_connected_diagonal_no_alloc<T>(
     energy: T::RealField,
     hamiltonian: &CsrMatrix<T::RealField>,
@@ -180,16 +216,22 @@ where
 /// and we can find the previous elements using the recursion
 /// G_{i i}^{R} = g_{i i}^{LR} (1 + t_{i i+1} G_{i+1 i+1}^{R} t_{i+1 i} g_{i i}^{LR})
 pub fn diagonal<T>(
-    energy: T::RealField,
-    hamiltonian: &CsrMatrix<T::RealField>,
-    self_energies: &(T, T),
-) -> color_eyre::Result<DVector<T>>
+    energy: T,
+    hamiltonian: &CsrMatrix<T>,
+    self_energies: &(Complex<T>, Complex<T>),
+    number_of_vertices_in_reservoir: usize,
+) -> color_eyre::Result<DVector<Complex<T>>>
 where
-    T: ComplexField + Copy,
-    <T as ComplexField>::RealField: Copy,
+    T: RealField + Copy,
 {
     let nrows = hamiltonian.nrows();
-    let left_diagonal = left_connected_diagonal(energy, hamiltonian, self_energies, nrows)?;
+    let left_diagonal = left_connected_diagonal(
+        energy,
+        hamiltonian,
+        self_energies,
+        nrows,
+        number_of_vertices_in_reservoir,
+    )?;
 
     let mut diagonal = DVector::zeros(nrows);
     diagonal[nrows - 1] = left_diagonal[nrows - 1];
@@ -210,7 +252,7 @@ where
             T::from_real(row.values()[1])
         };
         *element = left_diagonal_element
-            * (T::one()
+            * (Complex::from(T::one())
                 + left_diagonal_element * previous * hopping_element * previous_hopping_element);
         previous_hopping_element = hopping_element;
         previous = *element;
@@ -224,33 +266,33 @@ where
 /// the value of the fully connected Greens function is
 /// G_{ii}^{R} = (D_i - t_{i, i-1} g_{i-1 i-1}^{RL} t_{i-1, i} - t_{i, i+1} g_{i+1i+1}^{RR} t_{i+1, i})^{-1}
 pub(crate) fn diagonal_element<T>(
-    energy: T::RealField,
-    hamiltonian: &CsrMatrix<T::RealField>,
-    self_energies: &(T, T),
+    energy: T,
+    hamiltonian: &CsrMatrix<T>,
+    self_energies: &(Complex<T>, Complex<T>),
     element_index: usize,
-) -> color_eyre::Result<T>
+) -> color_eyre::Result<Complex<T>>
 where
-    T: ComplexField + Copy,
-    <T as ComplexField>::RealField: Copy,
+    T: RealField + Copy,
 {
     let nrows = hamiltonian.nrows();
     if element_index == 0 {
         let right_diagonal =
-            right_connected_diagonal(energy, hamiltonian, self_energies, nrows - 1)?;
-        return Ok(T::one()
-            / (T::from_real(energy - hamiltonian.row(0).values()[0])
+            right_connected_diagonal(energy, hamiltonian, self_energies, nrows - 1, 0)?;
+        return Ok(Complex::from(T::one())
+            / (Complex::from(energy - hamiltonian.row(0).values()[0])
                 - self_energies.0
                 - right_diagonal[0]
-                    * T::from_real(
+                    * Complex::from(
                         hamiltonian.row(0).values()[1] * hamiltonian.row(1).values()[0],
                     )));
     } else if element_index == nrows - 1 {
-        let left_diagonal = left_connected_diagonal(energy, hamiltonian, self_energies, nrows - 1)?;
-        return Ok(T::one()
-            / (T::from_real(energy - hamiltonian.row(nrows - 1).values()[1])
+        let left_diagonal =
+            left_connected_diagonal(energy, hamiltonian, self_energies, nrows - 1, 0)?;
+        return Ok(Complex::from(T::one())
+            / (Complex::from(energy - hamiltonian.row(nrows - 1).values()[1])
                 - self_energies.1
                 - left_diagonal[nrows - 2]
-                    * T::from_real(
+                    * Complex::from(
                         hamiltonian.row(nrows - 1).values()[0]
                             * hamiltonian.row(nrows - 2).values()[2],
                     )));
@@ -260,19 +302,20 @@ where
             hamiltonian,
             self_energies,
             nrows - element_index - 1,
+            0,
         )?;
         let left_diagonal =
-            left_connected_diagonal(energy, hamiltonian, self_energies, element_index)?;
-        return Ok(T::one()
-            / (T::from_real(energy - hamiltonian.row(element_index).values()[1])
+            left_connected_diagonal(energy, hamiltonian, self_energies, element_index, 0)?;
+        return Ok(Complex::from(T::one())
+            / (Complex::from(energy - hamiltonian.row(element_index).values()[1])
                 - left_diagonal[element_index - 1]
-                    * T::from_real(
+                    * Complex::from(
                         hamiltonian.row(element_index).values()[0]
                             * hamiltonian.row(element_index - 1).values()
                                 [hamiltonian.row(element_index - 1).values().len() - 1],
                     )
                 - right_diagonal[0]
-                    * T::from_real(
+                    * Complex::from(
                         hamiltonian.row(element_index).values()[2]
                             * hamiltonian.row(element_index + 1).values()[0],
                     )));
@@ -289,22 +332,27 @@ where
 /// The row is build from element `row_index` to the device end for elements in the first half of the stack,
 /// for those in the second half it is build from `row_index` to the device start
 pub(crate) fn build_out_row<T>(
-    energy: T::RealField,
-    hamiltonian: &CsrMatrix<T::RealField>,
-    full_diagonal: &DVector<T>,
-    self_energies: &(T, T),
+    energy: T,
+    hamiltonian: &CsrMatrix<T>,
+    full_diagonal: &DVector<Complex<T>>,
+    self_energies: &(Complex<T>, Complex<T>),
     row_index: usize,
-) -> color_eyre::Result<DVector<T>>
+    number_of_vertices_in_reservoir: usize,
+) -> color_eyre::Result<DVector<Complex<T>>>
 where
-    T: ComplexField + Copy,
-    <T as ComplexField>::RealField: Copy,
+    T: RealField + Copy,
 {
     let nrows = hamiltonian.nrows();
     if row_index > nrows / 2 {
         // Build a row to the left of the diagonal
-        let mut row: DVector<T> = DVector::zeros(row_index + 1);
-        let left_diagonal =
-            left_connected_diagonal(energy, hamiltonian, self_energies, row_index + 1)?;
+        let mut row: DVector<Complex<T>> = DVector::zeros(row_index + 1);
+        let left_diagonal = left_connected_diagonal(
+            energy,
+            hamiltonian,
+            self_energies,
+            row_index + 1,
+            number_of_vertices_in_reservoir,
+        )?;
         row[row_index] = full_diagonal[row_index];
         let mut previous = row[row_index];
         for (idx, (element, &g_lr)) in row
@@ -323,10 +371,15 @@ where
         }
         Ok(row)
     } else {
-        let mut row: DVector<T> = DVector::zeros(nrows - row_index);
+        let mut row: DVector<Complex<T>> = DVector::zeros(nrows - row_index);
         // Build a row to the right of the diagonal
-        let right_diagonal =
-            right_connected_diagonal(energy, hamiltonian, self_energies, nrows - row_index)?;
+        let right_diagonal = right_connected_diagonal(
+            energy,
+            hamiltonian,
+            self_energies,
+            nrows - row_index,
+            number_of_vertices_in_reservoir,
+        )?;
         row[0] = full_diagonal[row_index];
         let mut previous = row[0];
         for (idx, (element, &g_rr)) in row
@@ -344,17 +397,24 @@ where
 }
 
 pub(crate) fn build_out_column<T>(
-    energy: T::RealField,
-    hamiltonian: &CsrMatrix<T::RealField>,
-    full_diagonal: &DVector<T>,
-    self_energies: &(T, T),
+    energy: T,
+    hamiltonian: &CsrMatrix<T>,
+    full_diagonal: &DVector<Complex<T>>,
+    self_energies: &(Complex<T>, Complex<T>),
     row_index: usize,
-) -> color_eyre::Result<DVector<T>>
+    number_of_vertices_in_reservoir: usize,
+) -> color_eyre::Result<DVector<Complex<T>>>
 where
-    T: ComplexField + Copy,
-    <T as ComplexField>::RealField: Copy,
+    T: RealField + Copy,
 {
-    build_out_row(energy, hamiltonian, full_diagonal, self_energies, row_index)
+    build_out_row(
+        energy,
+        hamiltonian,
+        full_diagonal,
+        self_energies,
+        row_index,
+        number_of_vertices_in_reservoir,
+    )
 }
 
 pub(crate) fn left_column<T>(
@@ -457,6 +517,7 @@ mod test {
             energy,
             &hamiltonian,
             &(right_self_energy, right_self_energy),
+            0,
         )
         .unwrap();
 
@@ -605,6 +666,7 @@ mod test {
             energy,
             &hamiltonian.calculate_total(0.),
             &(right_self_energy, right_self_energy),
+            0,
         )
         .unwrap();
 
@@ -617,6 +679,7 @@ mod test {
                 &inverse.diagonal(),
                 &(right_self_energy, right_self_energy),
                 idx,
+                0,
             )
             .unwrap();
 
@@ -634,6 +697,7 @@ mod test {
                 &inverse.diagonal(),
                 &(right_self_energy, right_self_energy),
                 idx,
+                0,
             )
             .unwrap();
 
@@ -697,6 +761,7 @@ mod test {
             energy,
             &hamiltonian.calculate_total(0.),
             &(right_self_energy, right_self_energy),
+            0,
         )
         .unwrap();
 
@@ -709,6 +774,7 @@ mod test {
                 &inverse.diagonal(),
                 &(right_self_energy, right_self_energy),
                 idx,
+                0,
             )
             .unwrap();
 
@@ -727,6 +793,7 @@ mod test {
                 &inverse.diagonal(),
                 &(right_self_energy, right_self_energy),
                 idx,
+                0,
             )
             .unwrap();
 
@@ -768,6 +835,7 @@ mod test {
             &hamiltonian,
             &(self_energy, self_energy),
             mesh.elements().len(),
+            0,
         )
         .unwrap();
 
@@ -776,6 +844,7 @@ mod test {
             &hamiltonian,
             &(self_energy, self_energy),
             mesh.elements().len(),
+            0,
         )
         .unwrap();
 

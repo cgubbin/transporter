@@ -27,7 +27,10 @@ mod local;
 
 pub use global::*;
 
-use crate::utilities::assemblers::VertexAssemblerBuilder;
+use crate::{
+    error::{BuildError, CsrError},
+    utilities::assemblers::VertexAssemblerBuilder,
+};
 use nalgebra::{allocator::Allocator, DefaultAllocator, DimName, OPoint, RealField};
 use nalgebra_sparse::CsrMatrix;
 use transporter_mesher::{Connectivity, Mesh, SmallDim};
@@ -84,7 +87,7 @@ impl<T: Copy + RealField> Hamiltonian<T> {
         &mut self,
         info_desk: &InfoDesk,
         mesh: &Mesh<T, GeometryDim, C>,
-    ) -> color_eyre::Result<()>
+    ) -> Result<(), BuildError>
     where
         InfoDesk: PotentialInfoDesk<T>,
         C: Connectivity<T, GeometryDim>,
@@ -149,7 +152,7 @@ where
 {
     /// Builds an instance of `Hamiltonian` from a `HamiltonianBuilder`
     #[tracing::instrument(name = "Hamiltonian Builder", level = "info", skip(self))]
-    pub(crate) fn build(self) -> color_eyre::Result<Hamiltonian<T>> {
+    pub(crate) fn build(self) -> Result<Hamiltonian<T>, BuildError> {
         Hamiltonian::build_operator(self.info_desk, self.mesh)
     }
 }
@@ -175,7 +178,7 @@ where
     fn build_operator<C, InfoDesk>(
         info_desk: &InfoDesk,
         mesh: &Mesh<T, InfoDesk::GeometryDim, C>,
-    ) -> color_eyre::Result<Self>
+    ) -> Result<Self, BuildError>
     where
         InfoDesk: HamiltonianInfoDesk<T> + PotentialInfoDesk<T>,
         C: Connectivity<T, InfoDesk::GeometryDim>,

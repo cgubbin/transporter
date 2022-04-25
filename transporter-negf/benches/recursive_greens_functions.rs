@@ -90,6 +90,7 @@ pub fn bench_fully_connected_diagonal(c: &mut Criterion) {
                         black_box(energy),
                         black_box(&hamiltonian),
                         black_box(&self_energies),
+                        black_box(0),
                     )
                 })
             },

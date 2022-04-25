@@ -1,5 +1,5 @@
 [workspace]
-members = ['transporter-mesher', 'transporter-negf', 'transporter-poisson']
+members = ['transporter-mesher', 'transporter-negf']
 
 [profile.release]
 codegen-units = 1

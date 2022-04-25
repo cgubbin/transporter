@@ -9,9 +9,9 @@ use crate::postprocessor::{Charge, Current};
 use crate::{
     app::Calculation,
     device::info_desk::DeviceInfoDesk,
+    error::{BuildError, CsrError},
     spectral::{SpectralDiscretisation, SpectralSpace, WavevectorSpace},
 };
-use color_eyre::eyre::eyre;
 use nalgebra::{
     allocator::Allocator, Const, DMatrix, DefaultAllocator, Dynamic, Matrix, RealField, VecStorage,
 };
@@ -134,8 +134,18 @@ where
     // TODO Gatekeep for U1
     pub(crate) fn build(
         self,
-    ) -> color_eyre::Result<
+    ) -> Result<
         AggregateGreensFunctions<'a, T, CsrMatrix<Complex<T>>, GeometryDim, BandDim>,
+        BuildError,
+    > {
+        Ok(self.build_inner()?)
+    }
+
+    pub(crate) fn build_inner(
+        self,
+    ) -> Result<
+        AggregateGreensFunctions<'a, T, CsrMatrix<Complex<T>>, GeometryDim, BandDim>,
+        CsrError,
     > {
         // Assemble the sparsity pattern for the retarded green's function
         let number_of_vertices_in_internal_lead =
@@ -152,8 +162,7 @@ where
         )?;
         // Fill with dummy values
         let initial_values = vec![Complex::from(T::zero()); sparsity_pattern.nnz()];
-        let csr = CsrMatrix::try_from_pattern_and_values(sparsity_pattern, initial_values)
-            .map_err(|e| eyre!("Failed to write values to Csr GF Matrix {:?}", e))?;
+        let csr = CsrMatrix::try_from_pattern_and_values(sparsity_pattern, initial_values)?;
         // Map the csr matrix over the number of points in the spectral space to assemble the initial Green's function vector
         let spectrum_of_csr = (0..self.spectral.total_number_of_points())
             .map(|_| GreensFunction {
@@ -166,8 +175,7 @@ where
         let diagonal_sparsity_pattern = csr.diagonal_as_csr().pattern().clone();
         let initial_values = vec![Complex::from(T::zero()); diagonal_sparsity_pattern.nnz()];
         let diagonal_csr =
-            CsrMatrix::try_from_pattern_and_values(diagonal_sparsity_pattern, initial_values)
-                .map_err(|e| eyre!("Failed to write values to Csr GF Matrix {:?}", e))?;
+            CsrMatrix::try_from_pattern_and_values(diagonal_sparsity_pattern, initial_values)?;
         let spectrum_of_diagonal_csr = (0..self.spectral.total_number_of_points())
             .map(|_| GreensFunction {
                 matrix: diagonal_csr.clone(),
@@ -208,18 +216,28 @@ where
 {
     /// When the attached spectral space has wavevector discretisation we build out a vector of dense
     /// `DMatrix` as the scattering process under study is incoherent.
+    /// The nested method lets me upcast the error to `BuildError`.
     pub(crate) fn build(
         self,
-    ) -> color_eyre::Result<
+    ) -> Result<
         AggregateGreensFunctions<'a, T, CsrMatrix<Complex<T>>, GeometryDim, BandDim>,
+        BuildError,
+    > {
+        Ok(self.build_inner()?)
+    }
+
+    pub(crate) fn build_inner(
+        self,
+    ) -> Result<
+        AggregateGreensFunctions<'a, T, CsrMatrix<Complex<T>>, GeometryDim, BandDim>,
+        CsrError,
     > {
         // Assemble the sparsity pattern for the retarded green's function
         let sparsity_pattern =
             assemble_csr_sparsity_for_retarded_gf(self.mesh.vertices().len(), 0)?;
         // Fill with dummy values
         let initial_values = vec![Complex::from(T::zero()); sparsity_pattern.nnz()];
-        let csr = CsrMatrix::try_from_pattern_and_values(sparsity_pattern, initial_values)
-            .map_err(|e| eyre!("Failed to write values to Csr GF Matrix {:?}", e))?;
+        let csr = CsrMatrix::try_from_pattern_and_values(sparsity_pattern, initial_values)?;
         // Map the csr matrix over the number of points in the spectral space to assemble the initial Green's function vector
         let spectrum_of_csr = (0..self.spectral.total_number_of_points())
             .map(|_| GreensFunction {
@@ -232,8 +250,7 @@ where
         let diagonal_sparsity_pattern = csr.diagonal_as_csr().pattern().clone();
         let initial_values = vec![Complex::from(T::zero()); diagonal_sparsity_pattern.nnz()];
         let diagonal_csr =
-            CsrMatrix::try_from_pattern_and_values(diagonal_sparsity_pattern, initial_values)
-                .map_err(|e| eyre!("Failed to write values to Csr GF Matrix {:?}", e))?;
+            CsrMatrix::try_from_pattern_and_values(diagonal_sparsity_pattern, initial_values)?;
         let spectrum_of_diagonal_csr = (0..self.spectral.total_number_of_points())
             .map(|_| GreensFunction {
                 matrix: diagonal_csr.clone(),
@@ -276,8 +293,9 @@ where
     /// `DMatrix` as the scattering process under study is incoherent.
     pub(crate) fn build(
         self,
-    ) -> color_eyre::Result<
+    ) -> Result<
         AggregateGreensFunctions<'a, T, DMatrix<Complex<T>>, GeometryDim, BandDim>,
+        BuildError,
     > {
         let matrix = GreensFunction {
             matrix: DMatrix::zeros(self.mesh.vertices().len(), self.mesh.vertices().len()),
@@ -340,6 +358,7 @@ pub(crate) trait AggregateGreensFunctionMethods<
     /// Operates on the collected Green's functions to calculate the total current in each band
     fn accumulate_into_current_density_vector(
         &self,
+        voltage: T,
         mesh: &Mesh<T, GeometryDim, Conn>,
         self_energy: &SelfEnergy,
         integrator: &Integrator,
@@ -353,7 +372,7 @@ pub(crate) trait AggregateGreensFunctionMethods<
 pub(crate) fn assemble_csr_sparsity_for_retarded_gf(
     number_of_elements_in_mesh: usize,
     number_of_elements_in_contacts: usize,
-) -> color_eyre::Result<SparsityPattern> {
+) -> Result<SparsityPattern, nalgebra_sparse::pattern::SparsityPatternFormatError> {
     if number_of_elements_in_contacts == 0 {
         let mut col_indices = vec![0, number_of_elements_in_mesh - 1]; // In the first row the first and last columns are occupied
         let mut row_offsets = vec![0, 2]; // 2 elements in the first row
@@ -374,7 +393,6 @@ pub(crate) fn assemble_csr_sparsity_for_retarded_gf(
             row_offsets,
             col_indices,
         )
-        .map_err(|e| eyre!("Failed to construct Csr Sparsity pattern {:?}", e))
     } else {
         let mut col_indices = vec![0]; // In the first row only the diagonal is occupied
         let mut row_offsets = vec![0, 1]; // with a single element
@@ -408,7 +426,6 @@ pub(crate) fn assemble_csr_sparsity_for_retarded_gf(
             row_offsets,
             col_indices,
         )
-        .map_err(|e| eyre!("Failed to construct Csr Sparsity pattern {:?}", e))
     }
 }
 

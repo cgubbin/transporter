@@ -75,6 +75,10 @@ where
         &self.charge
     }
 
+    pub(crate) fn current_as_ref(&self) -> &Current<T, BandDim> {
+        &self.current
+    }
+
     /// Given a tolerance, and a previous value for the charge and current
     /// calculates whether the change in the norms is less than the tolerance.
     #[allow(clippy::neg_cmp_op_on_partial_ord)]
@@ -186,5 +190,21 @@ where
                 "All currents must have the same number of points"
             ))
         }
+    }
+}
+
+impl<T: RealField, BandDim: SmallDim> Current<T, BandDim>
+where
+    DefaultAllocator: Allocator<
+        Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
+        BandDim,
+    >,
+{
+    pub(crate) fn net_current(&self) -> DVector<T> {
+        self.current.iter().sum()
+    }
+
+    pub(crate) fn as_ref_mut(&mut self) -> &mut OVector<DVector<T>, BandDim> {
+        &mut self.current
     }
 }

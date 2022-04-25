@@ -63,6 +63,7 @@ where
             PostProcessorBuilder::new().with_mesh(self.mesh).build();
         let charge_and_current: ChargeAndCurrent<T::RealField, BandDim> = postprocessor
             .recompute_currents_and_densities(
+                self.voltage,
                 self.greens_functions,
                 self.self_energies,
                 self.spectral,
@@ -83,6 +84,7 @@ where
             self.spectral,
         )?;
         self.greens_functions.update_greens_functions(
+            self.voltage,
             self.hamiltonian,
             self.self_energies,
             self.spectral,
@@ -142,6 +144,7 @@ where
             PostProcessorBuilder::new().with_mesh(self.mesh).build();
         let charge_and_current: ChargeAndCurrent<T::RealField, BandDim> = postprocessor
             .recompute_currents_and_densities(
+                self.voltage,
                 self.greens_functions,
                 self.self_energies,
                 self.spectral,
@@ -163,6 +166,7 @@ where
             self.spectral,
         )?;
         self.greens_functions.update_greens_functions(
+            self.voltage,
             self.hamiltonian,
             self.self_energies,
             self.spectral,
@@ -230,6 +234,7 @@ where
             PostProcessorBuilder::new().with_mesh(self.mesh).build();
         let charge_and_current: ChargeAndCurrent<T::RealField, BandDim> = postprocessor
             .recompute_currents_and_densities(
+                self.voltage,
                 self.greens_functions,
                 self.self_energies,
                 self.spectral,
@@ -266,6 +271,7 @@ where
             )?;
 
         self.greens_functions.update_greens_functions(
+            self.voltage,
             self.hamiltonian,
             self.self_energies,
             self.spectral,
@@ -273,8 +279,9 @@ where
 
         let postprocessor: PostProcessor<T, GeometryDim, Conn> =
             PostProcessorBuilder::new().with_mesh(self.mesh).build();
-        let charge = postprocessor
+        let _charge = postprocessor
             .recompute_currents_and_densities(
+                self.voltage,
                 self.greens_functions,
                 self.self_energies,
                 self.spectral,
@@ -282,16 +289,16 @@ where
             .charge_as_ref()
             .net_charge();
 
-        let system_time = std::time::SystemTime::now();
-        let datetime: chrono::DateTime<chrono::Utc> = system_time.into();
-        let mut file = std::fs::File::create(format!(
-            "../results/inner_charge_{}_{}.txt",
-            self.scattering_scaling, datetime
-        ))?;
-        for value in charge.row_iter() {
-            let value = value[0].to_f64().unwrap().to_string();
-            writeln!(file, "{}", value)?;
-        }
+        // let system_time = std::time::SystemTime::now();
+        // let datetime: chrono::DateTime<chrono::Utc> = system_time.into();
+        // let mut file = std::fs::File::create(format!(
+        //     "../results/inner_charge_{}_{}.txt",
+        //     self.scattering_scaling, datetime
+        // ))?;
+        // for value in charge.row_iter() {
+        //     let value = value[0].to_f64().unwrap().to_string();
+        //     writeln!(file, "{}", value)?;
+        // }
         Ok(())
     }
 
@@ -358,6 +365,7 @@ where
             self.spectral,
         )?;
         self.greens_functions.update_greens_functions(
+            self.voltage,
             self.hamiltonian,
             self.self_energies,
             self.spectral,
@@ -367,6 +375,7 @@ where
             PostProcessorBuilder::new().with_mesh(self.mesh).build();
         let charge = postprocessor
             .recompute_currents_and_densities(
+                self.voltage,
                 self.greens_functions,
                 self.self_energies,
                 self.spectral,
@@ -407,6 +416,7 @@ where
                     self.greens_functions,
                 )?;
             self.greens_functions.update_greens_functions(
+                self.voltage,
                 self.hamiltonian,
                 self.self_energies,
                 self.spectral,
@@ -414,6 +424,7 @@ where
 
             let charge = postprocessor
                 .recompute_currents_and_densities(
+                    self.voltage,
                     self.greens_functions,
                     self.self_energies,
                     self.spectral,
