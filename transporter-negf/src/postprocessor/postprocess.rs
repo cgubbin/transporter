@@ -31,6 +31,52 @@ where
             AggregateGreensFunctionMethods<T, BandDim, GeometryDim, Conn, Spectral, SelfEnergy>;
 }
 
+pub(crate) trait PostProcessLOGenerationRate<
+    T: RealField + Copy,
+    BandDim: SmallDim,
+    GeometryDim: SmallDim,
+    Conn: Connectivity<T, GeometryDim>,
+    Spectral,
+    SelfEnergy,
+> where
+    Spectral: SpectralDiscretisation<T>,
+    DefaultAllocator: Allocator<
+            Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
+            BandDim,
+        > + Allocator<T, GeometryDim>,
+{
+    fn compute_momentum_resolved_lo_generation_rate<AggregateGreensFunctions>(
+        &self,
+        greens_functions: &AggregateGreensFunctions,
+        self_energy: &SelfEnergy,
+        spectral_discretisation: &Spectral,
+    ) -> color_eyre::Result<nalgebra::DVector<T::RealField>>
+    where
+        AggregateGreensFunctions:
+            AggregateGreensFunctionMethods<T, BandDim, GeometryDim, Conn, Spectral, SelfEnergy>;
+
+    fn compute_total_lo_generation_rate<AggregateGreensFunctions>(
+        &self,
+        greens_functions: &AggregateGreensFunctions,
+        self_energy: &SelfEnergy,
+        spectral_discretisation: &Spectral,
+    ) -> color_eyre::Result<T::RealField>
+    where
+        AggregateGreensFunctions:
+            AggregateGreensFunctionMethods<T, BandDim, GeometryDim, Conn, Spectral, SelfEnergy>,
+    {
+        // TODO Add weightings for integration
+        Ok(self
+            .compute_momentum_resolved_lo_generation_rate(
+                greens_functions,
+                self_energy,
+                spectral_discretisation,
+            )?
+            .iter()
+            .fold(T::zero(), |acc, &x| acc + x))
+    }
+}
+
 impl<T, GeometryDim, Conn, BandDim, Spectral>
     PostProcess<T, BandDim, GeometryDim, Conn, Spectral, SelfEnergy<T, GeometryDim, Conn>>
     for PostProcessor<'_, T, GeometryDim, Conn>

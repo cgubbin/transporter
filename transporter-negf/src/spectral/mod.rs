@@ -238,7 +238,7 @@ impl<T: RealField + Copy> SpectralDiscretisation<T> for SpectralSpace<T, ()> {
         x.into_iter()
     }
     fn iter_wavevectors(&self) -> Self::Iter {
-        vec![T::one(); 1].into_iter()
+        vec![T::zero(); 1].into_iter()
     }
 
     #[allow(clippy::needless_collect)]
@@ -262,6 +262,7 @@ impl<T: RealField + Copy> SpectralDiscretisation<T> for SpectralSpace<T, ()> {
         let x = self.energy.weights().copied().collect::<Vec<_>>();
         x.into_iter()
     }
+
     fn iter_wavevector_weights(&self) -> Self::Iter {
         vec![T::one(); 1].into_iter()
     }

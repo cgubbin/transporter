@@ -4,7 +4,7 @@
 //! evaluated at all energy and wavevector points in the spectral grid over which the problem is defined.
 //! Aggregated structures and methods are designed to integrate with the inner loop, whereas the individual
 //! Green's functions should not be called directly.
-use super::{GreensFunction, GreensFunctionMethods};
+use super::{mixed::MMatrix, GreensFunction, GreensFunctionMethods};
 use crate::postprocessor::{Charge, Current};
 use crate::{
     app::Calculation,
@@ -299,6 +299,43 @@ where
     > {
         let matrix = GreensFunction {
             matrix: DMatrix::zeros(self.mesh.vertices().len(), self.mesh.vertices().len()),
+            marker: std::marker::PhantomData,
+        };
+
+        let num_spectral_points = self.spectral.total_number_of_points();
+        Ok(AggregateGreensFunctions {
+            //    spectral: self.spectral,
+            info_desk: self.info_desk,
+            retarded: vec![matrix.clone(); num_spectral_points],
+            advanced: Vec::new(),
+            lesser: vec![matrix; num_spectral_points],
+            greater: Vec::new(),
+        })
+    }
+
+    pub(crate) fn build_mixed(
+        self,
+    ) -> Result<
+        AggregateGreensFunctions<'a, T, MMatrix<Complex<T>>, GeometryDim, BandDim>,
+        BuildError,
+    >
+    where
+        T: num_traits::ToPrimitive,
+    {
+        // Assemble the sparsity pattern for the retarded green's function
+        let number_of_vertices_in_reservoir = if let Some(lead_length) = self.info_desk.lead_length
+        {
+            (lead_length * T::from_f64(1e-9).unwrap() / self.mesh.elements()[0].0.diameter())
+                .to_usize()
+                .unwrap()
+        } else {
+            0
+        };
+        let number_of_vertices_in_core =
+            self.mesh.vertices().len() - 2 * number_of_vertices_in_reservoir;
+
+        let matrix = GreensFunction {
+            matrix: MMatrix::zeros(number_of_vertices_in_reservoir, number_of_vertices_in_core),
             marker: std::marker::PhantomData,
         };
 

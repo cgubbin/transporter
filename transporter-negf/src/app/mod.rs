@@ -22,6 +22,7 @@ mod telemetry;
 pub(crate) mod tracker;
 
 use calculations::coherent_calculation_at_fixed_voltage;
+use calculations::incoherent_calculation_at_fixed_voltage;
 pub(crate) use configuration::Configuration;
 pub(crate) use error::TransporterError;
 use telemetry::{get_subscriber, init_subscriber};
@@ -294,8 +295,43 @@ where
                 current_voltage += voltage_step;
             }
         }
-        CalculationB::Incoherent { .. } => unimplemented!(),
+        CalculationB::Incoherent { voltage_target } => {
+            let mut current_voltage = T::zero();
+            let mut voltage_step = config.global.voltage_step;
+            while current_voltage <= voltage_target {
+                // Do a single calculation
+                tracing::info!("Solving for current voltage {current_voltage}V");
+                match incoherent_calculation_at_fixed_voltage(
+                    current_voltage,
+                    initial_potential.clone(),
+                    &config,
+                    mesh,
+                    tracker,
+                ) {
+                    // If it converged proceed
+                    Ok(converged_potential) => {
+                        let _ = std::mem::replace(&mut initial_potential, converged_potential);
+                    }
+                    // If there is an error, either return if unrecoverable or reduce the voltage step
+                    Err(OuterLoopError::FixedPoint(fixed_point_error)) => match fixed_point_error {
+                        conflux::core::FixedPointError::TooManyIterations(_cost) => {
+                            current_voltage -= voltage_step;
+                            voltage_step /= T::one() + T::one();
+                        }
+                        _ => {
+                            return Err(OuterLoopError::FixedPoint(fixed_point_error).into());
+                        }
+                    },
+                    Err(e) => {
+                        return Err(e.into());
+                    }
+                }
+                // increment
+                current_voltage += voltage_step;
+            }
+        }
     }
+
     Ok(())
 }
 

@@ -32,7 +32,7 @@ where
     T: RealField + Copy,
     // <T as ComplexField>::RealField: Copy,
 {
-    let optical_potential = Complex::new(T::zero(), T::from_f64(0.00001).unwrap());
+    let optical_potential = Complex::new(T::zero(), T::zero() * T::from_f64(0.001).unwrap());
     let mut diagonal = DVector::zeros(terminate_after);
     // at the left contact g_{00}^{LR} is just the inverse of the diagonal matrix element D_{0}
     diagonal[0] = Complex::from(T::one())
@@ -132,7 +132,7 @@ pub fn right_connected_diagonal<T>(
 where
     T: RealField + Copy,
 {
-    let optical_potential = Complex::new(T::zero(), T::from_f64(0.00001).unwrap());
+    let optical_potential = Complex::new(T::zero(), T::zero() * T::from_f64(0.001).unwrap()); // 15mev optical potential
     let nrows = hamiltonian.nrows();
     let mut diagonal: DVector<Complex<T>> = DVector::zeros(terminate_after);
     // g_{N-1N-1}^{RR} = D_{N-1}^{-1}
@@ -151,7 +151,7 @@ where
         let hopping_element = T::from_real(row.values()[row.values().len() - 1]);
         let diagonal = Complex::from(energy - row.values()[row.values().len() - 2])
             - if idx == hamiltonian.nrows() - 2 {
-                self_energies.1
+                self_energies.0
             } else {
                 Complex::from(T::zero())
             }

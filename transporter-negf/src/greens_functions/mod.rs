@@ -1,5 +1,6 @@
 mod aggregate;
 mod dense;
+pub(crate) mod mixed;
 pub mod recursive;
 mod sparse;
 

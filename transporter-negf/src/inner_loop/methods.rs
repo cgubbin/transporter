@@ -1,5 +1,6 @@
 use super::InnerLoop;
 use crate::{
+    greens_functions::mixed::MMatrix,
     postprocessor::{ChargeAndCurrent, PostProcess, PostProcessor, PostProcessorBuilder},
     spectral::{SpectralSpace, WavevectorSpace},
 };
@@ -436,6 +437,138 @@ where
             for value in charge.row_iter() {
                 let value = value[0].to_f64().unwrap().to_string();
                 writeln!(file, "{}", value)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+// Mixed impl
+/// Incoherent scattering impl with a full wavevector space
+impl<'a, T, GeometryDim, Conn, BandDim> Inner<T, BandDim>
+    for InnerLoop<
+        'a,
+        T,
+        GeometryDim,
+        Conn,
+        MMatrix<Complex<T>>,
+        SpectralSpace<T, WavevectorSpace<T, GeometryDim, Conn>>,
+        BandDim,
+    >
+where
+    T: Copy + RealField + argmin::core::ArgminFloat,
+    GeometryDim: SmallDim,
+    BandDim: SmallDim,
+    Conn: Connectivity<T, GeometryDim> + Send + Sync,
+    <Conn as Connectivity<T, GeometryDim>>::Element: Send + Sync,
+    // MatrixType: GreensFunctionMethods<T>,
+    DefaultAllocator: Allocator<T, GeometryDim>
+        + Allocator<
+            Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
+            BandDim,
+        > + Allocator<T, BandDim>
+        + Allocator<[T; 3], BandDim>,
+    <DefaultAllocator as Allocator<T, GeometryDim>>::Buffer: Send + Sync,
+    <DefaultAllocator as Allocator<T, BandDim>>::Buffer: Send + Sync,
+    <DefaultAllocator as Allocator<[T; 3], BandDim>>::Buffer: Send + Sync,
+{
+    /// Check convergence and re-assign the new charge density to the old one
+    fn is_loop_converged(
+        &self,
+        previous_charge_and_current: &mut ChargeAndCurrent<T, BandDim>,
+    ) -> color_eyre::Result<bool> {
+        let postprocessor: PostProcessor<T, GeometryDim, Conn> =
+            PostProcessorBuilder::new().with_mesh(self.mesh).build();
+        let charge_and_current: ChargeAndCurrent<T::RealField, BandDim> = postprocessor
+            .recompute_currents_and_densities(
+                self.voltage,
+                self.greens_functions,
+                self.self_energies,
+                self.spectral,
+            )?;
+        let result = charge_and_current.is_change_within_tolerance(
+            previous_charge_and_current,
+            self.convergence_settings.inner_tolerance(),
+        );
+        let _ = std::mem::replace(previous_charge_and_current, charge_and_current);
+        result
+    }
+
+    fn single_iteration(&mut self) -> color_eyre::Result<()> {
+        // TODO Recompute se, check it's ok, recompute green's functions
+        tracing::trace!("Inner loop with scaling {}", self.scattering_scaling);
+        self.self_energies.recalculate_contact_self_energy(
+            self.mesh,
+            self.hamiltonian,
+            self.spectral,
+        )?;
+        self.self_energies
+            .recalculate_localised_lo_lesser_self_energy_mixed(
+                self.scattering_scaling,
+                self.mesh,
+                self.spectral,
+                self.greens_functions,
+            )?;
+        self.self_energies
+            .recalculate_localised_lo_retarded_self_energy_mixed(
+                self.scattering_scaling,
+                self.mesh,
+                self.spectral,
+                self.greens_functions,
+            )?;
+
+        self.greens_functions.update_greens_functions(
+            self.voltage,
+            self.hamiltonian,
+            self.self_energies,
+            self.spectral,
+        )?;
+
+        let postprocessor: PostProcessor<T, GeometryDim, Conn> =
+            PostProcessorBuilder::new().with_mesh(self.mesh).build();
+        let _charge = postprocessor
+            .recompute_currents_and_densities(
+                self.voltage,
+                self.greens_functions,
+                self.self_energies,
+                self.spectral,
+            )?
+            .charge_as_ref()
+            .net_charge();
+
+        // let system_time = std::time::SystemTime::now();
+        // let datetime: chrono::DateTime<chrono::Utc> = system_time.into();
+        // let mut file = std::fs::File::create(format!(
+        //     "../results/inner_charge_{}_{}.txt",
+        //     self.scattering_scaling, datetime
+        // ))?;
+        // for value in charge.row_iter() {
+        //     let value = value[0].to_f64().unwrap().to_string();
+        //     writeln!(file, "{}", value)?;
+        // }
+        Ok(())
+    }
+
+    fn run_loop(
+        &mut self,
+        previous_charge_and_current: &mut ChargeAndCurrent<T, BandDim>,
+    ) -> color_eyre::Result<()> {
+        //}
+        // TODO Only on the first full iteration
+        // self.coherent_step()?;
+        // self.ramp_scattering()?;
+        tracing::info!("Beginning loop");
+        self.single_iteration()?;
+
+        let mut iteration = 0;
+        while !self.is_loop_converged(previous_charge_and_current)? {
+            tracing::info!("The inner loop at iteration {iteration}");
+            self.single_iteration()?;
+            iteration += 1;
+            if iteration >= self.convergence_settings.maximum_inner_iterations() {
+                return Err(color_eyre::eyre::eyre!(
+                    "Reached maximum iteration count in the inner loop"
+                ));
             }
         }
         Ok(())

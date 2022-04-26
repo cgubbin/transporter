@@ -127,12 +127,20 @@ where
         // Sum over the diagonal of the calculated spectral density
         let mut summed_diagonal = vec![T::zero(); self.lesser[0].matrix.values().len()];
 
+        if spectral_space.number_of_wavevector_points() == 1 {}
+
         for (idx, ((wavevector, weight), width)) in spectral_space
             .iter_wavevectors()
             .zip(spectral_space.iter_wavevector_weights())
             .zip(spectral_space.iter_wavevector_widths())
             .enumerate()
         {
+            let wavevector = if spectral_space.number_of_wavevector_points() == 1 {
+                T::one()
+            } else {
+                wavevector
+            };
+
             let new_diagonal = self
                 .lesser
                 .iter()
@@ -599,7 +607,7 @@ where
                 &hamiltonian,
                 &self_energies_at_external_contacts,
                 number_of_vertices_in_internal_lead,
-                0,
+                number_of_vertices_in_internal_lead,
             )?;
             let left_internal_self_energy = left_internal_self_energy
                 [(left_internal_self_energy.shape().0 - 1, 0)]
@@ -620,6 +628,15 @@ where
                     .row(hamiltonian.nrows() - 1 - number_of_vertices_in_internal_lead)
                     .values()[2]
                     .powi(2);
+            // let gamma_values = vec![
+            //     Complex::new(T::zero(), fermi_functions[0])
+            //         * (self_energies_at_external_contacts.0
+            //             - self_energies_at_external_contacts.0.conj()),
+            //     Complex::new(T::zero(), fermi_functions[1])
+            //         * (self_energies_at_external_contacts.1
+            //             - self_energies_at_external_contacts.1.conj()),
+            // ];
+
             let gamma_values = vec![
                 Complex::new(T::zero(), fermi_functions[0])
                     * (left_internal_self_energy - left_internal_self_energy.conj()),

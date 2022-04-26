@@ -11,7 +11,7 @@ use nalgebra_sparse::{
 };
 use num_complex::Complex;
 use std::marker::PhantomData;
-use transporter_mesher::{Connectivity, Mesh, SmallDim};
+use transporter_mesher::{Connectivity, ElementMethods, Mesh, SmallDim};
 
 #[derive(Clone)]
 pub(crate) struct SelfEnergy<T, GeometryDim, Conn>
@@ -123,18 +123,34 @@ impl<'a, T, GeometryDim, Conn>
         &'a Mesh<T, GeometryDim, Conn>,
     >
 where
-    T: RealField + Copy,
+    T: RealField + Copy + num_traits::ToPrimitive,
     GeometryDim: SmallDim,
     Conn: Connectivity<T, GeometryDim> + Send + Sync,
     <Conn as Connectivity<T, GeometryDim>>::Element: Send + Sync,
     DefaultAllocator: Allocator<T, GeometryDim>,
     <DefaultAllocator as Allocator<T, GeometryDim>>::Buffer: Send + Sync,
 {
-    pub(crate) fn build_incoherent(self) -> Result<SelfEnergy<T, GeometryDim, Conn>, BuildError> {
-        Ok(self.build_incoherent_inner()?)
+    pub(crate) fn build_incoherent(
+        self,
+        lead_length: Option<T>,
+    ) -> Result<SelfEnergy<T, GeometryDim, Conn>, BuildError> {
+        Ok(self.build_incoherent_inner(lead_length)?)
     }
 
-    fn build_incoherent_inner(self) -> Result<SelfEnergy<T, GeometryDim, Conn>, CsrError> {
+    fn build_incoherent_inner(
+        self,
+        lead_length: Option<T>,
+    ) -> Result<SelfEnergy<T, GeometryDim, Conn>, CsrError> {
+        let number_of_vertices_in_reservoir = if let Some(lead_length) = lead_length {
+            (lead_length * T::from_f64(1e-9).unwrap() / self.mesh.elements()[0].0.diameter())
+                .to_usize()
+                .unwrap()
+        } else {
+            0
+        };
+        let number_of_vertices_in_core =
+            self.mesh.vertices().len() - 2 * number_of_vertices_in_reservoir;
+
         // Collect the indices of all elements at the boundaries
         let vertices_at_boundary: Vec<usize> = self
             .mesh
@@ -157,7 +173,7 @@ where
             .collect::<Vec<_>>();
         let csrmatrix = CsrMatrix::try_from_pattern_and_values(pattern, initial_values)?;
 
-        let dmatrix = DMatrix::zeros(self.mesh.vertices().len(), self.mesh.vertices().len());
+        let dmatrix = DMatrix::zeros(number_of_vertices_in_core, number_of_vertices_in_core);
         let num_spectral_points =
             self.spectral.number_of_wavevector_points() * self.spectral.number_of_energy_points();
 

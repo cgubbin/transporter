@@ -1,7 +1,7 @@
 use super::{OuterLoop, OuterLoopError};
 use crate::{
     app::Calculation,
-    greens_functions::{AggregateGreensFunctions, GreensFunctionBuilder},
+    greens_functions::{mixed::MMatrix, AggregateGreensFunctions, GreensFunctionBuilder},
     inner_loop::{Inner, InnerLoop, InnerLoopBuilder},
     self_energy::{SelfEnergy, SelfEnergyBuilder},
 };
@@ -13,6 +13,7 @@ use nalgebra::{
 };
 use nalgebra_sparse::CsrMatrix;
 use num_complex::Complex;
+use std::io::Write;
 use transporter_mesher::{Connectivity, SmallDim};
 
 /// A wrapper for the calculated electrostatic potential
@@ -159,12 +160,13 @@ where
             self.convergence_settings.outer_tolerance(),
             self.convergence_settings.maximum_outer_iterations() as u64,
         )
-        .beta(T::from_f64(0.1).unwrap());
+        .beta(T::from_f64(1.0).unwrap())
+        .memory(2);
         let vec_para = potential.as_ref().iter().copied().collect::<Vec<_>>();
         let initial_parameter = ndarray::Array1::from(vec_para);
         // let mut solver = FixedPointSolver::new(mixer, potential.as_ref().clone());
         let mut solver = FixedPointSolver::new(mixer, initial_parameter);
-        tracing::info!("Beginning outer self-consistent loop");
+        tracing::info!("Beginning outer self-consistent loop with Anderson mixing");
         let solution = solver.run(self)?;
 
         let solution = DVector::from(solution.get_param().iter().copied().collect::<Vec<_>>());
@@ -258,22 +260,24 @@ where
                     std::mem::replace(self.tracker.charge_and_currents_mut(), charge_and_currents);
             }
             Calculation::Incoherent => {
+                tracing::debug!("Incohrent path");
                 let mut greens_functions = GreensFunctionBuilder::new()
                     .with_info_desk(self.info_desk)
                     .with_mesh(self.mesh)
                     .with_spectral_discretisation(self.spectral)
                     .incoherent_calculation(&self.tracker.calculation)
-                    .build()?;
+                    // .build()?;
+                    .build_mixed()?;
                 tracing::trace!("Initialising Self Energies");
                 let mut self_energies = SelfEnergyBuilder::new()
                     .with_mesh(self.mesh)
                     .with_spectral_discretisation(self.spectral)
-                    .build_incoherent()?;
-                // Todo Get the new potential into the new hamiltonian...
+                    .build_incoherent(self.info_desk.lead_length)?; // We can only do an incoherent calculation with leads at the moment
+                                                                    // Todo Get the new potential into the new hamiltonian...
                 self.hamiltonian
                     .update_potential(&self.tracker, self.mesh)?;
-                let mut inner_loop =
-                    self.build_incoherent_inner_loop(&mut greens_functions, &mut self_energies);
+                let mut inner_loop = self
+                    .build_incoherent_inner_loop_mixed(&mut greens_functions, &mut self_energies);
                 let mut charge_and_currents = self.tracker.charge_and_currents.clone();
                 inner_loop
                     .run_loop(&mut charge_and_currents)
@@ -352,7 +356,6 @@ where
         // Define initial parameter vector
         let init_param: DVector<T> = DVector::from_vec(vec![T::zero(); self.mesh.vertices().len()]);
 
-        // If the initial residual is below the tolerance return early
         let residual = cost.apply(&init_param)?.norm()
             / T::from_usize(previous_potential.as_ref().len()).unwrap();
         let target = self.convergence_settings.outer_tolerance()
@@ -375,7 +378,7 @@ where
 
         // Run solver
         let res = Executor::new(cost, solver)
-            .configure(|state| state.param(init_param).max_iters(20))
+            .configure(|state| state.param(init_param).max_iters(25))
             //.add_observer(SlogLogger::term(), ObserverMode::Never)
             .run()?;
         tracing::info!(
@@ -616,6 +619,36 @@ where
         GeometryDim,
         Conn,
         DMatrix<Complex<T>>,
+        SpectralSpace<T, WavevectorSpace<T, GeometryDim, Conn>>,
+        BandDim,
+    > {
+        InnerLoopBuilder::new()
+            .with_convergence_settings(self.convergence_settings)
+            .with_mesh(self.mesh)
+            .with_spectral_discretisation(self.spectral)
+            .with_hamiltonian(self.hamiltonian)
+            .with_greens_functions(greens_functions)
+            .with_self_energies(self_energies)
+            .with_scattering_scaling(self.tracker.scattering_scaling)
+            .build(self.tracker.voltage)
+    }
+
+    fn build_incoherent_inner_loop_mixed<'a>(
+        &'a self,
+        greens_functions: &'a mut AggregateGreensFunctions<
+            'a,
+            T,
+            MMatrix<Complex<T>>,
+            GeometryDim,
+            BandDim,
+        >,
+        self_energies: &'a mut SelfEnergy<T, GeometryDim, Conn>,
+    ) -> InnerLoop<
+        'a,
+        T,
+        GeometryDim,
+        Conn,
+        MMatrix<Complex<T>>,
         SpectralSpace<T, WavevectorSpace<T, GeometryDim, Conn>>,
         BandDim,
     > {
