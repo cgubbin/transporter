@@ -120,7 +120,7 @@ impl<'a, T, GeometryDim, Conn, BandDim> Inner<T, BandDim>
         BandDim,
     >
 where
-    T: Copy + RealField,
+    T: Copy + RealField + num_traits::ToPrimitive,
     GeometryDim: SmallDim,
     BandDim: SmallDim,
     Conn: Connectivity<T, GeometryDim> + Send + Sync,
@@ -150,6 +150,7 @@ where
                 self.self_energies,
                 self.spectral,
             )?;
+
         let result = charge_and_current.is_change_within_tolerance(
             previous_charge_and_current,
             self.convergence_settings.inner_tolerance(),
@@ -486,6 +487,14 @@ where
                 self.self_energies,
                 self.spectral,
             )?;
+        //let system_time = std::time::SystemTime::now();
+        //let datetime: chrono::DateTime<chrono::Utc> = system_time.into();
+        //let mut file = std::fs::File::create(format!("../results/inner_charge_{}.txt", datetime))?;
+        //for value in charge_and_current.charge_as_ref().net_charge().row_iter() {
+        //    let value = value[0].to_f64().unwrap().to_string();
+        //    writeln!(file, "{}", value)?;
+        //}
+
         let result = charge_and_current.is_change_within_tolerance(
             previous_charge_and_current,
             self.convergence_settings.inner_tolerance(),
@@ -496,7 +505,10 @@ where
 
     fn single_iteration(&mut self) -> color_eyre::Result<()> {
         // TODO Recompute se, check it's ok, recompute green's functions
-        tracing::trace!("Inner loop with scaling {}", self.scattering_scaling);
+        tracing::trace!(
+            "Mixed formalism inner loop with scaling {}",
+            self.scattering_scaling
+        );
         self.self_energies.recalculate_contact_self_energy(
             self.mesh,
             self.hamiltonian,

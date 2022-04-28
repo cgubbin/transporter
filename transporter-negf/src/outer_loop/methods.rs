@@ -174,7 +174,7 @@ where
         self.tracker.update_potential(potential);
         //// A single iteration before the loop to avoid updating the potential with an empty charge vector
         // Postprocessing steps
-        self.tracker.write_to_file()?;
+        self.tracker.write_to_file("coherent")?;
         Ok(())
     }
 
@@ -318,6 +318,9 @@ where
         potential = Potential::from_vector(solution);
         self.tracker.update_potential(potential);
         // potential = Potential::from_vector(solution.get_param());
+        if self.tracker.scattering_scaling > T::from_f64(0.95).unwrap() {
+            self.tracker.write_to_file("incoherent")?;
+        }
         //// A single iteration before the loop to avoid updating the potential with an empty charge vector
         Ok(())
     }
@@ -421,7 +424,7 @@ where
     }
 
     pub(crate) fn increment_scattering_scaling(&mut self) {
-        self.tracker.scattering_scaling += T::from_f64(0.1).unwrap();
+        self.tracker.scattering_scaling += T::from_f64(0.3).unwrap();
     }
 }
 

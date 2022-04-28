@@ -182,6 +182,7 @@ where
             // .try_for_each(|(index, (wavevector, energy))| {
             .try_for_each(|(index, gf)| {
                 let energy = spectral_space.energy_at(index % n_energies);
+                let wavevector = spectral_space.wavevector_at(index / n_energies);
                 let (source, drain) = (
                     self.info_desk.get_fermi_function_at_source(energy),
                     self.info_desk.get_fermi_function_at_drain(energy, voltage),
@@ -193,12 +194,27 @@ where
                 contact_lesser
                     .values_mut()
                     .iter_mut()
-                    .for_each(|val| *val = val.clone() - val.conj());
+                    .for_each(|val| *val = Complex::new(T::zero(), T::one()) * (*val - val.conj()));
                 contact_lesser.values_mut()[0] *= Complex::new(T::zero(), source);
                 contact_lesser.values_mut()[1] *= Complex::new(T::zero(), drain);
 
-                let energy = spectral_space.energy_at(index % n_energies);
-                let wavevector = spectral_space.wavevector_at(index / n_energies);
+                let internal_lesser = compute_internal_lesser_self_energies(
+                    energy,
+                    wavevector,
+                    hamiltonian,
+                    [
+                        self_energy.contact_retarded[index].values()[0],
+                        self_energy.contact_retarded[index].values()[1],
+                    ],
+                    self.retarded[0].matrix.drain_diagonal.len(),
+                    [source, drain],
+                )?;
+
+                let nrows = self_energy.incoherent_lesser.as_deref().unwrap()[index].nrows();
+                let mut se_lesser_core =
+                    self_energy.incoherent_lesser.as_deref().unwrap()[index].clone();
+                se_lesser_core[(0, 0)] += internal_lesser[0];
+                se_lesser_core[(nrows - 1, nrows - 1)] += internal_lesser[1];
 
                 gf.as_mut().generate_lesser_into(
                     energy,
@@ -208,8 +224,7 @@ where
                     &MMatrix {
                         source_diagonal: vec![contact_lesser.values()[0]],
                         drain_diagonal: vec![contact_lesser.values()[1]],
-                        core_matrix: self_energy.incoherent_lesser.as_deref().unwrap()[index]
-                            .clone(),
+                        core_matrix: se_lesser_core,
                     },
                     &[source, drain],
                 )
@@ -241,8 +256,9 @@ where
         );
         let self_energies_at_external_contacts = (
             self_energy.source_diagonal[0],
-            self_energy.drain_diagonal[1],
+            self_energy.drain_diagonal[0],
         );
+
         // Get the Hamiltonian at this wavevector
         let hamiltonian = hamiltonian.calculate_total(wavevector); // The hamiltonian is minus itself because we are stupid
                                                                    // Generate the diagonal component of the CSR matrix
@@ -285,9 +301,10 @@ where
             number_of_vertices_in_reservoir,
         )] += left_internal_self_energy;
         dense_hamiltonian[(
-            number_of_vertices_in_reservoir + number_of_vertices_in_core,
-            number_of_vertices_in_reservoir + number_of_vertices_in_core,
+            number_of_vertices_in_reservoir + number_of_vertices_in_core - 1,
+            number_of_vertices_in_reservoir + number_of_vertices_in_core - 1,
         )] += right_internal_self_energy;
+
         let mut matrix = DMatrix::identity(number_of_vertices_in_core, number_of_vertices_in_core)
             * Complex::from(energy)
             - dense_hamiltonian.slice(
@@ -299,7 +316,8 @@ where
             ); //TODO Do we have to convert? Seems dumb. Should we store H in dense form too?&ham;
         if matrix.try_inverse_mut() {
             self.core_matrix.copy_from(&matrix);
-            return Ok(());
+        } else {
+            return Err(color_eyre::eyre::eyre!("Failed to invert for rgf"));
         }
 
         // Use the dyson equation to fill G^R in the drain
@@ -323,36 +341,54 @@ where
                 hamiltonian
                     .row_iter()
                     .zip(right_diagonal.into_iter())
-                    .skip(number_of_vertices_in_reservoir + number_of_vertices_in_core),
+                    .skip(number_of_vertices_in_reservoir + number_of_vertices_in_core - 1),
             )
-            .for_each(|(g_rr, (hamiltonian_row, g_ll))| {
+            .for_each(|(element, (hamiltonian_row, right_diagonal_element))| {
                 let hopping_element = hamiltonian_row.values()[2];
-                *g_rr = g_ll
+                *element = right_diagonal_element
                     * (Complex::from(T::one())
-                        + g_ll * previous * hopping_element * previous_hopping_element);
+                        + right_diagonal_element
+                            * previous
+                            * hopping_element
+                            * previous_hopping_element);
                 previous_hopping_element = hopping_element;
-                previous = *g_rr;
+                previous = *element;
             });
 
         // Use the Dyson equation to fill G^R in the source
+        let left_diagonal = left_connected_diagonal(
+            energy,
+            &hamiltonian,
+            &self_energies_at_external_contacts,
+            hamiltonian.nrows(),
+            number_of_vertices_in_reservoir,
+        )?;
         previous = self.core_matrix[(0, 0)];
         previous_hopping_element = hamiltonian.row(number_of_vertices_in_reservoir).values()[2];
         self.source_diagonal
             .iter_mut()
             .zip(
-                right_diagonal
+                left_diagonal
                     .into_iter()
                     .take(number_of_vertices_in_reservoir),
             )
             .rev()
             .enumerate()
-            .for_each(|(idx, (g_rr, g_ll))| {
-                let hamiltonian_row = hamiltonian.row(number_of_vertices_in_reservoir - 1 - idx);
-                let hopping_element = hamiltonian_row.values()[2];
-                *g_rr =
-                    (previous - g_ll) / g_ll.powi(2) / hopping_element / previous_hopping_element;
+            .for_each(|(idx, (element, left_diagonal_element))| {
+                let row = hamiltonian.row(number_of_vertices_in_reservoir - 1 - idx);
+                let hopping_element = if row.values().len() == 3 {
+                    T::from_real(row.values()[0])
+                } else {
+                    T::from_real(row.values()[1])
+                };
+                *element = left_diagonal_element
+                    * (Complex::from(T::one())
+                        + left_diagonal_element
+                            * previous
+                            * hopping_element
+                            * previous_hopping_element);
                 previous_hopping_element = hopping_element;
-                previous = *g_rr;
+                previous = *element;
             });
 
         Ok(())
@@ -411,6 +447,72 @@ where
 
         Ok(())
     }
+}
+
+fn compute_internal_lesser_self_energies<T: RealField + Copy>(
+    energy: T,
+    wavevector: T,
+    hamiltonian: &Hamiltonian<T>,
+    edge_retarded_self_energies: [Complex<T>; 2],
+    number_of_vertices_in_reservoir: usize,
+    fermi_functions: [T; 2],
+) -> color_eyre::Result<[Complex<T>; 2]> {
+    let retarded_self_energies_internal = compute_internal_retarded_self_energies(
+        energy,
+        wavevector,
+        hamiltonian,
+        edge_retarded_self_energies,
+        number_of_vertices_in_reservoir,
+    )?;
+
+    let lesser_se = retarded_self_energies_internal
+        .iter()
+        .zip(fermi_functions.into_iter())
+        .map(|(s_re, f)| {
+            Complex::new(T::zero(), f) * Complex::new(T::zero(), T::one()) * (s_re - s_re.conj())
+        })
+        .collect::<Vec<_>>();
+    Ok([lesser_se[0], lesser_se[1]])
+}
+
+fn compute_internal_retarded_self_energies<T: RealField + Copy>(
+    energy: T,
+    wavevector: T,
+    hamiltonian: &Hamiltonian<T>,
+    edge_retarded_self_energies: [Complex<T>; 2],
+    number_of_vertices_in_reservoir: usize,
+) -> color_eyre::Result<[Complex<T>; 2]> {
+    let self_energies_at_external_contacts = (
+        edge_retarded_self_energies[0],
+        edge_retarded_self_energies[1],
+    );
+    // Get the Hamiltonian at this wavevector
+    let hamiltonian = hamiltonian.calculate_total(wavevector); // The hamiltonian is minus itself because we are stupid
+                                                               // Generate the diagonal component of the CSR matrix
+
+    // Get the self-energies at the edge of the core region
+    let g_00 = left_connected_diagonal(
+        energy,
+        &hamiltonian,
+        &self_energies_at_external_contacts,
+        number_of_vertices_in_reservoir,
+        number_of_vertices_in_reservoir,
+    )?;
+    let left_internal_self_energy = g_00[(g_00.shape().0 - 1, 0)]
+        * hamiltonian.row(number_of_vertices_in_reservoir).values()[2].powi(2);
+    let g_ll = right_connected_diagonal(
+        energy,
+        &hamiltonian,
+        &self_energies_at_external_contacts,
+        number_of_vertices_in_reservoir,
+        number_of_vertices_in_reservoir,
+    )?;
+    let right_internal_self_energy = g_ll[(0, 0)]
+        * hamiltonian
+            .row(hamiltonian.nrows() - 1 - number_of_vertices_in_reservoir)
+            .values()[2]
+            .powi(2);
+    Ok([left_internal_self_energy, right_internal_self_energy])
 }
 
 /// Implementation of the accumulator methods for a sparse AggregateGreensFunction

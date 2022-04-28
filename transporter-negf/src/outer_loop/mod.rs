@@ -368,7 +368,7 @@ where
     fermi_level: DVector<T>,
     iteration: usize,
     calculation: Calculation,
-    scattering_scaling: T,
+    pub(crate) scattering_scaling: T,
     voltage: T,
 }
 
@@ -440,13 +440,13 @@ where
         self.scattering_scaling
     }
 
-    pub(crate) fn write_to_file(&self) -> Result<(), std::io::Error>
+    pub(crate) fn write_to_file(&self, calculation: &str) -> Result<(), std::io::Error>
     where
         T: argmin::core::ArgminFloat,
     {
         // Write potential
         let mut file = std::fs::File::create(format!(
-            "../results/potential_{}V_{}_scaling.txt",
+            "../results/{calculation}_potential_{}V_{}_scaling.txt",
             self.voltage, self.scattering_scaling
         ))?;
         for value in self.potential.as_ref().row_iter() {
@@ -456,7 +456,7 @@ where
 
         // Write net charge
         let mut file = std::fs::File::create(format!(
-            "../results/charge_{}V_{}_scaling.txt",
+            "../results/{calculation}_charge_{}V_{}_scaling.txt",
             self.voltage, self.scattering_scaling
         ))?;
         for value in self
