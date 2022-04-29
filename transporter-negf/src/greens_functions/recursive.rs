@@ -11,6 +11,10 @@ use nalgebra::{ComplexField, DVector, RealField};
 use nalgebra_sparse::CsrMatrix;
 use num_complex::Complex;
 
+/// Error for the recursive Green's function methods. Currently unimplemented
+#[derive(thiserror::Error, Debug, miette::Diagnostic)]
+pub enum RecursionError {}
+
 /// Calculates the left connected diagonal from the Hamiltonian of the system, and the self energy in the left lead.
 ///
 /// This process is initialised using the self-energy in the left lead, and solving
@@ -27,7 +31,7 @@ pub fn left_connected_diagonal<T>(
     // calculate the extended contact GF. To go down the whole matrix pass nrows
     terminate_after: usize,
     number_of_vertices_in_reservoir: usize,
-) -> color_eyre::Result<DVector<Complex<T>>>
+) -> Result<DVector<Complex<T>>, RecursionError>
 where
     T: RealField + Copy,
     // <T as ComplexField>::RealField: Copy,
@@ -83,7 +87,7 @@ pub fn left_connected_diagonal_no_alloc<T>(
     self_energies: &(T, T),
     diagonal: &mut ndarray::Array1<T>,
     // An optional early termination argument, to go down the whole matrix pass nrows
-) -> color_eyre::Result<()>
+) -> Result<(), RecursionError>
 where
     T: ComplexField + Copy,
     <T as ComplexField>::RealField: Copy,
@@ -128,7 +132,7 @@ pub fn right_connected_diagonal<T>(
     self_energies: &(Complex<T>, Complex<T>),
     terminate_after: usize,
     number_of_vertices_in_reservoir: usize,
-) -> color_eyre::Result<DVector<Complex<T>>>
+) -> Result<DVector<Complex<T>>, RecursionError>
 where
     T: RealField + Copy,
 {
@@ -179,7 +183,7 @@ pub fn right_connected_diagonal_no_alloc<T>(
     hamiltonian: &CsrMatrix<T::RealField>,
     self_energies: &(T, T),
     diagonal: &mut DVector<T>,
-) -> color_eyre::Result<()>
+) -> Result<(), RecursionError>
 where
     T: ComplexField + Copy,
     <T as ComplexField>::RealField: Copy,
@@ -220,7 +224,7 @@ pub fn diagonal<T>(
     hamiltonian: &CsrMatrix<T>,
     self_energies: &(Complex<T>, Complex<T>),
     number_of_vertices_in_reservoir: usize,
-) -> color_eyre::Result<DVector<Complex<T>>>
+) -> Result<DVector<Complex<T>>, RecursionError>
 where
     T: RealField + Copy,
 {
@@ -270,7 +274,7 @@ pub(crate) fn diagonal_element<T>(
     hamiltonian: &CsrMatrix<T>,
     self_energies: &(Complex<T>, Complex<T>),
     element_index: usize,
-) -> color_eyre::Result<Complex<T>>
+) -> Result<Complex<T>, RecursionError>
 where
     T: RealField + Copy,
 {
@@ -338,7 +342,7 @@ pub(crate) fn build_out_row<T>(
     self_energies: &(Complex<T>, Complex<T>),
     row_index: usize,
     number_of_vertices_in_reservoir: usize,
-) -> color_eyre::Result<DVector<Complex<T>>>
+) -> Result<DVector<Complex<T>>, RecursionError>
 where
     T: RealField + Copy,
 {
@@ -403,7 +407,7 @@ pub(crate) fn build_out_column<T>(
     self_energies: &(Complex<T>, Complex<T>),
     row_index: usize,
     number_of_vertices_in_reservoir: usize,
-) -> color_eyre::Result<DVector<Complex<T>>>
+) -> Result<DVector<Complex<T>>, RecursionError>
 where
     T: RealField + Copy,
 {
@@ -422,7 +426,7 @@ pub(crate) fn left_column<T>(
     _hamiltonian: &CsrMatrix<T::RealField>,
     _diagonal: &DVector<T>,
     _right_self_energy: T,
-) -> color_eyre::Result<DVector<T>>
+) -> Result<DVector<T>, RecursionError>
 where
     T: ComplexField + Copy,
     <T as ComplexField>::RealField: Copy,
@@ -453,7 +457,7 @@ pub(crate) fn right_column<T>(
     fully_connected_diagonal: &DVector<T>,
     left_connected_diagonal: &DVector<T>,
     hamiltonian: &CsrMatrix<T::RealField>,
-) -> color_eyre::Result<DVector<T>>
+) -> Result<DVector<T>, RecursionError>
 where
     T: ComplexField + Copy,
     <T as ComplexField>::RealField: Copy,

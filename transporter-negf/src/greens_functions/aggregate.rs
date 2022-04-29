@@ -4,7 +4,7 @@
 //! evaluated at all energy and wavevector points in the spectral grid over which the problem is defined.
 //! Aggregated structures and methods are designed to integrate with the inner loop, whereas the individual
 //! Green's functions should not be called directly.
-use super::{mixed::MMatrix, GreensFunction, GreensFunctionMethods};
+use super::{mixed::MMatrix, GreensFunction, GreensFunctionError, GreensFunctionMethods};
 use crate::postprocessor::{Charge, Current};
 use crate::{
     app::Calculation,
@@ -391,7 +391,7 @@ pub(crate) trait AggregateGreensFunctionMethods<
         &self,
         mesh: &Mesh<T, GeometryDim, Conn>,
         integrator: &Integrator,
-    ) -> color_eyre::Result<Charge<T, BandDim>>;
+    ) -> Result<Charge<T, BandDim>, crate::postprocessor::PostProcessorError>;
     /// Operates on the collected Green's functions to calculate the total current in each band
     fn accumulate_into_current_density_vector(
         &self,
@@ -399,7 +399,7 @@ pub(crate) trait AggregateGreensFunctionMethods<
         mesh: &Mesh<T, GeometryDim, Conn>,
         self_energy: &SelfEnergy,
         integrator: &Integrator,
-    ) -> color_eyre::Result<Current<T, BandDim>>;
+    ) -> Result<Current<T, BandDim>, crate::postprocessor::PostProcessorError>;
 }
 
 /// A helper function to assemble the csr pattern for the retarded Green's function

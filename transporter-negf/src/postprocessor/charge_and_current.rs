@@ -1,3 +1,4 @@
+use super::PostProcessorError;
 use nalgebra::{
     allocator::Allocator, Const, DVector, DefaultAllocator, Dynamic, Matrix, OVector, RealField,
     VecStorage,
@@ -86,7 +87,7 @@ where
         &self,
         previous: &ChargeAndCurrent<T, BandDim>,
         tolerance: T,
-    ) -> color_eyre::Result<bool> {
+    ) -> Result<bool, PostProcessorError> {
         Ok(self
             .charge_and_current_iter()
             .zip(previous.charge_and_current_iter())
@@ -162,14 +163,14 @@ where
         BandDim,
     >,
 {
-    pub(crate) fn new(charge: OVector<DVector<T>, BandDim>) -> color_eyre::Result<Self> {
+    pub(crate) fn new(charge: OVector<DVector<T>, BandDim>) -> Result<Self, PostProcessorError> {
         let length = charge[0].shape();
         if charge.iter().all(|x| x.shape() == length) {
             Ok(Self { charge })
         } else {
-            Err(color_eyre::eyre::eyre!(
+            Err(PostProcessorError::InconsistentDimensions(anyhow::anyhow!(
                 "All charges must have the same number of points"
-            ))
+            )))
         }
     }
 }
@@ -181,14 +182,14 @@ where
         BandDim,
     >,
 {
-    pub(crate) fn new(current: OVector<DVector<T>, BandDim>) -> color_eyre::Result<Self> {
+    pub(crate) fn new(current: OVector<DVector<T>, BandDim>) -> Result<Self, PostProcessorError> {
         let length = current[0].shape();
         if current.iter().all(|x| x.shape() == length) {
             Ok(Self { current })
         } else {
-            Err(color_eyre::eyre::eyre!(
-                "All currents must have the same number of points"
-            ))
+            Err(PostProcessorError::InconsistentDimensions(anyhow::anyhow!(
+                "All charges must have the same number of points"
+            )))
         }
     }
 }

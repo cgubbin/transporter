@@ -38,18 +38,21 @@ use transporter_mesher::{Connectivity, Mesh, SmallDim};
 
 #[derive(thiserror::Error, Debug, Diagnostic)]
 pub(crate) enum OuterLoopError<T: RealField> {
+    // An error in building an operator, or a self energy. These errors are non-recoverable
     #[error(transparent)]
     BuilderError(#[from] BuildError),
     // #[error(transparent)]
     // InnerLoopError,
-    // #[error(transparent)]
-    // OutOfIterations,
+    // An error in the fixed-point iteration convergence: this can be recoverable if it is an
+    // out-of-iteration variant. Sometimes convergence is close and we should just advance
     #[error(transparent)]
     FixedPoint(#[from] conflux::core::FixedPointError<T>),
+    // Errors from the Poisson equation convergence. These errors are probably non-recoverable
     #[error(transparent)]
     PoissonError(#[from] argmin::core::Error),
     // #[error(transparent)]
     // Stagnation,
+    // Write errors in post-processing. Non-recoverable
     #[error(transparent)]
     IoError(#[from] std::io::Error),
 }

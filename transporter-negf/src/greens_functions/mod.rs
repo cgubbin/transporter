@@ -11,6 +11,18 @@ pub(crate) use aggregate::{
 use nalgebra::{allocator::Allocator, DefaultAllocator, RealField};
 use transporter_mesher::SmallDim;
 
+#[derive(thiserror::Error, Debug, miette::Diagnostic)]
+pub(crate) enum GreensFunctionError {
+    // We wrap Csr errors in an anyhow error here so they are Send + Sync, something not
+    // implemented by the `SparseFormatError` natively
+    #[error(transparent)]
+    Csr(#[from] anyhow::Error),
+    #[error("Failed to invert for the retarded Green's Function")]
+    Inversion,
+    #[error(transparent)]
+    Recursion(#[from] crate::greens_functions::recursive::RecursionError),
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct GreensFunction<Matrix, T>
 where
@@ -40,13 +52,13 @@ where
     T: RealField + Copy,
 {
     type SelfEnergy;
-    fn generate_advanced_into(&mut self, retarded: &Self) -> color_eyre::Result<()>;
+    fn generate_advanced_into(&mut self, retarded: &Self) -> Result<(), GreensFunctionError>;
     fn generate_greater_into(
         &mut self,
         lesser: &Self,
         retarded: &Self,
         advanced: &Self,
-    ) -> color_eyre::Result<()>;
+    ) -> Result<(), GreensFunctionError>;
     fn generate_lesser_into(
         &mut self,
         energy: T,
@@ -55,14 +67,14 @@ where
         retarded_greens_function: &Self,
         retarded_self_energy: &Self,
         fermi_levels: &[T],
-    ) -> color_eyre::Result<()>;
+    ) -> Result<(), GreensFunctionError>;
     fn generate_retarded_into(
         &mut self,
         energy: T,
         wavevector: T,
         hamiltonian: &Hamiltonian<T>,
         self_energy: &Self,
-    ) -> color_eyre::Result<()>;
+    ) -> Result<(), GreensFunctionError>;
 }
 
 /// InfoDesk trait to provide the Fermi levels and 0th order Fermi integrals to Greens Function methods

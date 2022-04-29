@@ -1,5 +1,5 @@
 //! Dense implementations for single and aggregated Greens functions
-use super::GreensFunctionMethods;
+use super::{GreensFunctionError, GreensFunctionMethods};
 use crate::hamiltonian::Hamiltonian;
 use nalgebra::{ComplexField, DMatrix, RealField};
 use nalgebra_sparse::CsrMatrix;
@@ -34,7 +34,7 @@ where
         wavevector: T,
         hamiltonian: &Hamiltonian<T>,
         retarded_self_energy: &Self::SelfEnergy,
-    ) -> color_eyre::Result<()> {
+    ) -> Result<(), GreensFunctionError> {
         let mut output: nalgebra::DMatrixSliceMut<Complex<T>> = self.into();
 
         // do a slow matrix inversion
@@ -48,8 +48,8 @@ where
         for value in values {
             y.push(Complex::from(*value));
         }
-        let hamiltonian =
-            CsrMatrix::try_from_pattern_and_values(hamiltonian.pattern().clone(), y).unwrap();
+        let hamiltonian = CsrMatrix::try_from_pattern_and_values(hamiltonian.pattern().clone(), y)
+            .map_err(|e| GreensFunctionError::Csr(anyhow::anyhow!(e.to_string())))?;
         // Avoid allocation: https://github.com/InteractiveComputerGraphics/fenris/blob/e4161887669acb366cad312cfa68d106e6cf576c/src/assembly/operators.rs
         // Look at lines 164-172
         let mut matrix = DMatrix::identity(num_rows, num_rows) * Complex::from(energy)
@@ -60,10 +60,7 @@ where
             output.copy_from(&matrix);
             return Ok(());
         }
-
-        Err(color_eyre::eyre::eyre!(
-            "Failed to invert for the retarded Green's function",
-        ))
+        Err(GreensFunctionError::Inversion)
     }
 
     fn generate_greater_into(
@@ -71,13 +68,16 @@ where
         lesser: &DMatrix<Complex<T>>,
         retarded: &DMatrix<Complex<T>>,
         advanced: &DMatrix<Complex<T>>,
-    ) -> color_eyre::Result<()> {
+    ) -> Result<(), GreensFunctionError> {
         let mut output: nalgebra::DMatrixSliceMut<Complex<T>> = self.into();
         output.copy_from(&(retarded - advanced + lesser));
         Ok(())
     }
 
-    fn generate_advanced_into(&mut self, retarded: &DMatrix<Complex<T>>) -> color_eyre::Result<()> {
+    fn generate_advanced_into(
+        &mut self,
+        retarded: &DMatrix<Complex<T>>,
+    ) -> Result<(), GreensFunctionError> {
         let mut output: nalgebra::DMatrixSliceMut<Complex<T>> = self.into();
         output.copy_from(&retarded.conjugate().transpose());
         Ok(())
@@ -91,7 +91,7 @@ where
         retarded_greens_function: &DMatrix<Complex<T>>,
         lesser_self_energy: &Self::SelfEnergy,
         _fermi_functions: &[T],
-    ) -> color_eyre::Result<()> {
+    ) -> Result<(), GreensFunctionError> {
         self.iter_mut()
             .zip(
                 (retarded_greens_function
@@ -133,7 +133,7 @@ where
         &self,
         mesh: &Mesh<T, GeometryDim, Conn>,
         spectral_space: &Spectral,
-    ) -> color_eyre::Result<Charge<T, BandDim>> {
+    ) -> Result<Charge<T, BandDim>, crate::postprocessor::PostProcessorError> {
         let mut charges: Vec<DVector<T>> = Vec::with_capacity(BandDim::dim());
         // Sum over the diagonal of the calculated spectral density
         let n_ele = self.lesser[0].matrix.shape().0;
@@ -241,7 +241,7 @@ where
         mesh: &Mesh<T, GeometryDim, Conn>,
         self_energy: &SelfEnergy<T, GeometryDim, Conn>,
         spectral_space: &Spectral,
-    ) -> color_eyre::Result<Current<T, BandDim>> {
+    ) -> Result<Current<T, BandDim>, crate::postprocessor::PostProcessorError> {
         let mut currents: Vec<DVector<T>> = Vec::with_capacity(BandDim::dim());
 
         let summed_current = self
@@ -329,7 +329,7 @@ where
         hamiltonian: &Hamiltonian<T>,
         self_energy: &SelfEnergy<T, GeometryDim, Conn>,
         spectral_space: &Spectral,
-    ) -> color_eyre::Result<()>
+    ) -> Result<(), GreensFunctionError>
     where
         Conn: Connectivity<T, GeometryDim> + Send + Sync,
         Spectral: SpectralDiscretisation<T>,
@@ -354,7 +354,7 @@ where
         hamiltonian: &Hamiltonian<T>,
         self_energy: &SelfEnergy<T, GeometryDim, Conn>,
         spectral_space: &Spectral,
-    ) -> color_eyre::Result<()>
+    ) -> Result<(), GreensFunctionError>
     where
         Conn: Connectivity<T, GeometryDim> + Send + Sync,
         Spectral: SpectralDiscretisation<T>,
@@ -404,7 +404,7 @@ where
         hamiltonian: &Hamiltonian<T>,
         self_energy: &SelfEnergy<T, GeometryDim, Conn>,
         spectral_space: &Spectral,
-    ) -> color_eyre::Result<()>
+    ) -> Result<(), GreensFunctionError>
     where
         Conn: Connectivity<T, GeometryDim> + Send + Sync,
         Spectral: SpectralDiscretisation<T>,

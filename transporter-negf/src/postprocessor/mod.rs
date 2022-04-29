@@ -4,9 +4,16 @@ mod postprocess;
 pub(crate) use charge_and_current::{Charge, ChargeAndCurrent, Current};
 pub(crate) use postprocess::PostProcess;
 
+use miette::Diagnostic;
 use nalgebra::{allocator::Allocator, ComplexField, DefaultAllocator};
 use std::marker::PhantomData;
 use transporter_mesher::{Connectivity, Mesh, SmallDim};
+
+#[derive(thiserror::Error, Debug, Diagnostic)]
+pub(crate) enum PostProcessorError {
+    #[error(transparent)]
+    InconsistentDimensions(#[from] anyhow::Error),
+}
 
 pub(crate) struct PostProcessorBuilder<T, RefMesh> {
     mesh: RefMesh,

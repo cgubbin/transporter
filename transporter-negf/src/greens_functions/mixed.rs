@@ -8,7 +8,7 @@
 use super::{
     aggregate::{AggregateGreensFunctionMethods, AggregateGreensFunctions},
     recursive::{left_connected_diagonal, right_connected_diagonal},
-    GreensFunctionInfoDesk, GreensFunctionMethods,
+    GreensFunctionError, GreensFunctionInfoDesk, GreensFunctionMethods,
 };
 use crate::{
     hamiltonian::Hamiltonian,
@@ -32,8 +32,8 @@ use transporter_mesher::{Connectivity, ElementMethods, Mesh, SmallDim};
 #[derive(Clone, Debug)]
 pub(crate) struct MMatrix<T> {
     source_diagonal: Vec<T>,
-    drain_diagonal: Vec<T>,
-    core_matrix: DMatrix<T>,
+    pub(crate) drain_diagonal: Vec<T>,
+    pub(crate) core_matrix: DMatrix<T>,
 }
 
 impl<T: ComplexField> MMatrix<T> {
@@ -68,7 +68,7 @@ where
         hamiltonian: &Hamiltonian<T>,
         self_energy: &SelfEnergy<T, GeometryDim, Conn>,
         spectral_space: &Spectral,
-    ) -> color_eyre::Result<()>
+    ) -> Result<(), GreensFunctionError>
     where
         Conn: Connectivity<T, GeometryDim> + Send + Sync,
         Spectral: SpectralDiscretisation<T>,
@@ -93,7 +93,7 @@ where
         hamiltonian: &Hamiltonian<T>,
         self_energy: &SelfEnergy<T, GeometryDim, Conn>,
         spectral_space: &Spectral,
-    ) -> color_eyre::Result<()>
+    ) -> Result<(), GreensFunctionError>
     where
         Conn: Connectivity<T, GeometryDim> + Send + Sync,
         Spectral: SpectralDiscretisation<T>,
@@ -146,7 +146,7 @@ where
         hamiltonian: &Hamiltonian<T>,
         self_energy: &SelfEnergy<T, GeometryDim, Conn>,
         spectral_space: &Spectral,
-    ) -> color_eyre::Result<()>
+    ) -> Result<(), GreensFunctionError>
     where
         Conn: Connectivity<T, GeometryDim> + Send + Sync,
         Spectral: SpectralDiscretisation<T>,
@@ -245,7 +245,7 @@ where
         wavevector: T,
         hamiltonian: &Hamiltonian<T>,
         self_energy: &Self::SelfEnergy,
-    ) -> color_eyre::Result<()> {
+    ) -> Result<(), GreensFunctionError> {
         // The number of entries is n_rows + 2 * (n_rows - 2 * n_lead - 1)
         let number_of_vertices_in_reservoir = self.source_diagonal.len();
         let number_of_vertices_in_core = self.core_matrix.nrows();
@@ -317,7 +317,7 @@ where
         if matrix.try_inverse_mut() {
             self.core_matrix.copy_from(&matrix);
         } else {
-            return Err(color_eyre::eyre::eyre!("Failed to invert for rgf"));
+            return Err(GreensFunctionError::Inversion);
         }
 
         // Use the dyson equation to fill G^R in the drain
@@ -395,16 +395,21 @@ where
     }
 
     // We never generate a greater greens function in the self-consistent loop. Maybe we will in the future when moving to incoherent transport
-    fn generate_greater_into(&mut self, _: &Self, _: &Self, _: &Self) -> color_eyre::Result<()> {
-        unreachable!()
+    fn generate_greater_into(
+        &mut self,
+        _: &Self,
+        _: &Self,
+        _: &Self,
+    ) -> Result<(), GreensFunctionError> {
+        unimplemented!()
     }
 
     // We also never generate the advanced greens function, instead transiently calculating it in `generate_lesser_into`. Maybe we will in future
     fn generate_advanced_into(
         &mut self,
         _retarded: &MMatrix<Complex<T>>,
-    ) -> color_eyre::Result<()> {
-        unreachable!()
+    ) -> Result<(), GreensFunctionError> {
+        unimplemented!()
     }
 
     fn generate_lesser_into(
@@ -415,7 +420,7 @@ where
         retarded_greens_function: &MMatrix<Complex<T>>,
         lesser_self_energy: &MMatrix<Complex<T>>,
         fermi_functions: &[T],
-    ) -> color_eyre::Result<()> {
+    ) -> Result<(), GreensFunctionError> {
         // Expensive matrix inversion
         self.core_matrix
             .iter_mut()
@@ -456,7 +461,7 @@ fn compute_internal_lesser_self_energies<T: RealField + Copy>(
     edge_retarded_self_energies: [Complex<T>; 2],
     number_of_vertices_in_reservoir: usize,
     fermi_functions: [T; 2],
-) -> color_eyre::Result<[Complex<T>; 2]> {
+) -> Result<[Complex<T>; 2], GreensFunctionError> {
     let retarded_self_energies_internal = compute_internal_retarded_self_energies(
         energy,
         wavevector,
@@ -481,7 +486,7 @@ fn compute_internal_retarded_self_energies<T: RealField + Copy>(
     hamiltonian: &Hamiltonian<T>,
     edge_retarded_self_energies: [Complex<T>; 2],
     number_of_vertices_in_reservoir: usize,
-) -> color_eyre::Result<[Complex<T>; 2]> {
+) -> Result<[Complex<T>; 2], GreensFunctionError> {
     let self_energies_at_external_contacts = (
         edge_retarded_self_energies[0],
         edge_retarded_self_energies[1],
@@ -542,7 +547,7 @@ where
         &self,
         mesh: &Mesh<T, GeometryDim, Conn>,
         spectral_space: &Spectral,
-    ) -> color_eyre::Result<Charge<T, BandDim>> {
+    ) -> Result<Charge<T, BandDim>, crate::postprocessor::PostProcessorError> {
         let mut charges: Vec<DVector<T>> = Vec::with_capacity(BandDim::dim());
         // Sum over the diagonal of the calculated spectral density
         // TODO Only one band
@@ -676,7 +681,7 @@ where
         mesh: &Mesh<T, GeometryDim, Conn>,
         self_energy: &SelfEnergy<T, GeometryDim, Conn>,
         spectral_space: &Spectral,
-    ) -> color_eyre::Result<Current<T, BandDim>> {
+    ) -> Result<Current<T, BandDim>, crate::postprocessor::PostProcessorError> {
         let mut currents: Vec<DVector<T>> = Vec::with_capacity(BandDim::dim());
         let number_of_vertices_in_internal_lead = self.retarded[0].as_ref().source_diagonal.len();
 

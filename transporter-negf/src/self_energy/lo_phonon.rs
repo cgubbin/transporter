@@ -1,4 +1,4 @@
-use super::SelfEnergy;
+use super::{SelfEnergy, SelfEnergyError};
 use crate::constants::{ELECTRON_CHARGE, EPSILON_0};
 use crate::greens_functions::{mixed::MMatrix, AggregateGreensFunctions};
 use crate::spectral::SpectralDiscretisation;
@@ -33,7 +33,7 @@ where
             GeometryDim,
             BandDim,
         >,
-    ) -> color_eyre::Result<()>
+    ) -> Result<(), SelfEnergyError>
     where
         Spectral: SpectralDiscretisation<T>,
         DefaultAllocator: Allocator<T, BandDim> + Allocator<[T; 3], BandDim>,
@@ -185,7 +185,7 @@ where
             GeometryDim,
             BandDim,
         >,
-    ) -> color_eyre::Result<()>
+    ) -> Result<(), SelfEnergyError>
     where
         Spectral: SpectralDiscretisation<T>,
         DefaultAllocator: Allocator<T, BandDim> + Allocator<[T; 3], BandDim>,
@@ -384,7 +384,7 @@ where
             GeometryDim,
             BandDim,
         >,
-    ) -> color_eyre::Result<()>
+    ) -> Result<(), SelfEnergyError>
     where
         Spectral: SpectralDiscretisation<T>,
         DefaultAllocator: Allocator<T, BandDim> + Allocator<[T; 3], BandDim>,
@@ -397,6 +397,8 @@ where
         let eps_fr = T::from_f64(20_f64).unwrap();
         let gamma_frohlich =
             scaling * T::from_f64(ELECTRON_CHARGE / 2_f64 / EPSILON_0).unwrap() * e_0 * eps_fr; // In electron volts
+
+        let num_vertices_in_reservoir = greens_functions.retarded[0].as_ref().drain_diagonal.len();
 
         assert!(self.incoherent_lesser.is_some());
 
@@ -470,10 +472,10 @@ where
                         );
                         for (idx, mut row) in lesser_self_energy_matrix.row_iter_mut().enumerate() {
                             for (jdx, entry) in row.iter_mut().enumerate() {
-                                let prefactor = Self::bulk_lo_phonon_potential(
+                                let prefactor = Self::bulk_lo_phonon_potential_mixed(
                                     mesh,
-                                    idx,
-                                    jdx,
+                                    idx + num_vertices_in_reservoir,
+                                    jdx + num_vertices_in_reservoir,
                                     (wavevector_k - wavevector_l).abs(),
                                 );
                                 *entry += Complex::from(
@@ -515,10 +517,10 @@ where
 
                         for (idx, mut row) in lesser_self_energy_matrix.row_iter_mut().enumerate() {
                             for (jdx, entry) in row.iter_mut().enumerate() {
-                                let prefactor = Self::bulk_lo_phonon_potential(
+                                let prefactor = Self::bulk_lo_phonon_potential_mixed(
                                     mesh,
-                                    idx,
-                                    jdx,
+                                    idx + num_vertices_in_reservoir,
+                                    jdx + num_vertices_in_reservoir,
                                     (wavevector_k - wavevector_l).abs(),
                                 );
                                 *entry += Complex::from(prefactor * (n_0) * weight * wavevector_l)
@@ -528,6 +530,7 @@ where
                     }
                 }
             });
+
         Ok(())
     }
 
@@ -543,7 +546,7 @@ where
             GeometryDim,
             BandDim,
         >,
-    ) -> color_eyre::Result<()>
+    ) -> Result<(), SelfEnergyError>
     where
         Spectral: SpectralDiscretisation<T>,
         DefaultAllocator: Allocator<T, BandDim> + Allocator<[T; 3], BandDim>,
@@ -700,7 +703,80 @@ where
                     }
                 }
             });
+
         Ok(())
+    }
+
+    pub(crate) fn calculate_localised_lo_scattering_rate<BandDim: SmallDim, Spectral>(
+        &self,
+        spectral_space: &Spectral,
+        greens_functions: &AggregateGreensFunctions<
+            '_,
+            T,
+            MMatrix<Complex<T>>,
+            GeometryDim,
+            BandDim,
+        >,
+    ) -> Result<Complex<T>, SelfEnergyError>
+    where
+        Spectral: SpectralDiscretisation<T>,
+        DefaultAllocator: Allocator<T, BandDim> + Allocator<[T; 3], BandDim>,
+        <DefaultAllocator as Allocator<T, BandDim>>::Buffer: Send + Sync,
+        <DefaultAllocator as Allocator<[T; 3], BandDim>>::Buffer: Send + Sync,
+    {
+        tracing::info!("Calculating LO scattering rate");
+
+        assert!(self.incoherent_retarded.is_some());
+
+        let mut result = Complex::from(T::zero());
+
+        // \Sigma^{<} =
+
+        let wavevector_weights = spectral_space.iter_wavevector_weights().collect::<Vec<_>>();
+        let energy_weights = spectral_space.iter_energy_weights().collect::<Vec<_>>();
+
+        for index in 0..self.incoherent_retarded.as_deref().unwrap().len() {
+            let energy_index = index % spectral_space.number_of_energy_points();
+            let wavevector_index_k = index / spectral_space.number_of_energy_points();
+            let wavevector_k = spectral_space.wavevector_at(wavevector_index_k);
+
+            // Sigma^> = \Sigma^R - \Sigma^A + \Sigma^<
+            let incoherent_greater = &self.incoherent_retarded.as_deref().unwrap()[index]
+                - self.incoherent_retarded.as_deref().unwrap()[index].adjoint()
+                + &self.incoherent_lesser.as_deref().unwrap()[index];
+
+            // G^> = G^R - G^A + G^<
+            let g_greater = &greens_functions.retarded[index].as_ref().core_matrix
+                - &greens_functions.retarded[index]
+                    .as_ref()
+                    .core_matrix
+                    .adjoint()
+                + &greens_functions.lesser[index].as_ref().core_matrix;
+
+            let integrand = (&self.incoherent_lesser.as_deref().unwrap()[index] * g_greater
+                - incoherent_greater * &greens_functions.lesser[index].as_ref().core_matrix)
+                .diagonal();
+            if integrand.sum() == Complex::from(T::zero()) {
+                dbg!(
+                    integrand,
+                    &greens_functions.retarded[index].as_ref().core_matrix,
+                    &self.incoherent_lesser.as_deref().unwrap()[index]
+                );
+                panic!();
+            }
+            let integrand = -integrand.sum();
+            let prefactor = wavevector_k
+                * T::from_f64(
+                    2_f64 * ELECTRON_CHARGE
+                        / crate::constants::HBAR
+                        / (2_f64 * std::f64::consts::PI).powi(2),
+                )
+                .unwrap()
+                * wavevector_weights[wavevector_index_k]
+                * energy_weights[energy_index];
+            result += Complex::from(prefactor) * integrand;
+        }
+        Ok(result)
     }
 
     fn bulk_lo_phonon_potential_mixed(
@@ -712,11 +788,11 @@ where
         let debye_wavevector = T::from_f64(1_f64 / 10e-9).unwrap();
         let _common_wavevector = (debye_wavevector.powi(2) + wavevector.powi(2)).sqrt();
         let region_a = &mesh.vertices()[vertex_a].1;
-        if *region_a != transporter_mesher::Assignment::Core(1) {
+        if *region_a != transporter_mesher::Assignment::Core(2) {
             return T::zero();
         }
         let d = T::from_f64(5e-9).unwrap();
-        let center = T::from_f64(12.5e-9).unwrap();
+        let center = T::from_f64(42.5e-9).unwrap();
         let xi = T::from_f64(std::f64::consts::PI).unwrap() / d;
         let z_a = &mesh.vertices()[vertex_a].0;
         let z_b = &mesh.vertices()[vertex_b].0;

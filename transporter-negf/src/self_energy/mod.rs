@@ -13,6 +13,12 @@ use num_complex::Complex;
 use std::marker::PhantomData;
 use transporter_mesher::{Connectivity, ElementMethods, Mesh, SmallDim};
 
+#[derive(thiserror::Error, Debug, miette::Diagnostic)]
+pub(crate) enum SelfEnergyError {
+    #[error(transparent)]
+    Computation(#[from] anyhow::Error),
+}
+
 #[derive(Clone)]
 pub(crate) struct SelfEnergy<T, GeometryDim, Conn>
 where

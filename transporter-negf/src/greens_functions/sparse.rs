@@ -7,7 +7,7 @@
 use super::{
     aggregate::{AggregateGreensFunctionMethods, AggregateGreensFunctions},
     recursive::{build_out_column, diagonal, left_connected_diagonal, right_connected_diagonal},
-    {GreensFunctionInfoDesk, GreensFunctionMethods},
+    {GreensFunctionError, GreensFunctionInfoDesk, GreensFunctionMethods},
 };
 use crate::{
     hamiltonian::Hamiltonian,
@@ -34,7 +34,7 @@ pub(crate) trait CsrAssembly<T: RealField> {
         diagonal: DVector<Complex<T>>,
         left_column: DVector<Complex<T>>,
         right_column: DVector<Complex<T>>,
-    ) -> color_eyre::Result<()>;
+    ) -> Result<(), GreensFunctionError>;
 }
 
 impl<T: Copy + RealField> CsrAssembly<T> for CsrMatrix<Complex<T>> {
@@ -43,7 +43,7 @@ impl<T: Copy + RealField> CsrAssembly<T> for CsrMatrix<Complex<T>> {
         diagonal: DVector<Complex<T>>,
         left_column: DVector<Complex<T>>,
         right_column: DVector<Complex<T>>,
-    ) -> color_eyre::Result<()> {
+    ) -> Result<(), GreensFunctionError> {
         let n_values = self.values().len();
         assert_eq!(
             n_values,
@@ -122,7 +122,7 @@ where
         &self,
         mesh: &Mesh<T, GeometryDim, Conn>,
         spectral_space: &Spectral,
-    ) -> color_eyre::Result<Charge<T, BandDim>> {
+    ) -> Result<Charge<T, BandDim>, crate::postprocessor::PostProcessorError> {
         let mut charges: Vec<DVector<T>> = Vec::with_capacity(BandDim::dim());
         // Sum over the diagonal of the calculated spectral density
         let mut summed_diagonal = vec![T::zero(); self.lesser[0].matrix.values().len()];
@@ -242,7 +242,7 @@ where
         mesh: &Mesh<T, GeometryDim, Conn>,
         self_energy: &SelfEnergy<T, GeometryDim, Conn>,
         spectral_space: &Spectral,
-    ) -> color_eyre::Result<Current<T, BandDim>> {
+    ) -> Result<Current<T, BandDim>, crate::postprocessor::PostProcessorError> {
         let mut currents: Vec<DVector<T>> = Vec::with_capacity(BandDim::dim());
         let number_of_vertices_in_internal_lead =
             (3 * self.retarded[0].matrix.nrows() - self.retarded[0].matrix.nnz() - 2) / 4;
@@ -332,7 +332,7 @@ where
         hamiltonian: &Hamiltonian<T>,
         self_energy: &SelfEnergy<T, GeometryDim, Conn>,
         spectral_space: &Spectral,
-    ) -> color_eyre::Result<()>
+    ) -> Result<(), GreensFunctionError>
     where
         Conn: Connectivity<T, GeometryDim> + Send + Sync,
         Spectral: SpectralDiscretisation<T>,
@@ -357,7 +357,7 @@ where
         hamiltonian: &Hamiltonian<T>,
         self_energy: &SelfEnergy<T, GeometryDim, Conn>,
         spectral_space: &Spectral,
-    ) -> color_eyre::Result<()>
+    ) -> Result<(), GreensFunctionError>
     where
         Conn: Connectivity<T, GeometryDim> + Send + Sync,
         Spectral: SpectralDiscretisation<T>,
@@ -405,7 +405,7 @@ where
         hamiltonian: &Hamiltonian<T>,
         self_energy: &SelfEnergy<T, GeometryDim, Conn>,
         spectral_space: &Spectral,
-    ) -> color_eyre::Result<()>
+    ) -> Result<(), GreensFunctionError>
     where
         Conn: Connectivity<T, GeometryDim> + Send + Sync,
         Spectral: SpectralDiscretisation<T>,
@@ -480,7 +480,7 @@ where
         wavevector: T,
         hamiltonian: &Hamiltonian<T>,
         self_energy: &Self::SelfEnergy,
-    ) -> color_eyre::Result<()> {
+    ) -> Result<(), GreensFunctionError> {
         // The number of entries is n_rows + 2 * (n_rows - 2 * n_lead - 1)
         assert_eq!((3 * self.nrows() - self.nnz() - 2) % 4, 0);
         let number_of_vertices_in_internal_lead = (3 * self.nrows() - self.nnz() - 2) / 4;
@@ -537,16 +537,21 @@ where
     }
 
     // We never generate a greater greens function in the self-consistent loop. Maybe we will in the future when moving to incoherent transport
-    fn generate_greater_into(&mut self, _: &Self, _: &Self, _: &Self) -> color_eyre::Result<()> {
-        unreachable!()
+    fn generate_greater_into(
+        &mut self,
+        _: &Self,
+        _: &Self,
+        _: &Self,
+    ) -> Result<(), GreensFunctionError> {
+        unimplemented!()
     }
 
     // We also never generate the advanced greens function, instead transiently calculating it in `generate_lesser_into`. Maybe we will in future
     fn generate_advanced_into(
         &mut self,
         _retarded: &CsrMatrix<Complex<T>>,
-    ) -> color_eyre::Result<()> {
-        unreachable!()
+    ) -> Result<(), GreensFunctionError> {
+        unimplemented!()
     }
 
     fn generate_lesser_into(
@@ -557,7 +562,7 @@ where
         retarded_greens_function: &CsrMatrix<Complex<T>>,
         retarded_self_energy: &CsrMatrix<Complex<T>>,
         fermi_functions: &[T],
-    ) -> color_eyre::Result<()> {
+    ) -> Result<(), GreensFunctionError> {
         // The number of entries is n_rows + 2 * (n_rows - 2 * n_lead - 1)
         let number_of_vertices_in_internal_lead =
             (3 * retarded_greens_function.nrows() - retarded_greens_function.nnz() - 2) / 4;

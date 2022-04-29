@@ -13,6 +13,7 @@ use nalgebra::{
 };
 use nalgebra_sparse::CsrMatrix;
 use num_complex::Complex;
+use std::fs::OpenOptions;
 use std::io::Write;
 use transporter_mesher::{Connectivity, SmallDim};
 
@@ -265,7 +266,7 @@ where
                     .with_info_desk(self.info_desk)
                     .with_mesh(self.mesh)
                     .with_spectral_discretisation(self.spectral)
-                    .incoherent_calculation(&self.tracker.calculation)
+                    .incoherent_calculation(&Calculation::Incoherent)
                     // .build()?;
                     .build_mixed()?;
                 tracing::trace!("Initialising Self Energies");
@@ -276,12 +277,29 @@ where
                                                                     // Todo Get the new potential into the new hamiltonian...
                 self.hamiltonian
                     .update_potential(&self.tracker, self.mesh)?;
+
+                let mut charge_and_currents = self.tracker.charge_and_currents.clone();
                 let mut inner_loop = self
                     .build_incoherent_inner_loop_mixed(&mut greens_functions, &mut self_energies);
-                let mut charge_and_currents = self.tracker.charge_and_currents.clone();
                 inner_loop
                     .run_loop(&mut charge_and_currents)
                     .expect("Inner loop failed");
+
+                let mut file = OpenOptions::new()
+                    .write(true)
+                    .append(true)
+                    .create(true)
+                    .open("../results/scattering_rate.txt")
+                    .unwrap();
+                writeln!(
+                    file,
+                    "{}, {}, {}, {}",
+                    self.tracker.voltage,
+                    self.tracker.scattering_scaling,
+                    inner_loop.rate.unwrap().re,
+                    inner_loop.rate.unwrap().im,
+                );
+
                 let _ =
                     std::mem::replace(self.tracker.charge_and_currents_mut(), charge_and_currents);
             }

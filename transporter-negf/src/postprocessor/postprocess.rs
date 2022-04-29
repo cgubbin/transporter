@@ -1,4 +1,4 @@
-use super::{ChargeAndCurrent, PostProcessor};
+use super::{ChargeAndCurrent, PostProcessor, PostProcessorError};
 use crate::{
     greens_functions::AggregateGreensFunctionMethods, self_energy::SelfEnergy,
     spectral::SpectralDiscretisation,
@@ -25,7 +25,7 @@ where
         greens_functions: &AggregateGreensFunctions,
         self_energy: &SelfEnergy,
         spectral_discretisation: &Spectral,
-    ) -> color_eyre::Result<ChargeAndCurrent<T::RealField, BandDim>>
+    ) -> Result<ChargeAndCurrent<T::RealField, BandDim>, PostProcessorError>
     where
         AggregateGreensFunctions:
             AggregateGreensFunctionMethods<T, BandDim, GeometryDim, Conn, Spectral, SelfEnergy>;
@@ -50,7 +50,7 @@ pub(crate) trait PostProcessLOGenerationRate<
         greens_functions: &AggregateGreensFunctions,
         self_energy: &SelfEnergy,
         spectral_discretisation: &Spectral,
-    ) -> color_eyre::Result<nalgebra::DVector<T::RealField>>
+    ) -> Result<nalgebra::DVector<T::RealField>, PostProcessorError>
     where
         AggregateGreensFunctions:
             AggregateGreensFunctionMethods<T, BandDim, GeometryDim, Conn, Spectral, SelfEnergy>;
@@ -60,7 +60,7 @@ pub(crate) trait PostProcessLOGenerationRate<
         greens_functions: &AggregateGreensFunctions,
         self_energy: &SelfEnergy,
         spectral_discretisation: &Spectral,
-    ) -> color_eyre::Result<T::RealField>
+    ) -> Result<T::RealField, PostProcessorError>
     where
         AggregateGreensFunctions:
             AggregateGreensFunctionMethods<T, BandDim, GeometryDim, Conn, Spectral, SelfEnergy>,
@@ -98,7 +98,7 @@ where
         greens_functions: &AggregateGreensFunctions,
         self_energy: &SelfEnergy<T, GeometryDim, Conn>,
         spectral_discretisation: &Spectral,
-    ) -> color_eyre::Result<ChargeAndCurrent<T, BandDim>>
+    ) -> Result<ChargeAndCurrent<T, BandDim>, PostProcessorError>
     where
         AggregateGreensFunctions: AggregateGreensFunctionMethods<
             T,

@@ -7,9 +7,24 @@ use crate::{
     self_energy::SelfEnergy,
 };
 pub(crate) use methods::Inner;
+use miette::Diagnostic;
 use nalgebra::{allocator::Allocator, DefaultAllocator, RealField};
 use std::marker::PhantomData;
 use transporter_mesher::{Connectivity, Mesh, SmallDim};
+
+#[derive(thiserror::Error, Debug, Diagnostic)]
+pub(crate) enum InnerLoopError {
+    #[error(transparent)]
+    GreensFunction(#[from] crate::greens_functions::GreensFunctionError),
+    #[error(transparent)]
+    SelfEnergy(#[from] crate::self_energy::SelfEnergyError),
+    #[error(transparent)]
+    PostProcessor(#[from] crate::postprocessor::PostProcessorError),
+    #[error(transparent)]
+    IoError(#[from] std::io::Error),
+    #[error("Exceeded max inner iterations")]
+    OutOfIterations,
+}
 
 pub(crate) struct InnerLoopBuilder<
     T,
@@ -259,6 +274,7 @@ where
     convergence_settings: &'a Convergence<T>,
     scattering_scaling: T,
     voltage: T,
+    pub(crate) rate: Option<num_complex::Complex<T>>,
 }
 
 impl<'a, T, GeometryDim, Conn, Matrix, SpectralSpace, BandDim>
@@ -294,6 +310,7 @@ where
             convergence_settings: self.convergence_settings,
             scattering_scaling: self.scattering_scaling,
             voltage,
+            rate: None,
         }
     }
 }

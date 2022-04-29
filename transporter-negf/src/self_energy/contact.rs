@@ -1,4 +1,4 @@
-use super::SelfEnergy;
+use super::{SelfEnergy, SelfEnergyError};
 use crate::{hamiltonian::Hamiltonian, spectral::SpectralDiscretisation};
 use console::Term;
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
@@ -19,7 +19,7 @@ where
         mesh: &Mesh<T, GeometryDim, Conn>,
         hamiltonian: &Hamiltonian<T>,
         spectral_space: &Spectral,
-    ) -> color_eyre::Result<()>
+    ) -> Result<(), SelfEnergyError>
     where
         Spectral: SpectralDiscretisation<T>,
     {
