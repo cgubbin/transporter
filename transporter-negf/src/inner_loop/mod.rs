@@ -275,6 +275,7 @@ where
     scattering_scaling: T,
     voltage: T,
     pub(crate) rate: Option<num_complex::Complex<T>>,
+    term: console::Term,
 }
 
 impl<'a, T, GeometryDim, Conn, Matrix, SpectralSpace, BandDim>
@@ -311,6 +312,7 @@ where
             scattering_scaling: self.scattering_scaling,
             voltage,
             rate: None,
+            term: console::Term::stdout(),
         }
     }
 }

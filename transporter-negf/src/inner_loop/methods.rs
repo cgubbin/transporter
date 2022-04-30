@@ -100,6 +100,8 @@ where
         previous_charge_and_current: &mut ChargeAndCurrent<T, BandDim>,
     ) -> Result<(), InnerLoopError> {
         // In a coherent calculation there is no inner loop
+        self.term.move_cursor_to(0, 5)?;
+        self.term.clear_to_end_of_screen()?;
         tracing::info!("Recalculating electron density");
         self.single_iteration()?;
         // Run the convergence check, this is solely to update the charge and current in the tracker
@@ -161,7 +163,6 @@ where
     }
 
     fn single_iteration(&mut self) -> Result<(), InnerLoopError> {
-        dbg!("The inner loop");
         // TODO Recompute se, check it's ok, recompute green's functions
         self.self_energies.recalculate_contact_self_energy(
             self.mesh,
@@ -191,6 +192,8 @@ where
         //        ));
         //    }
         //}
+        self.term.move_cursor_to(0, 5)?;
+        self.term.clear_to_end_of_screen()?;
         tracing::info!("Recalculating electron density");
         self.single_iteration()?;
         // Run the convergence check, this is solely to update the charge and current in the tracker
@@ -504,10 +507,6 @@ where
 
     fn single_iteration(&mut self) -> Result<(), InnerLoopError> {
         // TODO Recompute se, check it's ok, recompute green's functions
-        tracing::trace!(
-            "Mixed formalism inner loop with scaling {}",
-            self.scattering_scaling
-        );
         self.self_energies.recalculate_contact_self_energy(
             self.mesh,
             self.hamiltonian,
@@ -542,14 +541,18 @@ where
         &mut self,
         previous_charge_and_current: &mut ChargeAndCurrent<T, BandDim>,
     ) -> Result<(), InnerLoopError> {
-        tracing::info!("Beginning inner loop");
+        self.term.move_cursor_to(0, 6)?;
+        self.term.clear_to_end_of_screen()?;
+        tracing::info!("Inner loop at iteration 1");
         self.single_iteration()?;
 
         let mut iteration = 0;
         // Run to iteration == 2 because on the first iteration incoherent
         // self energies will be trivially zero as the Greens functions are uninitialised
         while !self.is_loop_converged(previous_charge_and_current)? | (iteration < 2) {
-            tracing::info!("The inner loop at iteration {iteration}");
+            self.term.move_cursor_to(0, 6)?;
+            self.term.clear_to_end_of_screen()?;
+            tracing::info!("Inner loop at iteration {}", iteration + 2);
             self.single_iteration()?;
             iteration += 1;
             if iteration >= self.convergence_settings.maximum_inner_iterations() {

@@ -23,6 +23,13 @@ where
     where
         Spectral: SpectralDiscretisation<T>,
     {
+        let term = console::Term::stdout();
+        if self.incoherent_lesser.is_none() {
+            term.move_cursor_to(0, 5).unwrap();
+        } else {
+            term.move_cursor_to(0, 7).unwrap();
+        }
+        term.clear_to_end_of_screen().unwrap();
         tracing::info!("Updating self-energies");
         match GeometryDim::dim() {
             1 => {

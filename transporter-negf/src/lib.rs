@@ -40,7 +40,7 @@
 
 #![warn(missing_docs)]
 #![allow(dead_code)]
-#![allow(clippy::rntype_complexity)]
+#![allow(clippy::type_complexity)]
 
 /// The command line global application, tracing and display primitives
 pub mod app;

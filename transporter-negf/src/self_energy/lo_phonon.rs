@@ -391,7 +391,10 @@ where
         <DefaultAllocator as Allocator<T, BandDim>>::Buffer: Send + Sync,
         <DefaultAllocator as Allocator<[T; 3], BandDim>>::Buffer: Send + Sync,
     {
-        tracing::info!("Calculating LO Lesser SE {}", scaling);
+        let term = console::Term::stdout();
+        term.move_cursor_to(0, 7).unwrap();
+        term.clear_to_end_of_screen().unwrap();
+        tracing::info!("Calculating LO Lesser self energy");
         let n_0 = T::from_f64(0.3481475088177923).unwrap(); // The LO phonon population, to be updated as we pass through the loop
         let e_0 = T::from_f64(0.035).unwrap(); // The phonon energy in electron volts
         let eps_fr = T::from_f64(20_f64).unwrap();
@@ -401,8 +404,6 @@ where
         let num_vertices_in_reservoir = greens_functions.retarded[0].as_ref().drain_diagonal.len();
 
         assert!(self.incoherent_lesser.is_some());
-
-        let term = Term::stdout();
 
         // Display
         let spinner_style = ProgressStyle::default_spinner()
@@ -553,7 +554,10 @@ where
         <DefaultAllocator as Allocator<T, BandDim>>::Buffer: Send + Sync,
         <DefaultAllocator as Allocator<[T; 3], BandDim>>::Buffer: Send + Sync,
     {
-        tracing::info!("Calculating LO retarded SE {}", scaling);
+        let term = console::Term::stdout();
+        term.move_cursor_to(0, 7).unwrap();
+        term.clear_to_end_of_screen().unwrap();
+        tracing::info!("Calculating LO retarded self energy");
         let n_0 = T::from_f64(0.3481475088177923).unwrap(); // The LO phonon population, to be updated as we pass through the loop
         let e_0 = T::from_f64(0.035).unwrap(); // The phonon energy in electron volts
         let eps_fr = T::from_f64(20_f64).unwrap();
@@ -563,7 +567,6 @@ where
         assert!(self.incoherent_retarded.is_some());
 
         // Display
-        let term = Term::stdout();
         let spinner_style = ProgressStyle::default_spinner()
             .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ ")
             .template(
@@ -724,6 +727,9 @@ where
         <DefaultAllocator as Allocator<T, BandDim>>::Buffer: Send + Sync,
         <DefaultAllocator as Allocator<[T; 3], BandDim>>::Buffer: Send + Sync,
     {
+        let term = console::Term::stdout();
+        term.move_cursor_to(0, 7).unwrap();
+        term.clear_to_end_of_screen().unwrap();
         tracing::info!("Calculating LO scattering rate");
 
         assert!(self.incoherent_retarded.is_some());

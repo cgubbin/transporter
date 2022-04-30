@@ -89,7 +89,7 @@ where
         &self,
         previous_potential: &mut Potential<T>,
     ) -> Result<bool, OuterLoopError<T>> {
-        let potential = self.update_potential(previous_potential)?;
+        let potential = self.update_potential(previous_potential)?.0;
         let result = potential.is_change_within_tolerance(
             previous_potential,
             self.convergence_settings.outer_tolerance(),
@@ -116,12 +116,16 @@ where
             .update_potential(Potential::from_vector(previous_potential.clone()));
 
         // TODO Building the gfs and SE here is a bad idea, we should do this else where so it is not redone on every iteration
+        self.term.move_cursor_to(0, 5)?;
+        self.term.clear_to_end_of_screen()?;
         tracing::trace!("Initialising Greens Functions");
         let mut greens_functions = GreensFunctionBuilder::new()
             .with_info_desk(self.info_desk)
             .with_mesh(self.mesh)
             .with_spectral_discretisation(self.spectral)
             .build()?;
+        self.term.move_cursor_to(0, 5)?;
+        self.term.clear_to_end_of_screen()?;
         tracing::trace!("Initialising Self Energies");
         let mut self_energies = SelfEnergyBuilder::new()
             .with_mesh(self.mesh)
@@ -147,9 +151,10 @@ where
             self.tracker.charge_as_ref(),
         ));
 
-        let potential = self
+        let (potential, residual) = self
             .update_potential(&Potential::from_vector(previous_potential.clone()))
             .expect("Potential update failed");
+        self.tracker.current_residual = residual;
 
         Ok(potential.as_ref().clone())
     }
@@ -167,7 +172,10 @@ where
         let initial_parameter = ndarray::Array1::from(vec_para);
         // let mut solver = FixedPointSolver::new(mixer, potential.as_ref().clone());
         let mut solver = FixedPointSolver::new(mixer, initial_parameter);
-        tracing::info!("Beginning outer self-consistent loop with Anderson mixing");
+
+        self.term.move_cursor_to(0, 2)?;
+        self.term.clear_to_end_of_screen()?;
+        tracing::info!("Outer self-consistent loop with Anderson mixing");
         let solution = solver.run(self)?;
 
         let solution = DVector::from(solution.get_param().iter().copied().collect::<Vec<_>>());
@@ -215,7 +223,7 @@ where
         &self,
         previous_potential: &mut Potential<T>,
     ) -> Result<bool, OuterLoopError<T>> {
-        let potential = self.update_potential(previous_potential)?;
+        let potential = self.update_potential(previous_potential)?.0;
         let result = potential.is_change_within_tolerance(
             previous_potential,
             self.convergence_settings.outer_tolerance(),
@@ -232,15 +240,19 @@ where
             .update_potential(Potential::from_vector(previous_potential.clone()));
 
         // TODO Building the gfs and SE here is a bad idea, we should do this else where so it is not redone on every iteration
-        tracing::trace!("Initialising Greens Functions");
         match self.tracker.calculation {
             Calculation::Coherent => {
                 dbg!("Coherent Path");
+                self.term.move_cursor_to(0, 5)?;
+                self.term.clear_to_end_of_screen()?;
+                tracing::trace!("Initialising Greens Functions");
                 let mut greens_functions = GreensFunctionBuilder::new()
                     .with_info_desk(self.info_desk)
                     .with_mesh(self.mesh)
                     .with_spectral_discretisation(self.spectral)
                     .build()?;
+                self.term.move_cursor_to(0, 5)?;
+                self.term.clear_to_end_of_screen()?;
                 tracing::trace!("Initialising Self Energies");
                 let mut self_energies = SelfEnergyBuilder::new()
                     .with_mesh(self.mesh)
@@ -261,7 +273,9 @@ where
                     std::mem::replace(self.tracker.charge_and_currents_mut(), charge_and_currents);
             }
             Calculation::Incoherent => {
-                tracing::debug!("Incohrent path");
+                self.term.move_cursor_to(0, 6)?;
+                self.term.clear_to_end_of_screen()?;
+                tracing::trace!("Initialising Greens Functions");
                 let mut greens_functions = GreensFunctionBuilder::new()
                     .with_info_desk(self.info_desk)
                     .with_mesh(self.mesh)
@@ -269,6 +283,8 @@ where
                     .incoherent_calculation(&Calculation::Incoherent)
                     // .build()?;
                     .build_mixed()?;
+                self.term.move_cursor_to(0, 6)?;
+                self.term.clear_to_end_of_screen()?;
                 tracing::trace!("Initialising Self Energies");
                 let mut self_energies = SelfEnergyBuilder::new()
                     .with_mesh(self.mesh)
@@ -298,7 +314,7 @@ where
                     self.tracker.scattering_scaling,
                     inner_loop.rate.unwrap().re,
                     inner_loop.rate.unwrap().im,
-                );
+                )?;
 
                 let _ =
                     std::mem::replace(self.tracker.charge_and_currents_mut(), charge_and_currents);
@@ -311,9 +327,10 @@ where
             &Potential::from_vector(previous_potential.clone()),
             self.tracker.charge_as_ref(),
         ));
-        let potential = self
+        let (potential, residual) = self
             .update_potential(&Potential::from_vector(previous_potential.clone()))
             .expect("Potential update failed");
+        self.tracker.current_residual = residual;
 
         Ok(potential.as_ref().clone())
     }
@@ -327,10 +344,20 @@ where
         let vec_para = potential.as_ref().iter().copied().collect::<Vec<_>>();
         let initial_parameter = ndarray::Array1::from(vec_para);
         let mut solver = FixedPointSolver::new(mixer, initial_parameter);
-        tracing::info!("Beginning outer self-consistent loop");
-        let solution = solver.run(self)?;
 
-        dbg!(solution.get_param());
+        // We print 1 line further down in an incoherent loop
+        match self.tracker.calculation {
+            Calculation::Coherent => {
+                self.term.move_cursor_to(0, 2)?;
+                self.term.clear_to_end_of_screen()?;
+            }
+            Calculation::Incoherent => {
+                self.term.move_cursor_to(0, 3)?;
+                self.term.clear_to_end_of_screen()?;
+            }
+        }
+        tracing::info!("Beginning outer self-consistent loop with Anderson Mixing");
+        let solution = solver.run(self)?;
 
         let solution = DVector::from(solution.get_param().iter().copied().collect::<Vec<_>>());
         potential = Potential::from_vector(solution);
@@ -366,7 +393,7 @@ where
     fn update_potential(
         &self,
         previous_potential: &Potential<T>,
-    ) -> Result<Potential<T::RealField>, OuterLoopError<T>> {
+    ) -> Result<(Potential<T::RealField>, T::RealField), OuterLoopError<T>> {
         let cost = super::poisson::PoissonProblemBuilder::default()
             .with_charge(self.tracker.charge_as_ref())
             .with_info_desk(self.info_desk)
@@ -382,14 +409,13 @@ where
         let target = self.convergence_settings.outer_tolerance()
             * self.info_desk.donor_densities[0]
             * T::from_f64(crate::constants::ELECTRON_CHARGE).unwrap();
-        tracing::info!(
-            "Current residual: {}, target residual: {}",
-            residual,
-            target
-        );
+
+        self.term.move_cursor_to(0, 5)?;
+        self.term.clear_to_end_of_screen()?;
+        tracing::info!("Solving Poisson Equation",);
 
         if residual < target {
-            return Ok(previous_potential.clone());
+            return Ok((previous_potential.clone(), residual));
         }
 
         let linesearch = argmin::solver::linesearch::MoreThuenteLineSearch::new()
@@ -402,6 +428,9 @@ where
             .configure(|state| state.param(init_param).max_iters(25))
             //.add_observer(SlogLogger::term(), ObserverMode::Never)
             .run()?;
+
+        self.term.move_cursor_to(0, 5)?;
+        self.term.clear_to_end_of_screen()?;
         tracing::info!(
             "Poisson calculation converged in {} iterations",
             res.state.iter
@@ -434,7 +463,7 @@ where
         //println!("{}", output);
         //println!("{:?}", self.tracker.charge_as_ref());
 
-        Ok(Potential::from_vector(output))
+        Ok((Potential::from_vector(output), residual))
     }
 
     pub(crate) fn scattering_scaling(&self) -> T {
@@ -944,9 +973,28 @@ where
         &mut self,
         potential: &Self::Param,
     ) -> Result<Self::Param, conflux::core::FixedPointError<T>> {
+        let target = self.convergence_settings.outer_tolerance()
+            * self.info_desk.donor_densities[0]
+            * T::from_f64(crate::constants::ELECTRON_CHARGE).unwrap();
+
+        self.term.move_cursor_to(0, 3).unwrap();
+        self.term.clear_to_end_of_screen().unwrap();
+        if self.tracker.iteration > 0 {
+            tracing::info!(
+                "Current residual: {}, target residual: {}",
+                self.tracker.current_residual,
+                target
+            );
+        } else {
+            tracing::info!("First iteration with target residual: {}", target);
+        }
+
         let potential = DVector::from(potential.into_iter().copied().collect::<Vec<_>>());
         let new_potential = self.single_iteration(&potential).expect("It should work");
         let change = (&new_potential - &potential).norm() / T::from_usize(potential.len()).unwrap();
+
+        self.term.move_cursor_to(0, 5).unwrap();
+        self.term.clear_to_end_of_screen().unwrap();
         tracing::info!("Change in potential per element: {change}");
         self.tracker.iteration += 1;
 
@@ -996,9 +1044,33 @@ where
         &mut self,
         potential: &Self::Param,
     ) -> Result<Self::Param, conflux::core::FixedPointError<T>> {
+        let target = self.convergence_settings.outer_tolerance()
+            * self.info_desk.donor_densities[0]
+            * T::from_f64(crate::constants::ELECTRON_CHARGE).unwrap();
+
+        match self.tracker.calculation {
+            Calculation::Coherent => self.term.move_cursor_to(0, 3).unwrap(),
+            Calculation::Incoherent => self.term.move_cursor_to(0, 4).unwrap(),
+        };
+        self.term.clear_to_end_of_screen().unwrap();
+        if self.tracker.iteration > 0 {
+            tracing::info!(
+                "Current residual: {}, target residual: {}",
+                self.tracker.current_residual,
+                target
+            );
+        } else {
+            tracing::info!("First iteration with target residual: {}", target);
+        }
         let potential = DVector::from(potential.into_iter().copied().collect::<Vec<_>>());
         let new_potential = self.single_iteration(&potential).expect("It should work");
         let change = (&new_potential - &potential).norm() / T::from_usize(potential.len()).unwrap();
+
+        match self.tracker.calculation {
+            Calculation::Coherent => self.term.move_cursor_to(0, 5).unwrap(),
+            Calculation::Incoherent => self.term.move_cursor_to(0, 6).unwrap(),
+        };
+        self.term.clear_to_end_of_screen().unwrap();
         tracing::info!("Change in potential per element: {change}");
         self.tracker.iteration += 1;
         let vec_para = new_potential.iter().copied().collect::<Vec<_>>();

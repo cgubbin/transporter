@@ -4,7 +4,7 @@
 //! evaluated at all energy and wavevector points in the spectral grid over which the problem is defined.
 //! Aggregated structures and methods are designed to integrate with the inner loop, whereas the individual
 //! Green's functions should not be called directly.
-use super::{mixed::MMatrix, GreensFunction, GreensFunctionError, GreensFunctionMethods};
+use super::{mixed::MMatrix, GreensFunction, GreensFunctionMethods};
 use crate::postprocessor::{Charge, Current};
 use crate::{
     app::Calculation,

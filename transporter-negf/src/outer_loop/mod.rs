@@ -286,6 +286,7 @@ where
     // TODO A solution tracker, think about this IMPL. We already have a top-level tracker
     tracker: LoopTracker<T::RealField, BandDim>,
     info_desk: &'a DeviceInfoDesk<T::RealField, GeometryDim, BandDim>,
+    term: console::Term,
 }
 
 impl<'a, T, GeometryDim, Conn, BandDim, SpectralSpace>
@@ -330,6 +331,7 @@ where
             spectral: self.spectral,
             tracker,
             info_desk: self.info_desk,
+            term: console::Term::stdout(),
         })
     }
 
@@ -346,6 +348,7 @@ where
             spectral: self.spectral,
             tracker,
             info_desk: self.info_desk,
+            term: console::Term::stdout(),
         })
     }
 }
@@ -372,6 +375,7 @@ where
     iteration: usize,
     calculation: Calculation,
     pub(crate) scattering_scaling: T,
+    pub(crate) current_residual: T,
     voltage: T,
 }
 
@@ -411,6 +415,7 @@ where
             calculation: global_tracker.calculation(),
             iteration: 0,
             scattering_scaling: T::from_f64(0.1).unwrap(),
+            current_residual: T::max_value().unwrap(),
             voltage,
         }
     }

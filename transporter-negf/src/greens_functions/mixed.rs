@@ -16,7 +16,6 @@ use crate::{
     self_energy::SelfEnergy,
     spectral::SpectralDiscretisation,
 };
-use console::Term;
 use indicatif::{ParallelProgressIterator, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use nalgebra::{
     allocator::Allocator, ComplexField, Const, DMatrix, DVector, DefaultAllocator, Dynamic, Matrix,
@@ -99,9 +98,10 @@ where
         Spectral: SpectralDiscretisation<T>,
         DefaultAllocator: Allocator<T, GeometryDim>,
     {
-        tracing::info!("retarded ");
-
-        let term = Term::stdout();
+        let term = console::Term::stdout();
+        term.move_cursor_to(0, 7).unwrap();
+        term.clear_to_end_of_screen().unwrap();
+        tracing::info!("Calculating retarded Green's functions");
 
         // Display
         let spinner_style = ProgressStyle::default_spinner()
@@ -155,9 +155,10 @@ where
         <DefaultAllocator as Allocator<T, BandDim>>::Buffer: Send + Sync,
         <DefaultAllocator as Allocator<[T; 3], BandDim>>::Buffer: Send + Sync,
     {
-        tracing::info!("lesser");
-
-        let term = Term::stdout();
+        let term = console::Term::stdout();
+        term.move_cursor_to(0, 7).unwrap();
+        term.clear_to_end_of_screen().unwrap();
+        tracing::info!("Calculating lesser Green's functions");
 
         // Display
         let spinner_style = ProgressStyle::default_spinner()
@@ -173,7 +174,6 @@ where
         pb.set_style(spinner_style);
 
         let n_energies = spectral_space.number_of_energy_points();
-        let n_ele = self_energy.contact_retarded[0].nrows();
 
         self.lesser
             .par_iter_mut()
@@ -414,9 +414,9 @@ where
 
     fn generate_lesser_into(
         &mut self,
-        energy: T,
-        wavevector: T,
-        hamiltonian: &Hamiltonian<T>,
+        _energy: T,
+        _wavevector: T,
+        _hamiltonian: &Hamiltonian<T>,
         retarded_greens_function: &MMatrix<Complex<T>>,
         lesser_self_energy: &MMatrix<Complex<T>>,
         fermi_functions: &[T],
@@ -587,7 +587,7 @@ where
                                 .iter()
                                 .chain(matrix.core_matrix.diagonal().iter())
                                 .chain(matrix.drain_diagonal.iter())
-                                .map(|x| *x)
+                                .copied()
                                 .collect::<Vec<_>>(),
                         );
                         sum + diagonal
@@ -683,7 +683,7 @@ where
         spectral_space: &Spectral,
     ) -> Result<Current<T, BandDim>, crate::postprocessor::PostProcessorError> {
         let mut currents: Vec<DVector<T>> = Vec::with_capacity(BandDim::dim());
-        let number_of_vertices_in_internal_lead = self.retarded[0].as_ref().source_diagonal.len();
+        let _number_of_vertices_in_internal_lead = self.retarded[0].as_ref().source_diagonal.len();
 
         let summed_current = self
             .retarded

@@ -13,6 +13,7 @@ pub(crate) fn coherent_calculation_at_fixed_voltage<T, BandDim: SmallDim>(
     config: &Configuration<T>,
     mesh: &Mesh<T, U1, Segment1dConnectivity>,
     tracker: &Tracker<'_, T, U1, BandDim>,
+    term: &console::Term,
 ) -> Result<Potential<T>, OuterLoopError<T>>
 where
     T: ArgminFloat + Copy + num_traits::NumCast + RealField + ndarray::ScalarOperand,
@@ -28,6 +29,9 @@ where
     <DefaultAllocator as Allocator<[T; 3], BandDim>>::Buffer: Send + Sync,
 {
     // if all the masses are equal we do not need to discretise wavevectors for a coherent calculation
+    term.move_cursor_to(0, 1)?;
+    term.clear_to_end_of_screen()?;
+    tracing::info!("Coherent calculation");
     let first = tracker.info_desk.effective_masses[0].clone();
     match tracker
         .info_desk
@@ -41,6 +45,7 @@ where
             config,
             mesh,
             tracker,
+            term,
         ),
         false => coherent_calculation_at_fixed_voltage_with_changing_mass(
             voltage,
@@ -48,6 +53,7 @@ where
             config,
             mesh,
             tracker,
+            term,
         ),
     }
 }
@@ -58,6 +64,7 @@ fn coherent_calculation_at_fixed_voltage_with_constant_mass<T, BandDim: SmallDim
     config: &Configuration<T>,
     mesh: &Mesh<T, U1, Segment1dConnectivity>,
     tracker: &Tracker<'_, T, U1, BandDim>,
+    _term: &console::Term,
 ) -> Result<Potential<T>, OuterLoopError<T>>
 where
     T: ArgminFloat + Copy + num_traits::NumCast + RealField + ndarray::ScalarOperand,
@@ -120,6 +127,7 @@ fn coherent_calculation_at_fixed_voltage_with_changing_mass<T, BandDim: SmallDim
     config: &Configuration<T>,
     mesh: &Mesh<T, U1, Segment1dConnectivity>,
     tracker: &Tracker<'_, T, U1, BandDim>,
+    _term: &console::Term,
 ) -> Result<Potential<T>, OuterLoopError<T>>
 where
     T: ArgminFloat + Copy + num_traits::NumCast + RealField + ndarray::ScalarOperand,
@@ -186,6 +194,7 @@ pub(crate) fn incoherent_calculation_at_fixed_voltage<T, BandDim: SmallDim>(
     config: &Configuration<T>,
     mesh: &Mesh<T, U1, Segment1dConnectivity>,
     tracker: &Tracker<'_, T, U1, BandDim>,
+    term: &console::Term,
 ) -> Result<Potential<T>, OuterLoopError<T>>
 where
     T: ArgminFloat + Copy + num_traits::NumCast + RealField + ndarray::ScalarOperand,
@@ -203,6 +212,9 @@ where
     // if all the masses are equal we do not need to discretise wavevectors for a coherent calculation
     let first = tracker.info_desk.effective_masses[0].clone();
     // do an initial coherent calculation
+    term.move_cursor_to(0, 1)?;
+    term.clear_to_end_of_screen()?;
+    tracing::info!("Initial coherent calculation");
     let mut potential = match tracker
         .info_desk
         .effective_masses
@@ -215,6 +227,7 @@ where
             config,
             mesh,
             tracker,
+            term,
         ),
         false => coherent_calculation_at_fixed_voltage_with_changing_mass(
             voltage,
@@ -222,10 +235,14 @@ where
             config,
             mesh,
             tracker,
+            term,
         ),
     }?;
     // do an incoherent calculation ramping the scattering from 0 to 1
 
+    term.move_cursor_to(0, 1)?;
+    term.clear_to_end_of_screen()?;
+    tracing::info!("Incoherent calculation");
     // Build calculation independent structures
     let mut hamiltonian = crate::hamiltonian::HamiltonianBuilder::new()
         .with_mesh(mesh)
@@ -280,6 +297,8 @@ where
         //     let value = value[0].to_f64().unwrap().to_string();
         //     writeln!(file, "{}", value)?;
         // }
+        term.move_cursor_to(0, 2)?;
+        term.clear_to_end_of_screen()?;
         tracing::info!("Scattering scaled at {}", outer_loop.scattering_scaling());
         outer_loop.run_loop(potential.clone())?;
         potential = outer_loop.potential_owned();

@@ -143,7 +143,7 @@ where
     let cli = App::parse();
 
     // Initiate the tracing subscriber
-    let subscriber = get_subscriber(cli.global_opts.log_level);
+    let (subscriber, _guard) = get_subscriber(cli.global_opts.log_level);
     init_subscriber(subscriber);
 
     let __marker: std::marker::PhantomData<T> = std::marker::PhantomData;
@@ -158,6 +158,7 @@ where
     match cli.global_opts.dimension {
         Dimension::D1 => {
             // Initialise and pretty print device
+            term.move_cursor_to(0, 0).into_diagnostic()?;
             tracing::trace!("Initialising device");
             let device: Device<T::RealField, U1> = Device::build(path)?;
             let mut device_display = device.display();
@@ -168,15 +169,23 @@ where
             {
                 device_display.colorize();
             }
+            term.move_cursor_to(0, 0).into_diagnostic()?;
             term.write_line(&format!("{device_display}"))
                 .into_diagnostic()?;
 
             // TODO Info_desk is currently always U1 because it is informed by the device dimension right now, this is no good. We need n_bands to be in-play here.
             let info_desk = device.build_device_info_desk()?;
+
+            term.move_cursor_to(0, 0).into_diagnostic()?;
+            term.clear_screen().into_diagnostic()?;
             tracing::trace!("Initialising mesh");
+
             let voltage_target = device.voltage_offsets[1];
             let mesh: Mesh1d<T::RealField> =
                 build_mesh_with_config(&config, device).map_err(|e| miette::miette!("{:?}", e))?;
+
+            term.move_cursor_to(0, 0).into_diagnostic()?;
+            term.clear_to_end_of_screen().into_diagnostic()?;
             tracing::info!("Mesh initialised with {} elements", mesh.elements().len());
 
             let tracker = tracker::TrackerBuilder::new(cli.global_opts.calculation)
@@ -190,7 +199,7 @@ where
                 Calculation::Incoherent => CalculationB::Incoherent { voltage_target },
             };
 
-            build_and_run(config, &mesh, &tracker, calculation)
+            build_and_run(config, &mesh, &tracker, calculation, term)
                 .map_err(|e| miette::miette!("{:?}", e))?;
         }
         Dimension::D2 => {
@@ -240,6 +249,7 @@ fn build_and_run<T, BandDim: SmallDim>(
     mesh: &Mesh<T, U1, Segment1dConnectivity>,
     tracker: &Tracker<'_, T, U1, BandDim>,
     calculation_type: CalculationB<T>,
+    term: console::Term,
 ) -> Result<(), TransporterError<T>>
 where
     T: ArgminFloat + Copy + num_traits::NumCast + RealField + ndarray::ScalarOperand,
@@ -265,6 +275,8 @@ where
             let mut voltage_step = config.global.voltage_step;
             while current_voltage <= voltage_target {
                 // Do a single calculation
+                term.move_cursor_to(0, 0)?;
+                term.clear_to_end_of_screen()?;
                 tracing::info!("Solving for current voltage {current_voltage}V");
                 match coherent_calculation_at_fixed_voltage(
                     current_voltage,
@@ -272,6 +284,7 @@ where
                     &config,
                     mesh,
                     tracker,
+                    &term,
                 ) {
                     // If it converged proceed
                     Ok(converged_potential) => {
@@ -300,6 +313,8 @@ where
             let mut voltage_step = config.global.voltage_step;
             while current_voltage <= voltage_target {
                 // Do a single calculation
+                term.move_cursor_to(0, 0)?;
+                term.clear_to_end_of_screen()?;
                 tracing::info!("Solving for current voltage {current_voltage}V");
                 match incoherent_calculation_at_fixed_voltage(
                     current_voltage,
@@ -307,6 +322,7 @@ where
                     &config,
                     mesh,
                     tracker,
+                    &term,
                 ) {
                     // If it converged proceed
                     Ok(converged_potential) => {

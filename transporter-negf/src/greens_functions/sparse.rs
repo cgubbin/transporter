@@ -363,7 +363,10 @@ where
         Spectral: SpectralDiscretisation<T>,
         DefaultAllocator: Allocator<T, GeometryDim>,
     {
-        tracing::info!("retarded ");
+        let term = console::Term::stdout();
+        term.move_cursor_to(0, 5).unwrap();
+        term.clear_to_end_of_screen().unwrap();
+        tracing::info!("Recalculating retarded Green's function");
 
         let term = Term::stdout();
 
@@ -414,7 +417,10 @@ where
         <DefaultAllocator as Allocator<T, BandDim>>::Buffer: Send + Sync,
         <DefaultAllocator as Allocator<[T; 3], BandDim>>::Buffer: Send + Sync,
     {
-        tracing::info!("lesser");
+        let term = console::Term::stdout();
+        term.move_cursor_to(0, 5).unwrap();
+        term.clear_to_end_of_screen().unwrap();
+        tracing::info!("Recalculating lesser Green's function");
 
         let term = Term::stdout();
 

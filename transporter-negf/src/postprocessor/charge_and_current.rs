@@ -95,11 +95,7 @@ where
                 let norm = new.norm();
                 (new - previous, norm)
             })
-            .map(|(difference, norm)| {
-                let difference = difference.norm() / (norm);
-                tracing::info!("Difference {difference}, tolerance {tolerance}");
-                difference
-            }) // This breaks when norm is zero, need to compute currents for a result
+            .map(|(difference, norm)| difference.norm() / (norm)) // This breaks when norm is zero, need to compute currents for a result
             .filter(|&x| {
                 !((x != T::zero()) & !(x > T::zero())) // Hacky trick to filter NaN from the result
             })
