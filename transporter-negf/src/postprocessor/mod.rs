@@ -10,7 +10,7 @@ use std::marker::PhantomData;
 use transporter_mesher::{Connectivity, Mesh, SmallDim};
 
 #[derive(thiserror::Error, Debug, Diagnostic)]
-pub(crate) enum PostProcessorError {
+pub enum PostProcessorError {
     #[error(transparent)]
     InconsistentDimensions(#[from] anyhow::Error),
 }

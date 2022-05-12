@@ -13,7 +13,7 @@ use std::marker::PhantomData;
 use transporter_mesher::{Connectivity, Mesh, SmallDim};
 
 /// A tracker struct, holds the state of the solution. We `impl` all InfoDesk methods on the tracker
-pub(crate) struct Tracker<'a, T: RealField, GeometryDim: SmallDim, BandDim: SmallDim>
+pub struct Tracker<'a, T: RealField, GeometryDim: SmallDim, BandDim: SmallDim>
 where
     // C: Connectivity<T, GeometryDim>,
     DefaultAllocator: Allocator<T, BandDim>
@@ -106,14 +106,14 @@ where
     }
 }
 
-pub(crate) struct TrackerBuilder<RefInfoDesk, RefMesh> {
+pub struct TrackerBuilder<RefInfoDesk, RefMesh> {
     info_desk: RefInfoDesk,
     mesh: RefMesh,
     calculation: Calculation,
 }
 
 impl TrackerBuilder<(), ()> {
-    pub(crate) fn new(calculation: Calculation) -> Self {
+    pub fn new(calculation: Calculation) -> Self {
         Self {
             info_desk: (),
             mesh: (),
@@ -123,7 +123,7 @@ impl TrackerBuilder<(), ()> {
 }
 
 impl<RefInfoDesk, RefMesh> TrackerBuilder<RefInfoDesk, RefMesh> {
-    pub(crate) fn with_info_desk<InfoDesk>(
+    pub fn with_info_desk<InfoDesk>(
         self,
         info_desk: &InfoDesk,
     ) -> TrackerBuilder<&InfoDesk, RefMesh> {
@@ -133,7 +133,7 @@ impl<RefInfoDesk, RefMesh> TrackerBuilder<RefInfoDesk, RefMesh> {
             calculation: self.calculation,
         }
     }
-    pub(crate) fn with_mesh<Mesh>(self, mesh: &Mesh) -> TrackerBuilder<RefInfoDesk, &Mesh> {
+    pub fn with_mesh<Mesh>(self, mesh: &Mesh) -> TrackerBuilder<RefInfoDesk, &Mesh> {
         TrackerBuilder {
             info_desk: self.info_desk,
             mesh,
@@ -154,7 +154,7 @@ where
             BandDim,
         >,
 {
-    pub(crate) fn build(self) -> color_eyre::Result<Tracker<'a, T, GeometryDim, BandDim>> {
+    pub fn build(self) -> color_eyre::Result<Tracker<'a, T, GeometryDim, BandDim>> {
         let potential = Potential::from_vector(DVector::zeros(self.mesh.vertices().len()));
         let empty_vector: DVector<T> = DVector::zeros(self.mesh.vertices().len());
         let charge_densities: Charge<T, BandDim> = Charge::new(

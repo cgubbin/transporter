@@ -85,7 +85,7 @@ where
         .with_info_desk(tracker)
         .build()?;
 
-    let spectral_space_builder = crate::spectral::constructors::SpectralSpaceBuilder::new()
+    let spectral_space_builder = crate::spectral::SpectralSpaceBuilder::new()
         .with_number_of_energy_points(config.spectral.number_of_energy_points)
         .with_energy_range(std::ops::Range {
             start: config.spectral.minimum_energy,
@@ -148,7 +148,7 @@ where
         .with_info_desk(tracker)
         .build()?;
 
-    let spectral_space_builder = crate::spectral::constructors::SpectralSpaceBuilder::new()
+    let spectral_space_builder = crate::spectral::SpectralSpaceBuilder::new()
         .with_number_of_energy_points(config.spectral.number_of_energy_points)
         .with_energy_range(std::ops::Range {
             start: config.spectral.minimum_energy,
@@ -249,7 +249,7 @@ where
         .with_info_desk(tracker)
         .build()?;
 
-    let spectral_space_builder = crate::spectral::constructors::SpectralSpaceBuilder::new()
+    let spectral_space_builder = crate::spectral::SpectralSpaceBuilder::new()
         .with_number_of_energy_points(config.spectral.number_of_energy_points)
         .with_energy_range(std::ops::Range {
             start: config.spectral.minimum_energy,

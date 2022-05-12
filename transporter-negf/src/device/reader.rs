@@ -9,7 +9,7 @@ use transporter_mesher::SmallDim;
 
 #[derive(Debug, Deserialize)]
 #[serde(bound(deserialize = "'de: 'static"))]
-pub(crate) struct Device<T: DeserializeOwned + RealField, GeometryDim: SmallDim>
+pub struct Device<T: DeserializeOwned + RealField, GeometryDim: SmallDim>
 where
     DefaultAllocator: Allocator<T, GeometryDim>,
     <DefaultAllocator as Allocator<T, GeometryDim>>::Buffer: Deserialize<'static>,
@@ -34,7 +34,7 @@ where
 
 #[derive(Debug, Deserialize)]
 #[serde(bound(deserialize = "'de: 'static"))]
-pub(crate) struct Layer<T: DeserializeOwned + RealField, GeometryDim: SmallDim>
+pub struct Layer<T: DeserializeOwned + RealField, GeometryDim: SmallDim>
 where
     DefaultAllocator: Allocator<T, GeometryDim>,
     <DefaultAllocator as Allocator<T, GeometryDim>>::Buffer: Deserialize<'static>,
@@ -50,7 +50,7 @@ where
     DefaultAllocator: Allocator<T, GeometryDim>,
     <DefaultAllocator as Allocator<T, GeometryDim>>::Buffer: Deserialize<'static>,
 {
-    pub(crate) fn build(path: PathBuf) -> miette::Result<Self> {
+    pub fn build(path: PathBuf) -> miette::Result<Self> {
         let s = Config::builder()
             .add_source(File::from(path))
             .build()
@@ -74,7 +74,7 @@ where
     }
 }
 
-pub(crate) struct DeviceDisplay<'a, T: DeserializeOwned + RealField, GeometryDim: SmallDim>
+pub struct DeviceDisplay<'a, T: DeserializeOwned + RealField, GeometryDim: SmallDim>
 where
     DefaultAllocator: Allocator<T, GeometryDim>,
     <DefaultAllocator as Allocator<T, GeometryDim>>::Buffer: Deserialize<'static>,

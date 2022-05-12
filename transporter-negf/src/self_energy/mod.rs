@@ -20,7 +20,7 @@ pub(crate) enum SelfEnergyError {
 }
 
 #[derive(Clone)]
-pub(crate) struct SelfEnergy<T, GeometryDim, Conn>
+pub struct SelfEnergy<T, GeometryDim, Conn>
 where
     T: RealField + Copy,
     GeometryDim: SmallDim,
@@ -36,14 +36,14 @@ where
     pub(crate) incoherent_lesser: Option<Vec<DMatrix<Complex<T>>>>,
 }
 
-pub(crate) struct SelfEnergyBuilder<T, RefSpectral, RefMesh> {
+pub struct SelfEnergyBuilder<T, RefSpectral, RefMesh> {
     pub(crate) spectral: RefSpectral,
     pub(crate) mesh: RefMesh,
     marker: PhantomData<T>,
 }
 
 impl<T: ComplexField> SelfEnergyBuilder<T, (), ()> {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             spectral: (),
             mesh: (),
@@ -53,7 +53,7 @@ impl<T: ComplexField> SelfEnergyBuilder<T, (), ()> {
 }
 
 impl<T, RefSpectral, RefMesh> SelfEnergyBuilder<T, RefSpectral, RefMesh> {
-    pub(crate) fn with_spectral_discretisation<Spectral>(
+    pub fn with_spectral_discretisation<Spectral>(
         self,
         spectral: &Spectral,
     ) -> SelfEnergyBuilder<T, &Spectral, RefMesh> {
@@ -64,7 +64,7 @@ impl<T, RefSpectral, RefMesh> SelfEnergyBuilder<T, RefSpectral, RefMesh> {
         }
     }
 
-    pub(crate) fn with_mesh<Mesh>(self, mesh: &Mesh) -> SelfEnergyBuilder<T, RefSpectral, &Mesh> {
+    pub fn with_mesh<Mesh>(self, mesh: &Mesh) -> SelfEnergyBuilder<T, RefSpectral, &Mesh> {
         SelfEnergyBuilder {
             spectral: self.spectral,
             mesh,
@@ -82,11 +82,11 @@ where
     Conn: Connectivity<T, GeometryDim>,
     DefaultAllocator: Allocator<T, GeometryDim>,
 {
-    pub(crate) fn build_coherent(self) -> Result<SelfEnergy<T, GeometryDim, Conn>, BuildError> {
+    pub fn build_coherent(self) -> Result<SelfEnergy<T, GeometryDim, Conn>, BuildError> {
         Ok(self.build_coherent_inner()?)
     }
 
-    pub(crate) fn build_coherent_inner(self) -> Result<SelfEnergy<T, GeometryDim, Conn>, CsrError> {
+    fn build_coherent_inner(self) -> Result<SelfEnergy<T, GeometryDim, Conn>, CsrError> {
         // Collect the indices of all elements at the boundaries
         let vertices_at_boundary: Vec<usize> = self
             .mesh

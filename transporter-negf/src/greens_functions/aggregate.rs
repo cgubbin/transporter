@@ -21,7 +21,7 @@ use transporter_mesher::{Connectivity, ElementMethods, Mesh, SmallDim};
 
 /// Builder struct for aggregated Green's functions
 #[derive(Clone)]
-pub(crate) struct GreensFunctionBuilder<T, RefInfoDesk, RefMesh, RefSpectral, RefCalculationType> {
+pub struct GreensFunctionBuilder<T, RefInfoDesk, RefMesh, RefSpectral, RefCalculationType> {
     /// Placeholder for a reference to the problem's information desk
     pub(crate) info_desk: RefInfoDesk,
     /// Placeholder for a reference to the problem's Mesh
@@ -39,7 +39,7 @@ where
     T: RealField,
 {
     /// Initialise an empty instance of `GreensFunctionBuilder`
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             info_desk: (),
             mesh: (),
@@ -54,7 +54,7 @@ impl<T, RefInfoDesk, RefMesh, RefSpectral, RefCalculationType>
     GreensFunctionBuilder<T, RefInfoDesk, RefMesh, RefSpectral, RefCalculationType>
 {
     /// Attach an information desk to the builder
-    pub(crate) fn with_info_desk<InfoDesk>(
+    pub fn with_info_desk<InfoDesk>(
         self,
         info_desk: &InfoDesk,
     ) -> GreensFunctionBuilder<T, &InfoDesk, RefMesh, RefSpectral, RefCalculationType> {
@@ -68,7 +68,7 @@ impl<T, RefInfoDesk, RefMesh, RefSpectral, RefCalculationType>
     }
 
     /// Attach a mesh to the builder
-    pub(crate) fn with_mesh<Mesh>(
+    pub fn with_mesh<Mesh>(
         self,
         mesh: &Mesh,
     ) -> GreensFunctionBuilder<T, RefInfoDesk, &Mesh, RefSpectral, RefCalculationType> {
@@ -82,7 +82,7 @@ impl<T, RefInfoDesk, RefMesh, RefSpectral, RefCalculationType>
     }
 
     /// Attach the spectral discretisation to the builder
-    pub(crate) fn with_spectral_discretisation<Spectral>(
+    pub fn with_spectral_discretisation<Spectral>(
         self,
         spectral: &Spectral,
     ) -> GreensFunctionBuilder<T, RefInfoDesk, RefMesh, &Spectral, RefCalculationType> {
@@ -132,7 +132,7 @@ where
     /// the transport should be determined before calling this method. This method is only currently suitable for 1d structures
     /// with contacts in the edge elements.
     // TODO Gatekeep for U1
-    pub(crate) fn build(
+    pub fn build(
         self,
     ) -> Result<
         AggregateGreensFunctions<'a, T, CsrMatrix<Complex<T>>, GeometryDim, BandDim>,
@@ -141,7 +141,7 @@ where
         Ok(self.build_inner()?)
     }
 
-    pub(crate) fn build_inner(
+    fn build_inner(
         self,
     ) -> Result<
         AggregateGreensFunctions<'a, T, CsrMatrix<Complex<T>>, GeometryDim, BandDim>,
@@ -217,7 +217,7 @@ where
     /// When the attached spectral space has wavevector discretisation we build out a vector of dense
     /// `DMatrix` as the scattering process under study is incoherent.
     /// The nested method lets me upcast the error to `BuildError`.
-    pub(crate) fn build(
+    pub fn build(
         self,
     ) -> Result<
         AggregateGreensFunctions<'a, T, CsrMatrix<Complex<T>>, GeometryDim, BandDim>,
@@ -226,7 +226,7 @@ where
         Ok(self.build_inner()?)
     }
 
-    pub(crate) fn build_inner(
+    fn build_inner(
         self,
     ) -> Result<
         AggregateGreensFunctions<'a, T, CsrMatrix<Complex<T>>, GeometryDim, BandDim>,
@@ -291,7 +291,7 @@ where
 {
     /// When the attached spectral space has wavevector discretisation we build out a vector of dense
     /// `DMatrix` as the scattering process under study is incoherent.
-    pub(crate) fn build(
+    pub fn build(
         self,
     ) -> Result<
         AggregateGreensFunctions<'a, T, DMatrix<Complex<T>>, GeometryDim, BandDim>,
@@ -313,7 +313,7 @@ where
         })
     }
 
-    pub(crate) fn build_mixed(
+    pub fn build_mixed(
         self,
     ) -> Result<
         AggregateGreensFunctions<'a, T, MMatrix<Complex<T>>, GeometryDim, BandDim>,
@@ -351,7 +351,7 @@ where
     }
 }
 #[derive(Debug)]
-pub(crate) struct AggregateGreensFunctions<'a, T, Matrix, GeometryDim, BandDim>
+pub struct AggregateGreensFunctions<'a, T, Matrix, GeometryDim, BandDim>
 where
     Matrix: GreensFunctionMethods<T> + Send + Sync,
     T: RealField + Copy,
@@ -368,14 +368,8 @@ where
     pub(crate) greater: Vec<GreensFunction<Matrix, T>>,
 }
 
-pub(crate) trait AggregateGreensFunctionMethods<
-    T,
-    BandDim,
-    GeometryDim,
-    Conn,
-    Integrator,
-    SelfEnergy,
-> where
+pub trait AggregateGreensFunctionMethods<T, BandDim, GeometryDim, Conn, Integrator, SelfEnergy>
+where
     T: RealField,
     BandDim: SmallDim,
     GeometryDim: SmallDim,

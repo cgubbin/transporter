@@ -1,16 +1,17 @@
 /// This module provides the discrete energy and wavevector spaces necessary to
 /// scaffold the Green's functions and their relation to the electron density
-pub(crate) mod constructors;
+mod constructors;
 mod energy;
 mod wavevector;
 
+pub use constructors::SpectralSpaceBuilder;
 pub(crate) use wavevector::WavevectorSpace;
 
 use energy::EnergySpace;
 use nalgebra::{allocator::Allocator, DVector, DefaultAllocator, RealField};
 use transporter_mesher::{Connectivity, ElementMethods, Mesh, SmallDim};
 
-pub(crate) trait SpectralDiscretisation<T: RealField + Send>: Send + Sync {
+pub trait SpectralDiscretisation<T: RealField + Send>: Send + Sync {
     type Iter: Iterator<Item = T> + Clone;
     fn total_number_of_points(&self) -> usize {
         self.number_of_energy_points() * self.number_of_wavevector_points()
@@ -33,7 +34,7 @@ pub(crate) trait SpectralDiscretisation<T: RealField + Send>: Send + Sync {
 }
 
 /// A general `SpectralSpace` which contains the wavevector and energy discretisation and associated integration rules
-pub(crate) struct SpectralSpace<T: Copy + RealField, WavevectorSpace> {
+pub struct SpectralSpace<T: Copy + RealField, WavevectorSpace> {
     /// A `SpectralSpace` always has an associated energy space, so this is a concrete type
     pub(crate) energy: EnergySpace<T>,
     /// A `SpectralSpace` may have a wavevector space, either if the calculation is incoherent or the
@@ -308,7 +309,7 @@ pub enum IntegrationRule {
     ThreePoint,
 }
 
-pub(crate) trait GenerateWeights<T, GeometryDim, Conn>
+pub trait GenerateWeights<T, GeometryDim, Conn>
 where
     T: Copy + RealField,
     GeometryDim: SmallDim,

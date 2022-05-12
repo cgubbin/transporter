@@ -5,14 +5,14 @@ pub mod recursive;
 mod sparse;
 
 use crate::{device::info_desk::DeviceInfoDesk, hamiltonian::Hamiltonian};
-pub(crate) use aggregate::{
-    AggregateGreensFunctionMethods, AggregateGreensFunctions, GreensFunctionBuilder,
-};
+pub use aggregate::AggregateGreensFunctionMethods;
+
+pub use aggregate::{AggregateGreensFunctions, GreensFunctionBuilder};
 use nalgebra::{allocator::Allocator, DefaultAllocator, RealField};
 use transporter_mesher::SmallDim;
 
 #[derive(thiserror::Error, Debug, miette::Diagnostic)]
-pub(crate) enum GreensFunctionError {
+pub enum GreensFunctionError {
     // We wrap Csr errors in an anyhow error here so they are Send + Sync, something not
     // implemented by the `SparseFormatError` natively
     #[error(transparent)]
@@ -47,7 +47,7 @@ where
     }
 }
 
-pub(crate) trait GreensFunctionMethods<T>
+pub trait GreensFunctionMethods<T>
 where
     T: RealField + Copy,
 {
@@ -312,7 +312,7 @@ mod test {
             .unwrap();
 
         // Begin by building a coherent spectral space, regardless of calculation we begin with a coherent loop
-        let spectral_space_builder = crate::spectral::constructors::SpectralSpaceBuilder::new()
+        let spectral_space_builder = crate::spectral::SpectralSpaceBuilder::new()
             .with_number_of_energy_points(config.spectral.number_of_energy_points)
             .with_energy_range(std::ops::Range {
                 start: config.spectral.minimum_energy,
@@ -410,7 +410,7 @@ mod test {
             .unwrap();
 
         // Begin by building a coherent spectral space, regardless of calculation we begin with a coherent loop
-        let spectral_space_builder = crate::spectral::constructors::SpectralSpaceBuilder::new()
+        let spectral_space_builder = crate::spectral::SpectralSpaceBuilder::new()
             .with_number_of_energy_points(config.spectral.number_of_energy_points)
             .with_energy_range(std::ops::Range {
                 start: config.spectral.minimum_energy,
@@ -509,7 +509,7 @@ mod test {
             .unwrap();
 
         // Begin by building a coherent spectral space, regardless of calculation we begin with a coherent loop
-        let spectral_space_builder = crate::spectral::constructors::SpectralSpaceBuilder::new()
+        let spectral_space_builder = crate::spectral::SpectralSpaceBuilder::new()
             .with_number_of_energy_points(config.spectral.number_of_energy_points)
             .with_energy_range(std::ops::Range {
                 start: config.spectral.minimum_energy,
@@ -607,7 +607,7 @@ mod test {
             .unwrap();
 
         // Begin by building a coherent spectral space, regardless of calculation we begin with a coherent loop
-        let spectral_space_builder = crate::spectral::constructors::SpectralSpaceBuilder::new()
+        let spectral_space_builder = crate::spectral::SpectralSpaceBuilder::new()
             .with_number_of_energy_points(config.spectral.number_of_energy_points)
             .with_energy_range(std::ops::Range {
                 start: config.spectral.minimum_energy,
@@ -717,7 +717,7 @@ mod test {
             .unwrap();
 
         // Begin by building a coherent spectral space, regardless of calculation we begin with a coherent loop
-        let spectral_space_builder = crate::spectral::constructors::SpectralSpaceBuilder::new()
+        let spectral_space_builder = crate::spectral::SpectralSpaceBuilder::new()
             .with_number_of_energy_points(config.spectral.number_of_energy_points)
             .with_energy_range(std::ops::Range {
                 start: config.spectral.minimum_energy,
@@ -815,7 +815,7 @@ mod test {
             .unwrap();
 
         // Begin by building a coherent spectral space, regardless of calculation we begin with a coherent loop
-        let spectral_space_builder = crate::spectral::constructors::SpectralSpaceBuilder::new()
+        let spectral_space_builder = crate::spectral::SpectralSpaceBuilder::new()
             .with_number_of_energy_points(config.spectral.number_of_energy_points)
             .with_energy_range(std::ops::Range {
                 start: config.spectral.minimum_energy,
@@ -927,7 +927,7 @@ mod test {
             .unwrap();
 
         // Begin by building a coherent spectral space, regardless of calculation we begin with a coherent loop
-        let spectral_space_builder = crate::spectral::constructors::SpectralSpaceBuilder::new()
+        let spectral_space_builder = crate::spectral::SpectralSpaceBuilder::new()
             .with_number_of_energy_points(config.spectral.number_of_energy_points)
             .with_energy_range(std::ops::Range {
                 start: config.spectral.minimum_energy,
@@ -1046,7 +1046,7 @@ mod test {
         hamiltonian.update_potential(&tracker, &mesh).unwrap();
 
         // Begin by building a coherent spectral space, regardless of calculation we begin with a coherent loop
-        let spectral_space_builder = crate::spectral::constructors::SpectralSpaceBuilder::new()
+        let spectral_space_builder = crate::spectral::SpectralSpaceBuilder::new()
             .with_number_of_energy_points(config.spectral.number_of_energy_points)
             .with_energy_range(std::ops::Range {
                 start: config.spectral.minimum_energy,
@@ -1165,7 +1165,7 @@ mod test {
             .unwrap();
 
         // Begin by building a coherent spectral space, regardless of calculation we begin with a coherent loop
-        let spectral_space_builder = crate::spectral::constructors::SpectralSpaceBuilder::new()
+        let spectral_space_builder = crate::spectral::SpectralSpaceBuilder::new()
             .with_number_of_energy_points(config.spectral.number_of_energy_points)
             .with_energy_range(std::ops::Range {
                 start: config.spectral.minimum_energy,

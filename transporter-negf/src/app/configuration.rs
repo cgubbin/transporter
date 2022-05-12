@@ -6,53 +6,53 @@ use std::env;
 
 #[derive(Debug, Deserialize)]
 #[allow(unused)]
-pub(crate) struct Configuration<T> {
-    pub(crate) global: GlobalConfiguration<T>,
-    pub(crate) mesh: MeshConfiguration<T>,
-    pub(crate) inner_loop: InnerConfiguration<T>,
-    pub(crate) outer_loop: OuterConfiguration<T>,
-    pub(crate) spectral: SpectralConfiguration<T>,
+pub struct Configuration<T> {
+    pub global: GlobalConfiguration<T>,
+    pub mesh: MeshConfiguration<T>,
+    pub inner_loop: InnerConfiguration<T>,
+    pub outer_loop: OuterConfiguration<T>,
+    pub spectral: SpectralConfiguration<T>,
 }
 
 #[derive(Debug, Deserialize)]
-pub(crate) struct SpectralConfiguration<T> {
-    pub(crate) number_of_energy_points: usize,
+pub struct SpectralConfiguration<T> {
+    pub number_of_energy_points: usize,
     // TODO : These should be OPoint of size `BandDim`
-    pub(crate) minimum_energy: T,
-    pub(crate) maximum_energy: T,
-    pub(crate) energy_integration_rule: IntegrationRule,
-    pub(crate) number_of_wavevector_points: usize,
-    pub(crate) maximum_wavevector: T,
-    pub(crate) wavevector_integration_rule: IntegrationRule,
+    pub minimum_energy: T,
+    pub maximum_energy: T,
+    pub energy_integration_rule: IntegrationRule,
+    pub number_of_wavevector_points: usize,
+    pub maximum_wavevector: T,
+    pub wavevector_integration_rule: IntegrationRule,
 }
 
 #[derive(Debug, Deserialize)]
-pub(crate) struct GlobalConfiguration<T> {
-    pub(crate) number_of_bands: usize,
-    pub(crate) voltage_step: T,
+pub struct GlobalConfiguration<T> {
+    pub number_of_bands: usize,
+    pub voltage_step: T,
 }
 
 #[derive(Debug, Deserialize)]
-pub(crate) struct MeshConfiguration<T> {
-    pub(crate) unit_size: T,
-    pub(crate) elements_per_unit: usize,
-    pub(crate) maximum_growth_rate: T,
+pub struct MeshConfiguration<T> {
+    pub unit_size: T,
+    pub elements_per_unit: usize,
+    pub maximum_growth_rate: T,
 }
 
 #[derive(Debug, Deserialize)]
-pub(crate) struct InnerConfiguration<T> {
-    pub(crate) maximum_iterations: usize,
-    pub(crate) tolerance: T,
+pub struct InnerConfiguration<T> {
+    pub maximum_iterations: usize,
+    pub tolerance: T,
 }
 
 #[derive(Debug, Deserialize)]
-pub(crate) struct OuterConfiguration<T> {
-    pub(crate) maximum_iterations: usize,
-    pub(crate) tolerance: T,
+pub struct OuterConfiguration<T> {
+    pub maximum_iterations: usize,
+    pub tolerance: T,
 }
 
 impl<T: DeserializeOwned> Configuration<T> {
-    pub(crate) fn build() -> miette::Result<Self> {
+    pub fn build() -> miette::Result<Self> {
         // If I am running it here we should automatically be more debuggy
         let run_mode = env::var("RUN_MODE").unwrap_or_else(|_| "development".into());
 

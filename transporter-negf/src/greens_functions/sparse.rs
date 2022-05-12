@@ -352,7 +352,7 @@ where
         Ok(())
     }
 
-    pub(crate) fn update_aggregate_retarded_greens_function<Conn, Spectral>(
+    pub fn update_aggregate_retarded_greens_function<Conn, Spectral>(
         &mut self,
         hamiltonian: &Hamiltonian<T>,
         self_energy: &SelfEnergy<T, GeometryDim, Conn>,
@@ -402,7 +402,7 @@ where
         Ok(())
     }
 
-    pub(crate) fn update_aggregate_lesser_greens_function<Conn, Spectral>(
+    pub fn update_aggregate_lesser_greens_function<Conn, Spectral>(
         &mut self,
         voltage: T,
         hamiltonian: &Hamiltonian<T>,

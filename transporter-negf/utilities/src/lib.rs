@@ -1,3 +1,5 @@
+pub mod structures;
+
 use nalgebra_sparse::{pattern::SparsityPattern, CsrMatrix};
 use rand::{thread_rng, Rng};
 

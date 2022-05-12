@@ -38,7 +38,7 @@ use transporter_mesher::{Connectivity, Mesh, SmallDim};
 #[derive(Debug)]
 /// The Hamiltonian wrapper. Data is stored in `CsrMatrix` as the differential operator is sparse, although the constructor
 /// should be generic it is intended to work with nearest neighbour coupling schemes
-pub(crate) struct Hamiltonian<T: Copy + RealField> {
+pub struct Hamiltonian<T: Copy + RealField> {
     /// Contains the fixed component of the Hamiltonian, comprising the differential operator and conduction offsets
     fixed: CsrMatrix<T>,
     /// The CsrMatrix containing the potential at the current stage of the calculation, this is diagonal
@@ -48,7 +48,7 @@ pub(crate) struct Hamiltonian<T: Copy + RealField> {
 }
 
 /// An InfoDesk trait providing all the necessary external information required to construct the Hamiltonian
-pub(crate) trait HamiltonianInfoDesk<T: RealField>: PotentialInfoDesk<T>
+pub trait HamiltonianInfoDesk<T: RealField>: PotentialInfoDesk<T>
 where
     DefaultAllocator: Allocator<T, Self::BandDim>,
 {
@@ -72,7 +72,7 @@ where
     // }
 }
 
-pub(crate) trait PotentialInfoDesk<T: RealField> {
+pub trait PotentialInfoDesk<T: RealField> {
     type BandDim: SmallDim;
     /// Return the potential at mesh element `element` index by averaging over the values at each vertex providec
     fn potential(&self, vertex_index: usize) -> T;
@@ -107,14 +107,14 @@ impl<T: Copy + RealField> Hamiltonian<T> {
 }
 
 /// Builder for a Hamiltonian from the reference to a Mesh and an object implementing HamiltonianInfoDesk
-pub(crate) struct HamiltonianBuilder<RefInfoDesk, RefMesh> {
+pub struct HamiltonianBuilder<RefInfoDesk, RefMesh> {
     info_desk: RefInfoDesk,
     mesh: RefMesh,
 }
 
 impl HamiltonianBuilder<(), ()> {
     /// Initialize an empty instand of HamiltonianBuilder
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             info_desk: (),
             mesh: (),
@@ -124,7 +124,7 @@ impl HamiltonianBuilder<(), ()> {
 
 impl<RefInfoDesk, RefMesh> HamiltonianBuilder<RefInfoDesk, RefMesh> {
     /// Attach a mesh
-    pub(crate) fn with_mesh<Mesh>(self, mesh: &Mesh) -> HamiltonianBuilder<RefInfoDesk, &Mesh> {
+    pub fn with_mesh<Mesh>(self, mesh: &Mesh) -> HamiltonianBuilder<RefInfoDesk, &Mesh> {
         HamiltonianBuilder {
             info_desk: self.info_desk,
             mesh,
@@ -132,7 +132,7 @@ impl<RefInfoDesk, RefMesh> HamiltonianBuilder<RefInfoDesk, RefMesh> {
     }
 
     /// Attach an implementation of `HamiltonianInfoDesk`
-    pub(crate) fn with_info_desk<InfoDesk>(
+    pub fn with_info_desk<InfoDesk>(
         self,
         info_desk: &InfoDesk,
     ) -> HamiltonianBuilder<&InfoDesk, RefMesh> {
@@ -152,7 +152,7 @@ where
 {
     /// Builds an instance of `Hamiltonian` from a `HamiltonianBuilder`
     #[tracing::instrument(name = "Hamiltonian Builder", level = "info", skip(self))]
-    pub(crate) fn build(self) -> Result<Hamiltonian<T>, BuildError> {
+    pub fn build(self) -> Result<Hamiltonian<T>, BuildError> {
         Hamiltonian::build_operator(self.info_desk, self.mesh)
     }
 }

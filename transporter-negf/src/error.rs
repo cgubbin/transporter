@@ -1,7 +1,7 @@
 use miette::Diagnostic;
 
 #[derive(thiserror::Error, Debug, Diagnostic)]
-pub(crate) enum BuildError {
+pub enum BuildError {
     #[error(transparent)]
     Csr(#[from] CsrError),
     #[error("{0}")]
@@ -12,7 +12,7 @@ pub(crate) enum BuildError {
 
 #[derive(thiserror::Error, Debug, Diagnostic)]
 /// General error for Csr construction, patterns and element access problems
-pub(crate) enum CsrError {
+pub enum CsrError {
     #[error("{0}")]
     Access(String),
     #[error(transparent)]

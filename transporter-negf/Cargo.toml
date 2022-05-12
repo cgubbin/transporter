@@ -57,7 +57,7 @@ debug = true
 codegen-units = 1 
 
 [[bench]]
-name = "recursive_greens_functions"
+name = "sparse"
 harness = false
 
 

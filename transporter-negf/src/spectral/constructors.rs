@@ -7,7 +7,7 @@ use num_traits::NumCast;
 use std::ops::Range;
 use transporter_mesher::{Connectivity, Mesh, Segment1dConnectivity, SmallDim};
 
-pub(crate) struct SpectralSpaceBuilder<
+pub struct SpectralSpaceBuilder<
     T,
     RefEnergyRange,
     RefEnergyIntegrationMethod,
@@ -24,7 +24,7 @@ pub(crate) struct SpectralSpaceBuilder<
 }
 
 impl<T> SpectralSpaceBuilder<T, (), (), (), ()> {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             number_of_energy_points: None,
             energy_range: (),
@@ -52,7 +52,7 @@ impl<
         RefMesh,
     >
 {
-    pub(crate) fn with_number_of_energy_points(self, number_of_energy_points: usize) -> Self {
+    pub fn with_number_of_energy_points(self, number_of_energy_points: usize) -> Self {
         Self {
             number_of_energy_points: Some(number_of_energy_points),
             energy_range: self.energy_range,
@@ -100,7 +100,7 @@ impl<
         }
     }
 
-    pub(crate) fn with_energy_range(
+    pub fn with_energy_range(
         self,
         energy_range: Range<T>,
     ) -> SpectralSpaceBuilder<
@@ -121,7 +121,7 @@ impl<
         }
     }
 
-    pub(crate) fn with_energy_integration_method<EnergyIntegrationMethod>(
+    pub fn with_energy_integration_method<EnergyIntegrationMethod>(
         self,
         energy_integration_rule: EnergyIntegrationMethod,
     ) -> SpectralSpaceBuilder<
@@ -193,7 +193,7 @@ where
     T: Copy + RealField + NumCast,
     EnergyIntegrationRule: super::GenerateWeights<T, U1, Segment1dConnectivity>,
 {
-    pub(crate) fn build_coherent(self) -> SpectralSpace<T, ()> {
+    pub fn build_coherent(self) -> SpectralSpace<T, ()> {
         let energy = super::energy::EnergySpaceBuilder::new()
             .with_integration_rule(self.energy_integration_rule)
             .with_number_of_points(self.number_of_energy_points.unwrap())

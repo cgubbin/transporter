@@ -23,10 +23,10 @@ pub(crate) mod tracker;
 
 use calculations::coherent_calculation_at_fixed_voltage;
 use calculations::incoherent_calculation_at_fixed_voltage;
-pub(crate) use configuration::Configuration;
+pub use configuration::Configuration;
 pub(crate) use error::TransporterError;
 use telemetry::{get_subscriber, init_subscriber};
-pub(crate) use tracker::Tracker;
+pub use tracker::{Tracker, TrackerBuilder};
 
 use crate::{
     device::{info_desk::BuildInfoDesk, reader::Device},
@@ -106,7 +106,7 @@ impl std::string::ToString for LogLevel {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, ArgEnum)]
-pub(crate) enum Calculation {
+pub enum Calculation {
     Coherent,
     Incoherent,
 }
@@ -210,7 +210,7 @@ where
     Ok(())
 }
 
-pub(crate) fn build_mesh_with_config<T: Copy + DeserializeOwned + RealField + ToPrimitive>(
+pub fn build_mesh_with_config<T: Copy + DeserializeOwned + RealField + ToPrimitive>(
     config: &Configuration<T>,
     device: Device<T, U1>,
 ) -> miette::Result<Mesh1d<T>>

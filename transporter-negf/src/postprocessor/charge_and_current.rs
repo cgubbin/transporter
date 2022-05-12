@@ -104,7 +104,7 @@ where
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct Charge<T, BandDim: SmallDim>
+pub struct Charge<T, BandDim: SmallDim>
 where
     DefaultAllocator: Allocator<
         Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
@@ -142,7 +142,7 @@ where
     }
 }
 #[derive(Clone)]
-pub(crate) struct Current<T, BandDim: SmallDim>
+pub struct Current<T, BandDim: SmallDim>
 where
     DefaultAllocator: Allocator<
         Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,

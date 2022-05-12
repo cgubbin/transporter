@@ -11,3 +11,7 @@ nalgebra = "0.30"
 nalgebra-sparse = "0.6.0"
 transporter-negf = {path = ".."}
 rand = "0.8.5"
+serde = { version = "1.0.136", features = ["derive"] }
+transporter-mesher = { path = "../../transporter-mesher" }
+num-traits = "0.2.15"
+num-complex = "0.4.1"

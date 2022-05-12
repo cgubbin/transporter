@@ -49,7 +49,7 @@ pub mod app;
 mod constants;
 
 /// Device and geometry
-mod device;
+pub mod device;
 
 /// Error handling
 mod error;
@@ -73,10 +73,10 @@ mod outer_loop;
 mod postprocessor;
 
 /// Self energies for coherent and incoherent transport
-mod self_energy;
+pub mod self_energy;
 
 /// Discrete energy and wavevector spaces
-mod spectral;
+pub mod spectral;
 
 /// Helper functions and traits
 mod utilities;

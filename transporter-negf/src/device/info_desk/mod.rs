@@ -11,7 +11,7 @@ use transporter_mesher::{Assignment, SmallDim};
 
 /// Struct holding all the material information necessary to solve the problem
 #[derive(Debug)]
-pub(crate) struct DeviceInfoDesk<T: RealField, GeometryDim: SmallDim, BandDim: SmallDim>
+pub struct DeviceInfoDesk<T: RealField, GeometryDim: SmallDim, BandDim: SmallDim>
 where
     DefaultAllocator: Allocator<T, BandDim> + Allocator<[T; 3], BandDim>,
 {
@@ -116,7 +116,7 @@ where
 }
 
 /// Struct holding all the material information necessary to solve the problem
-pub(crate) struct LayerInfoDesk<T: RealField, BandDim: SmallDim>
+pub struct LayerInfoDesk<T: RealField, BandDim: SmallDim>
 where
     DefaultAllocator: Allocator<T, BandDim> + Allocator<[T; 3], BandDim>,
 {
@@ -128,7 +128,7 @@ where
     dielectric_constant: [T; 3],
 }
 
-pub(crate) trait BuildInfoDesk<T: RealField, GeometryDim: SmallDim, BandDim: SmallDim>
+pub trait BuildInfoDesk<T: RealField, GeometryDim: SmallDim, BandDim: SmallDim>
 where
     DefaultAllocator: Allocator<T, BandDim> + Allocator<[T; 3], BandDim>,
 {

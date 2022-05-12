@@ -414,7 +414,7 @@ where
             ),
             calculation: global_tracker.calculation(),
             iteration: 0,
-            scattering_scaling: T::from_f64(0.1).unwrap(),
+            scattering_scaling: T::from_f64(1.0).unwrap(),
             current_residual: T::max_value().unwrap(),
             voltage,
         }
