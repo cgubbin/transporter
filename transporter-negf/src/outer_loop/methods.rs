@@ -70,7 +70,7 @@ where
 impl<T, GeometryDim, Conn, BandDim> Outer<T>
     for OuterLoop<'_, T, GeometryDim, Conn, BandDim, SpectralSpace<T, ()>>
 where
-    T: ArgminFloat + RealField + Copy + ndarray::ScalarOperand,
+    T: ArgminFloat + RealField + Copy, //+ ndarray::ScalarOperand,
     Conn: Connectivity<T, GeometryDim> + Send + Sync,
     <Conn as Connectivity<T, GeometryDim>>::Element: Send + Sync,
     GeometryDim: SmallDim,
@@ -168,8 +168,9 @@ where
         )
         .beta(T::from_f64(1.0).unwrap())
         .memory(2);
-        let vec_para = potential.as_ref().iter().copied().collect::<Vec<_>>();
-        let initial_parameter = ndarray::Array1::from(vec_para);
+        // let vec_para = potential.as_ref().iter().copied().collect::<Vec<_>>();
+        // let initial_parameter = ndarray::Array1::from(vec_para);
+        let initial_parameter = potential.as_ref().clone();
         // let mut solver = FixedPointSolver::new(mixer, potential.as_ref().clone());
         let mut solver = FixedPointSolver::new(mixer, initial_parameter);
 
@@ -204,7 +205,7 @@ impl<T, GeometryDim, Conn, BandDim> Outer<T>
         SpectralSpace<T, WavevectorSpace<T, GeometryDim, Conn>>,
     >
 where
-    T: ArgminFloat + RealField + Copy + ndarray::ScalarOperand,
+    T: ArgminFloat + RealField + Copy, // + ndarray::ScalarOperand,
     Conn: Connectivity<T, GeometryDim> + Send + Sync,
     <Conn as Connectivity<T, GeometryDim>>::Element: Send + Sync,
     GeometryDim: SmallDim,
@@ -341,8 +342,9 @@ where
             self.convergence_settings.outer_tolerance(),
             self.convergence_settings.maximum_outer_iterations() as u64,
         );
-        let vec_para = potential.as_ref().iter().copied().collect::<Vec<_>>();
-        let initial_parameter = ndarray::Array1::from(vec_para);
+        // let vec_para = potential.as_ref().iter().copied().collect::<Vec<_>>();
+        // let initial_parameter = ndarray::Array1::from(vec_para);
+        let initial_parameter = potential.as_ref().clone();
         let mut solver = FixedPointSolver::new(mixer, initial_parameter);
 
         // We print 1 line further down in an incoherent loop
@@ -378,7 +380,7 @@ where
 impl<T, GeometryDim, Conn, BandDim, SpectralSpace>
     OuterLoop<'_, T, GeometryDim, Conn, BandDim, SpectralSpace>
 where
-    T: ArgminFloat + RealField + Copy + ndarray::ScalarOperand,
+    T: ArgminFloat + RealField + Copy, // + ndarray::ScalarOperand,
     Conn: Connectivity<T, GeometryDim>,
     GeometryDim: SmallDim,
     BandDim: SmallDim,
@@ -544,7 +546,7 @@ where
 impl<T, GeometryDim, Conn, BandDim>
     OuterLoop<'_, T, GeometryDim, Conn, BandDim, SpectralSpace<T, ()>>
 where
-    T: ArgminFloat + RealField + Copy + ndarray::ScalarOperand,
+    T: ArgminFloat + RealField + Copy, // + ndarray::ScalarOperand,
     Conn: Connectivity<T, GeometryDim>,
     <Conn as Connectivity<T, GeometryDim>>::Element: Send + Sync,
     GeometryDim: SmallDim,
@@ -589,7 +591,7 @@ impl<T, GeometryDim, Conn, BandDim>
         SpectralSpace<T, WavevectorSpace<T, GeometryDim, Conn>>,
     >
 where
-    T: ArgminFloat + RealField + Copy + ndarray::ScalarOperand,
+    T: ArgminFloat + RealField + Copy, //+ ndarray::ScalarOperand,
     Conn: Connectivity<T, GeometryDim>,
     <Conn as Connectivity<T, GeometryDim>>::Element: Send + Sync,
     GeometryDim: SmallDim,
@@ -641,7 +643,7 @@ impl<T, GeometryDim, Conn, BandDim>
         SpectralSpace<T, WavevectorSpace<T, GeometryDim, Conn>>,
     >
 where
-    T: ArgminFloat + RealField + Copy + ndarray::ScalarOperand,
+    T: ArgminFloat + RealField + Copy, // + ndarray::ScalarOperand,
     Conn: Connectivity<T, GeometryDim>,
     <Conn as Connectivity<T, GeometryDim>>::Element: Send + Sync,
     GeometryDim: SmallDim,
@@ -943,7 +945,7 @@ where
 impl<T, GeometryDim, Conn, BandDim> conflux::core::FixedPointProblem
     for OuterLoop<'_, T, GeometryDim, Conn, BandDim, SpectralSpace<T, ()>>
 where
-    T: RealField + Copy + ArgminFloat + ndarray::ScalarOperand, // + conflux::core::FPFloat,
+    T: RealField + Copy + ArgminFloat, // + ndarray::ScalarOperand, // + conflux::core::FPFloat,
     GeometryDim: SmallDim,
     BandDim: SmallDim,
     Conn: Connectivity<T, GeometryDim> + Send + Sync,
@@ -959,14 +961,14 @@ where
     <DefaultAllocator as Allocator<T, BandDim>>::Buffer: Send + Sync,
     <DefaultAllocator as Allocator<[T; 3], BandDim>>::Buffer: Send + Sync,
 {
-    // type Output = DVector<T>;
-    // type Param = DVector<T>;
-    // type Float = T;
-    // type Square = DMatrix<T>;
-    type Output = ndarray::Array1<T>;
-    type Param = ndarray::Array1<T>;
+    type Output = DVector<T>;
+    type Param = DVector<T>;
     type Float = T;
-    type Square = ndarray::Array2<T>;
+    type Square = DMatrix<T>;
+    // type Output = ndarray::Array1<T>;
+    // type Param = ndarray::Array1<T>;
+    // type Float = T;
+    // type Square = ndarray::Array2<T>;
 
     #[tracing::instrument(name = "Single iteration", fields(iteration = self.tracker.iteration + 1), skip_all)]
     fn update(
@@ -998,8 +1000,8 @@ where
         tracing::info!("Change in potential per element: {change}");
         self.tracker.iteration += 1;
 
-        let vec_para = new_potential.iter().copied().collect::<Vec<_>>();
-        let new_potential = ndarray::Array1::from(vec_para);
+        // let vec_para = new_potential.iter().copied().collect::<Vec<_>>();
+        // let new_potential = ndarray::Array1::from(vec_para);
         Ok(new_potential)
     }
 }
@@ -1014,7 +1016,7 @@ impl<T, GeometryDim, Conn, BandDim> conflux::core::FixedPointProblem
         SpectralSpace<T, WavevectorSpace<T, GeometryDim, Conn>>,
     >
 where
-    T: RealField + Copy + ArgminFloat + ndarray::ScalarOperand, // + conflux::core::FPFloat,
+    T: RealField + Copy + ArgminFloat, // + ndarray::ScalarOperand, // + conflux::core::FPFloat,
     GeometryDim: SmallDim,
     BandDim: SmallDim,
     Conn: Connectivity<T, GeometryDim> + Send + Sync,
@@ -1030,14 +1032,14 @@ where
     <DefaultAllocator as Allocator<T, BandDim>>::Buffer: Send + Sync,
     <DefaultAllocator as Allocator<[T; 3], BandDim>>::Buffer: Send + Sync,
 {
-    // type Output = DVector<T>;
-    // type Param = DVector<T>;
-    // type Float = T;
-    // type Square = DMatrix<T>;
-    type Output = ndarray::Array1<T>;
-    type Param = ndarray::Array1<T>;
+    type Output = DVector<T>;
+    type Param = DVector<T>;
     type Float = T;
-    type Square = ndarray::Array2<T>;
+    type Square = DMatrix<T>;
+    // type Output = ndarray::Array1<T>;
+    // type Param = ndarray::Array1<T>;
+    // type Float = T;
+    // type Square = ndarray::Array2<T>;
 
     #[tracing::instrument(name = "Single iteration", fields(iteration = self.tracker.iteration + 1), skip_all)]
     fn update(
@@ -1073,8 +1075,8 @@ where
         self.term.clear_to_end_of_screen().unwrap();
         tracing::info!("Change in potential per element: {change}");
         self.tracker.iteration += 1;
-        let vec_para = new_potential.iter().copied().collect::<Vec<_>>();
-        let new_potential = ndarray::Array1::from(vec_para);
+        // let vec_para = new_potential.iter().copied().collect::<Vec<_>>();
+        // let new_potential = ndarray::Array1::from(vec_para);
         Ok(new_potential)
     }
 }

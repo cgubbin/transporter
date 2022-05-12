@@ -79,44 +79,44 @@ where
     Ok(diagonal)
 }
 
-#[inline]
-/// Calculate the left connected diagonal by solving into the Array1 diagonal, this avoids the allocation
-pub fn left_connected_diagonal_no_alloc<T>(
-    energy: T::RealField,
-    hamiltonian: &CsrMatrix<T::RealField>,
-    self_energies: &(T, T),
-    diagonal: &mut ndarray::Array1<T>,
-    // An optional early termination argument, to go down the whole matrix pass nrows
-) -> Result<(), RecursionError>
-where
-    T: ComplexField + Copy,
-    <T as ComplexField>::RealField: Copy,
-{
-    // at the left contact g_{00}^{LR} is just the inverse of the diagonal matrix element D_{0}
-    diagonal[0] =
-        T::one() / (T::from_real(energy - hamiltonian.row(0).values()[0]) - self_energies.0);
-    let mut previous = diagonal[0]; // g_{00}^{LR}
-    let mut previous_hopping_element = T::from_real(hamiltonian.row(0).values()[1]); // t_{0 1}
-
-    for (idx, (element, row)) in diagonal
-        .iter_mut()
-        .zip(hamiltonian.row_iter())
-        .skip(1)
-        .enumerate()
-    {
-        let hopping_element = T::from_real(row.values()[0]); //  t_{i-1, i}
-        let diagonal = T::from_real(energy - row.values()[1])
-            - if idx == hamiltonian.nrows() - 2 {
-                self_energies.1
-            } else {
-                T::zero()
-            };
-        *element = T::one() / (diagonal - previous * hopping_element * previous_hopping_element); // g_{ii}^{LR}
-        previous_hopping_element = hopping_element;
-        previous = *element;
-    }
-    Ok(())
-}
+//#[inline]
+///// Calculate the left connected diagonal by solving into the Array1 diagonal, this avoids the allocation
+//pub fn left_connected_diagonal_no_alloc<T>(
+//    energy: T::RealField,
+//    hamiltonian: &CsrMatrix<T::RealField>,
+//    self_energies: &(T, T),
+//    diagonal: &mut ndarray::Array1<T>,
+//    // An optional early termination argument, to go down the whole matrix pass nrows
+//) -> Result<(), RecursionError>
+//where
+//    T: ComplexField + Copy,
+//    <T as ComplexField>::RealField: Copy,
+//{
+//    // at the left contact g_{00}^{LR} is just the inverse of the diagonal matrix element D_{0}
+//    diagonal[0] =
+//        T::one() / (T::from_real(energy - hamiltonian.row(0).values()[0]) - self_energies.0);
+//    let mut previous = diagonal[0]; // g_{00}^{LR}
+//    let mut previous_hopping_element = T::from_real(hamiltonian.row(0).values()[1]); // t_{0 1}
+//
+//    for (idx, (element, row)) in diagonal
+//        .iter_mut()
+//        .zip(hamiltonian.row_iter())
+//        .skip(1)
+//        .enumerate()
+//    {
+//        let hopping_element = T::from_real(row.values()[0]); //  t_{i-1, i}
+//        let diagonal = T::from_real(energy - row.values()[1])
+//            - if idx == hamiltonian.nrows() - 2 {
+//                self_energies.1
+//            } else {
+//                T::zero()
+//            };
+//        *element = T::one() / (diagonal - previous * hopping_element * previous_hopping_element); // g_{ii}^{LR}
+//        previous_hopping_element = hopping_element;
+//        previous = *element;
+//    }
+//    Ok(())
+//}
 
 /// Calculates the right connected diagonal from the Hamiltonian of the system, and the self energy in the semi-infinite right lead.
 ///

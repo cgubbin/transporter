@@ -33,6 +33,7 @@ use crate::{
 };
 use nalgebra::{allocator::Allocator, DefaultAllocator, DimName, OPoint, RealField};
 use nalgebra_sparse::CsrMatrix;
+use sprs::CsMat;
 use transporter_mesher::{Connectivity, Mesh, SmallDim};
 
 #[derive(Debug)]
@@ -40,11 +41,23 @@ use transporter_mesher::{Connectivity, Mesh, SmallDim};
 /// should be generic it is intended to work with nearest neighbour coupling schemes
 pub struct Hamiltonian<T: Copy + RealField> {
     /// Contains the fixed component of the Hamiltonian, comprising the differential operator and conduction offsets
+    #[cfg(not(feature = "ndarray"))]
     fixed: CsrMatrix<T>,
     /// The CsrMatrix containing the potential at the current stage of the calculation, this is diagonal
+    #[cfg(not(feature = "ndarray"))]
     potential: CsrMatrix<T>,
     /// The wavevector dependent component. This component is multiplied by the wavevector during the calculation
+    #[cfg(not(feature = "ndarray"))]
     wavevector: CsrMatrix<T>,
+    /// Contains the fixed component of the Hamiltonian, comprising the differential operator and conduction offsets
+    #[cfg(feature = "ndarray")]
+    fixed: CsMat<T>,
+    /// The CsrMatrix containing the potential at the current stage of the calculation, this is diagonal
+    #[cfg(feature = "ndarray")]
+    potential: CsMat<T>,
+    /// The wavevector dependent component. This component is multiplied by the wavevector during the calculation
+    #[cfg(feature = "ndarray")]
+    wavevector: CsMat<T>,
 }
 
 /// An InfoDesk trait providing all the necessary external information required to construct the Hamiltonian

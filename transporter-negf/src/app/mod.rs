@@ -125,13 +125,7 @@ use miette::IntoDiagnostic;
 /// attempts to run it to completion.
 pub fn run<T>() -> miette::Result<()>
 where
-    T: ArgminFloat
-        + Copy
-        + DeserializeOwned
-        + NumCast
-        + RealField
-        + ToPrimitive
-        + ndarray::ScalarOperand,
+    T: ArgminFloat + Copy + DeserializeOwned + NumCast + RealField + ToPrimitive, // + ndarray::ScalarOperand,
 {
     // Prepare terminal environment
     let term = console::Term::stdout();
@@ -252,7 +246,7 @@ fn build_and_run<T, BandDim: SmallDim>(
     term: console::Term,
 ) -> Result<(), TransporterError<T>>
 where
-    T: ArgminFloat + Copy + num_traits::NumCast + RealField + ndarray::ScalarOperand,
+    T: ArgminFloat + Copy + num_traits::NumCast + RealField, // + ndarray::ScalarOperand,
     //Tracker: crate::HamiltonianInfoDesk<T::RealField>,
     DefaultAllocator: Allocator<T, U1>
         + Allocator<T, BandDim>
