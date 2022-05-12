@@ -37,10 +37,37 @@ use clap::{ArgEnum, Args, Parser};
 use nalgebra::{
     allocator::Allocator, Const, DefaultAllocator, Dynamic, Matrix, RealField, VecStorage, U1,
 };
+use num_complex::Complex;
 use num_traits::{NumCast, ToPrimitive};
 use serde::{de::DeserializeOwned, Deserialize};
 use std::path::PathBuf;
 use transporter_mesher::{Mesh, Mesh1d, Segment1dConnectivity, SmallDim};
+
+#[cfg(feature = "ndarray")]
+pub trait NEGFFloat: ArgminFloat + Copy + NumCast + RealField + ndarray::ScalarOperand {}
+
+#[cfg(not(feature = "ndarray"))]
+pub trait NEGFFloat: ArgminFloat + Copy + NumCast + RealField {}
+
+impl NEGFFloat for f32 {}
+impl NEGFFloat for f64 {}
+
+#[cfg(feature = "ndarray")]
+pub trait NEGFComplex: Copy + nalgebra::ComplexField + ndarray::ScalarOperand {}
+
+#[cfg(not(feature = "ndarray"))]
+pub trait NEGFComplex: Copy + nalgebra::ComplexField {}
+
+#[cfg(feature = "ndarray")]
+impl<T> NEGFComplex for Complex<T>
+where
+    T: NEGFFloat,
+    Complex<T>: ndarray::ScalarOperand,
+{
+}
+
+#[cfg(not(feature = "ndarray"))]
+impl<T> NEGFComplex for Complex<T> where T: NEGFFloat {}
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
@@ -125,7 +152,8 @@ use miette::IntoDiagnostic;
 /// attempts to run it to completion.
 pub fn run<T>() -> miette::Result<()>
 where
-    T: ArgminFloat + Copy + DeserializeOwned + NumCast + RealField + ToPrimitive, // + ndarray::ScalarOperand,
+    T: NEGFFloat + DeserializeOwned + ToPrimitive, // + ndarray::ScalarOperand,
+    Complex<T>: NEGFComplex,
 {
     // Prepare terminal environment
     let term = console::Term::stdout();
@@ -246,7 +274,8 @@ fn build_and_run<T, BandDim: SmallDim>(
     term: console::Term,
 ) -> Result<(), TransporterError<T>>
 where
-    T: ArgminFloat + Copy + num_traits::NumCast + RealField, // + ndarray::ScalarOperand,
+    T: NEGFFloat, // + ndarray::ScalarOperand,
+    Complex<T>: NEGFComplex,
     //Tracker: crate::HamiltonianInfoDesk<T::RealField>,
     DefaultAllocator: Allocator<T, U1>
         + Allocator<T, BandDim>

@@ -1,17 +1,19 @@
-use super::{SelfEnergy, SelfEnergyError};
+use super::super::{SelfEnergy, SelfEnergyError};
 use crate::constants::{ELECTRON_CHARGE, EPSILON_0};
-use crate::greens_functions::{mixed::MMatrix, AggregateGreensFunctions};
+use crate::greens_functions::{ndarray_gf::mixed::MMatrix, AggregateGreensFunctions};
 use crate::spectral::SpectralDiscretisation;
 use console::Term;
 use indicatif::{ParallelProgressIterator, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use nalgebra::{allocator::Allocator, DMatrix, DefaultAllocator, RealField};
+use ndarray::Array2;
+use ndarray::ScalarOperand;
 use num_complex::Complex;
 use rayon::prelude::*;
 use transporter_mesher::{Connectivity, Mesh, SmallDim};
 
 impl<T, GeometryDim, Conn> SelfEnergy<T, GeometryDim, Conn>
 where
-    T: RealField + Copy,
+    T: RealField + Copy + ScalarOperand,
     GeometryDim: SmallDim,
     Conn: Connectivity<T, GeometryDim> + Send + Sync,
     <Conn as Connectivity<T, GeometryDim>>::Element: Send + Sync,
@@ -113,7 +115,8 @@ where
                         lesser_gf_scattered_from *= Complex::from(
                             gamma_frohlich * T::from_f64(1. / 4. / std::f64::consts::PI).unwrap(),
                         );
-                        for (idx, mut row) in lesser_self_energy_matrix.row_iter_mut().enumerate() {
+                        for (idx, mut row) in lesser_self_energy_matrix.outer_iter_mut().enumerate()
+                        {
                             for (jdx, entry) in row.iter_mut().enumerate() {
                                 let prefactor = Self::bulk_lo_phonon_potential(
                                     mesh,
@@ -155,7 +158,8 @@ where
                             gamma_frohlich * T::from_f64(1. / 4. / std::f64::consts::PI).unwrap(),
                         );
 
-                        for (idx, mut row) in lesser_self_energy_matrix.row_iter_mut().enumerate() {
+                        for (idx, mut row) in lesser_self_energy_matrix.outer_iter_mut().enumerate()
+                        {
                             for (jdx, entry) in row.iter_mut().enumerate() {
                                 let prefactor = Self::bulk_lo_phonon_potential(
                                     mesh,
@@ -267,7 +271,8 @@ where
                         gf_scattered_from *= Complex::from(
                             gamma_frohlich * T::from_f64(1. / 4. / std::f64::consts::PI).unwrap(),
                         );
-                        for (idx, mut row) in retarded_self_energy_matrix.row_iter_mut().enumerate()
+                        for (idx, mut row) in
+                            retarded_self_energy_matrix.outer_iter_mut().enumerate()
                         {
                             for (jdx, entry) in row.iter_mut().enumerate() {
                                 let prefactor = Self::bulk_lo_phonon_potential(
@@ -312,7 +317,8 @@ where
                         gf_scattered_to *= Complex::from(
                             gamma_frohlich * T::from_f64(1. / 4. / std::f64::consts::PI).unwrap(),
                         );
-                        for (idx, mut row) in retarded_self_energy_matrix.row_iter_mut().enumerate()
+                        for (idx, mut row) in
+                            retarded_self_energy_matrix.outer_iter_mut().enumerate()
                         {
                             for (jdx, entry) in row.iter_mut().enumerate() {
                                 let prefactor = Self::bulk_lo_phonon_potential(
@@ -362,7 +368,8 @@ where
 
 impl<T, GeometryDim, Conn> SelfEnergy<T, GeometryDim, Conn>
 where
-    T: RealField + Copy,
+    T: RealField + Copy + ScalarOperand,
+    Complex<T>: ScalarOperand,
     GeometryDim: SmallDim,
     Conn: Connectivity<T, GeometryDim> + Send + Sync,
     <Conn as Connectivity<T, GeometryDim>>::Element: Send + Sync,
@@ -430,8 +437,8 @@ where
             .enumerate()
             .progress_with(pb)
             .for_each(|(index, lesser_self_energy_matrix)| {
-                let mut phonon_workspace: DMatrix<Complex<T>> =
-                    DMatrix::zeros(num_vertices_in_core, num_vertices_in_core);
+                let mut phonon_workspace: Array2<Complex<T>> =
+                    Array2::zeros((num_vertices_in_core, num_vertices_in_core));
                 let energy_index = index % spectral_space.number_of_energy_points();
                 let wavevector_index_k = index / spectral_space.number_of_energy_points();
                 let wavevector_k = spectral_space.wavevector_at(wavevector_index_k);
@@ -472,17 +479,18 @@ where
                             .identify_bracketing_weights(energy_scattered_from)
                             .unwrap();
 
-                        *lesser_self_energy_matrix = phonon_workspace
-                            .scale((T::one() + n_0) * weight * width * wavevector_l)
-                            * prefactor
-                            * (greens_functions.lesser[global_indices[0]]
-                                .as_ref()
-                                .core_as_ref()
-                                * Complex::from(weights[0])
-                                + greens_functions.lesser[global_indices[1]]
-                                    .as_ref()
-                                    .core_as_ref()
-                                    * Complex::from(weights[1]));
+                        *lesser_self_energy_matrix = &phonon_workspace
+                            * Complex::from((T::one() + n_0) * weight * width * wavevector_l)
+                            * prefactor;
+                        // TODO Reinstate the GF bit when we get it to work
+                        // * (greens_functions.lesser[global_indices[0]]
+                        //     .as_ref()
+                        //     .core_as_ref()
+                        //     * Complex::from(weights[0])
+                        //     + greens_functions.lesser[global_indices[1]]
+                        //         .as_ref()
+                        //         .core_as_ref()
+                        //         * Complex::from(weights[1]));
                     }
 
                     if spectral_space.energy_at(energy_index) > e_0 {
@@ -503,17 +511,19 @@ where
                             .identify_bracketing_weights(energy_scattered_to)
                             .unwrap();
 
-                        *lesser_self_energy_matrix += phonon_workspace
-                            .scale(n_0 * weight * width * wavevector_l)
-                            * prefactor
-                            * (greens_functions.lesser[global_indices[0]]
-                                .as_ref()
-                                .core_as_ref()
-                                * Complex::from(weights[0])
-                                + greens_functions.lesser[global_indices[1]]
-                                    .as_ref()
-                                    .core_as_ref()
-                                    * Complex::from(weights[1]));
+                        *lesser_self_energy_matrix = lesser_self_energy_matrix.clone()
+                            + phonon_workspace
+                                * Complex::from(n_0 * weight * width * wavevector_l)
+                                * prefactor;
+                        // TODO Reinstate the GF bits after fixing them
+                        // * (greens_functions.lesser[global_indices[0]]
+                        //     .as_ref()
+                        //     .core_as_ref()
+                        //     * Complex::from(weights[0])
+                        //     + greens_functions.lesser[global_indices[1]]
+                        //         .as_ref()
+                        //         .core_as_ref()
+                        //         * Complex::from(weights[1]));
                     };
                 }
             });
@@ -580,8 +590,8 @@ where
                 let energy_index = index % spectral_space.number_of_energy_points();
                 let wavevector_index_k = index / spectral_space.number_of_energy_points();
                 let wavevector_k = spectral_space.wavevector_at(wavevector_index_k);
-                let mut phonon_workspace: DMatrix<Complex<T>> =
-                    DMatrix::zeros(num_vertices_in_core, num_vertices_in_core);
+                let mut phonon_workspace: Array2<Complex<T>> =
+                    Array2::zeros((num_vertices_in_core, num_vertices_in_core));
 
                 // Reset the matrix
                 retarded_self_energy_matrix.fill(Complex::from(T::zero()));
@@ -620,24 +630,25 @@ where
                         // Form the best guess for the lesser GF at `energy_scattered_from` (Eq 6, no PV)
 
                         *retarded_self_energy_matrix = phonon_workspace
-                            .scale(weight * width * wavevector_l)
-                            * prefactor
-                            * (greens_functions.retarded[global_indices[0]]
-                                .as_ref()
-                                .core_as_ref()
-                                * Complex::from(weights[0] * (T::one() + n_0))
-                                + greens_functions.retarded[global_indices[1]]
-                                    .as_ref()
-                                    .core_as_ref()
-                                    * Complex::from(weights[1] * (T::one() + n_0))
-                                - greens_functions.lesser[global_indices[0]]
-                                    .as_ref()
-                                    .core_as_ref()
-                                    * Complex::from(weights[0] / (T::one() + T::one()))
-                                - greens_functions.lesser[global_indices[1]]
-                                    .as_ref()
-                                    .core_as_ref()
-                                    * Complex::from(weights[1] / (T::one() + T::one())));
+                            * Complex::from(weight * width * wavevector_l)
+                            * prefactor;
+                        // TODO Reinstate when the Green's funcitons are fixed
+                        //* (greens_functions.retarded[global_indices[0]]
+                        //    .as_ref()
+                        //    .core_as_ref()
+                        //    * Complex::from(weights[0] * (T::one() + n_0))
+                        //    + greens_functions.retarded[global_indices[1]]
+                        //        .as_ref()
+                        //        .core_as_ref()
+                        //        * Complex::from(weights[1] * (T::one() + n_0))
+                        //    - greens_functions.lesser[global_indices[0]]
+                        //        .as_ref()
+                        //        .core_as_ref()
+                        //        * Complex::from(weights[0] / (T::one() + T::one()))
+                        //    - greens_functions.lesser[global_indices[1]]
+                        //        .as_ref()
+                        //        .core_as_ref()
+                        //        * Complex::from(weights[1] / (T::one() + T::one())));
                     }
 
                     if spectral_space.energy_at(energy_index) > e_0 {
@@ -658,25 +669,27 @@ where
                             .identify_bracketing_weights(energy_scattered_to)
                             .unwrap();
                         // Form the best guess for the lesser GF at `energy_scattered_from` (Eq 6, no PV)
-                        *retarded_self_energy_matrix += phonon_workspace
-                            .scale(weight * width * wavevector_l)
-                            * prefactor
-                            * (greens_functions.retarded[global_indices[0]]
-                                .as_ref()
-                                .core_as_ref()
-                                * Complex::from(weights[0] * n_0)
-                                + greens_functions.retarded[global_indices[1]]
-                                    .as_ref()
-                                    .core_as_ref()
-                                    * Complex::from(weights[1] * n_0)
-                                - greens_functions.lesser[global_indices[0]]
-                                    .as_ref()
-                                    .core_as_ref()
-                                    * Complex::from(weights[0] / (T::one() + T::one()))
-                                - greens_functions.lesser[global_indices[1]]
-                                    .as_ref()
-                                    .core_as_ref()
-                                    * Complex::from(weights[1] / (T::one() + T::one())));
+                        *retarded_self_energy_matrix = retarded_self_energy_matrix.clone()
+                            + phonon_workspace
+                                * Complex::from(weight * width * wavevector_l)
+                                * prefactor;
+                        // TODO Reinstate when the GFs are fixed
+                        // * (greens_functions.retarded[global_indices[0]]
+                        //     .as_ref()
+                        //     .core_as_ref()
+                        //     * Complex::from(weights[0] * n_0)
+                        //     + greens_functions.retarded[global_indices[1]]
+                        //         .as_ref()
+                        //         .core_as_ref()
+                        //         * Complex::from(weights[1] * n_0)
+                        //     - greens_functions.lesser[global_indices[0]]
+                        //         .as_ref()
+                        //         .core_as_ref()
+                        //         * Complex::from(weights[0] / (T::one() + T::one()))
+                        //     - greens_functions.lesser[global_indices[1]]
+                        //         .as_ref()
+                        //         .core_as_ref()
+                        //         * Complex::from(weights[1] / (T::one() + T::one())));
                     }
                 }
             });
@@ -722,7 +735,9 @@ where
 
             // Sigma^> = \Sigma^R - \Sigma^A + \Sigma^<
             let incoherent_greater = &self.incoherent_retarded.as_deref().unwrap()[index]
-                - self.incoherent_retarded.as_deref().unwrap()[index].adjoint()
+                - self.incoherent_retarded.as_deref().unwrap()[index]
+                    .t()
+                    .mapv(|x| x.conj())
                 + &self.incoherent_lesser.as_deref().unwrap()[index];
 
             // G^> = G^R - G^A + G^<
@@ -733,39 +748,40 @@ where
                     .adjoint()
                 + &greens_functions.lesser[index].as_ref().core_matrix;
 
-            let integrand = (&self.incoherent_lesser.as_deref().unwrap()[index] * g_greater
-                - incoherent_greater * &greens_functions.lesser[index].as_ref().core_matrix)
-                .diagonal();
-            if integrand.sum() == Complex::from(T::zero()) {
-                dbg!(
-                    integrand,
-                    &greens_functions.retarded[index].as_ref().core_matrix,
-                    &self.incoherent_lesser.as_deref().unwrap()[index]
-                );
-                panic!();
-            }
-            let integrand = integrand.sum();
-            let prefactor = wavevector_k
-                * T::from_f64(
-                    2_f64 * ELECTRON_CHARGE
-                        / crate::constants::HBAR
-                        / (2_f64 * std::f64::consts::PI).powi(2),
-                )
-                .unwrap()
-                * wavevector_weights[wavevector_index_k]
-                * energy_weights[energy_index];
-            result += Complex::from(prefactor) * integrand;
+            todo!()
+            // let integrand = (&self.incoherent_lesser.as_deref().unwrap()[index] * g_greater
+            //     - incoherent_greater * &greens_functions.lesser[index].as_ref().core_matrix)
+            //     .diagonal();
+            // if integrand.sum() == Complex::from(T::zero()) {
+            //     dbg!(
+            //         integrand,
+            //         &greens_functions.retarded[index].as_ref().core_matrix,
+            //         &self.incoherent_lesser.as_deref().unwrap()[index]
+            //     );
+            //     panic!();
+            // }
+            // let integrand = integrand.sum();
+            // let prefactor = wavevector_k
+            //     * T::from_f64(
+            //         2_f64 * ELECTRON_CHARGE
+            //             / crate::constants::HBAR
+            //             / (2_f64 * std::f64::consts::PI).powi(2),
+            //     )
+            //     .unwrap()
+            //     * wavevector_weights[wavevector_index_k]
+            //     * energy_weights[energy_index];
+            // result += Complex::from(prefactor) * integrand;
         }
         Ok(result)
     }
 
     fn assemble_phonon_potential(
-        output: &mut nalgebra::DMatrix<Complex<T>>,
+        output: &mut Array2<Complex<T>>,
         number_of_vertices_in_reservoir: usize,
         mesh: &Mesh<T, GeometryDim, Conn>,
         wavevector: T,
     ) {
-        let number_of_vertices_in_core = output.shape().0;
+        let number_of_vertices_in_core = output.shape()[0];
         for (index, element) in output.iter_mut().enumerate() {
             *element = Complex::from(Self::bulk_lo_phonon_potential_mixed(
                 mesh,

@@ -1,13 +1,20 @@
-mod aggregate;
-mod dense;
-pub(crate) mod mixed;
-pub mod recursive;
-mod sparse;
+#[cfg(not(feature = "ndarray"))]
+pub mod nalgebra_gf;
+
+#[cfg(not(feature = "ndarray"))]
+pub use nalgebra_gf::aggregate::{
+    AggregateGreensFunctionMethods, AggregateGreensFunctions, GreensFunctionBuilder,
+};
+
+#[cfg(feature = "ndarray")]
+pub mod ndarray_gf;
+
+// #[cfg(feature = "ndarray")]
+// pub use ndarray_gf::aggregate::{
+//     AggregateGreensFunctionMethods, AggregateGreensFunctions, GreensFunctionBuilder,
+// };
 
 use crate::{device::info_desk::DeviceInfoDesk, hamiltonian::Hamiltonian};
-pub use aggregate::AggregateGreensFunctionMethods;
-
-pub use aggregate::{AggregateGreensFunctions, GreensFunctionBuilder};
 use nalgebra::{allocator::Allocator, DefaultAllocator, RealField};
 use transporter_mesher::SmallDim;
 
@@ -20,8 +27,12 @@ pub enum GreensFunctionError {
     #[error("Failed to invert for the retarded Green's Function")]
     Inversion,
     #[error(transparent)]
-    Recursion(#[from] crate::greens_functions::recursive::RecursionError),
+    Recursion(#[from] RecursionError),
 }
+
+/// Error for the recursive Green's function methods. Currently unimplemented
+#[derive(thiserror::Error, Debug, miette::Diagnostic)]
+pub enum RecursionError {}
 
 #[derive(Clone, Debug)]
 pub(crate) struct GreensFunction<Matrix, T>

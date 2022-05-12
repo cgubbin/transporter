@@ -1,0 +1,33 @@
+lead_length = 34.0
+temperature = 300.0
+voltage_offsets = [0.0, 0.1]
+
+[[layers]]
+thickness = [25.0]
+material = "GaAs"
+acceptor_density = 0.0
+donor_density = 1e24
+
+[[layers]]
+thickness = [10.0]
+material = "GaAs"
+acceptor_density = 0.0
+donor_density = 1e18
+
+[[layers]]
+thickness = [5.0]
+material = "AlGaAs"
+acceptor_density = 0.0
+donor_density = 1e18
+
+[[layers]]
+thickness = [10.0]
+material = "GaAs"
+acceptor_density = 0.0
+donor_density = 1e18
+
+[[layers]]
+thickness = [25.0]
+material = "GaAs"
+acceptor_density = 0.0
+donor_density = 1e24

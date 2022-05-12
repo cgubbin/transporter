@@ -1,13 +1,13 @@
 //! Dense implementations for single and aggregated Greens functions
-use super::{GreensFunctionError, GreensFunctionMethods};
+use super::super::{GreensFunctionError, GreensFunctionMethods};
 use crate::hamiltonian::Hamiltonian;
 use nalgebra::{ComplexField, DMatrix, RealField};
 use nalgebra_sparse::CsrMatrix;
 use num_complex::Complex;
 
 use super::{
+    super::GreensFunctionInfoDesk,
     aggregate::{AggregateGreensFunctionMethods, AggregateGreensFunctions},
-    GreensFunctionInfoDesk,
 };
 use crate::{
     postprocessor::{Charge, Current},

@@ -1,5 +1,6 @@
 use super::{InnerLoop, InnerLoopError};
 use crate::{
+    app::NEGFFloat,
     greens_functions::mixed::MMatrix,
     postprocessor::{ChargeAndCurrent, PostProcess, PostProcessor, PostProcessorBuilder},
     spectral::{SpectralSpace, WavevectorSpace},
@@ -9,6 +10,7 @@ use nalgebra::{
 };
 use nalgebra_sparse::CsrMatrix;
 use num_complex::Complex;
+use num_traits::ToPrimitive;
 use std::io::Write;
 use transporter_mesher::{Connectivity, SmallDim};
 
@@ -40,7 +42,7 @@ where
 impl<'a, T, GeometryDim, Conn, BandDim> Inner<T::RealField, BandDim>
     for InnerLoop<'a, T, GeometryDim, Conn, CsrMatrix<Complex<T>>, SpectralSpace<T, ()>, BandDim>
 where
-    T: Copy + RealField,
+    T: NEGFFloat,
     GeometryDim: SmallDim,
     BandDim: SmallDim,
     Conn: Connectivity<T, GeometryDim> + Send + Sync,
@@ -123,7 +125,7 @@ impl<'a, T, GeometryDim, Conn, BandDim> Inner<T, BandDim>
         BandDim,
     >
 where
-    T: Copy + RealField + num_traits::ToPrimitive,
+    T: NEGFFloat + ToPrimitive,
     GeometryDim: SmallDim,
     BandDim: SmallDim,
     Conn: Connectivity<T, GeometryDim> + Send + Sync,
@@ -215,7 +217,7 @@ impl<'a, T, GeometryDim, Conn, BandDim> Inner<T, BandDim>
         BandDim,
     >
 where
-    T: Copy + RealField + argmin::core::ArgminFloat,
+    T: NEGFFloat,
     GeometryDim: SmallDim,
     BandDim: SmallDim,
     Conn: Connectivity<T, GeometryDim> + Send + Sync,
@@ -344,7 +346,7 @@ impl<'a, T, GeometryDim, Conn, BandDim>
         BandDim,
     >
 where
-    T: Copy + RealField + argmin::core::ArgminFloat,
+    T: NEGFFloat,
     GeometryDim: SmallDim,
     BandDim: SmallDim,
     Conn: Connectivity<T, GeometryDim> + Send + Sync,
@@ -448,6 +450,7 @@ where
 
 // Mixed impl
 /// Incoherent scattering impl with a full wavevector space
+#[cfg(not(feature = "ndarray"))]
 impl<'a, T, GeometryDim, Conn, BandDim> Inner<T, BandDim>
     for InnerLoop<
         'a,
@@ -459,7 +462,130 @@ impl<'a, T, GeometryDim, Conn, BandDim> Inner<T, BandDim>
         BandDim,
     >
 where
-    T: Copy + RealField + argmin::core::ArgminFloat,
+    T: NEGFFloat,
+    GeometryDim: SmallDim,
+    BandDim: SmallDim,
+    Conn: Connectivity<T, GeometryDim> + Send + Sync,
+    <Conn as Connectivity<T, GeometryDim>>::Element: Send + Sync,
+    // MatrixType: GreensFunctionMethods<T>,
+    DefaultAllocator: Allocator<T, GeometryDim>
+        + Allocator<
+            Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
+            BandDim,
+        > + Allocator<T, BandDim>
+        + Allocator<[T; 3], BandDim>,
+    <DefaultAllocator as Allocator<T, GeometryDim>>::Buffer: Send + Sync,
+    <DefaultAllocator as Allocator<T, BandDim>>::Buffer: Send + Sync,
+    <DefaultAllocator as Allocator<[T; 3], BandDim>>::Buffer: Send + Sync,
+{
+    /// Check convergence and re-assign the new charge density to the old one
+    fn is_loop_converged(
+        &self,
+        previous_charge_and_current: &mut ChargeAndCurrent<T, BandDim>,
+    ) -> Result<bool, InnerLoopError> {
+        let postprocessor: PostProcessor<T, GeometryDim, Conn> =
+            PostProcessorBuilder::new().with_mesh(self.mesh).build();
+        let charge_and_current: ChargeAndCurrent<T::RealField, BandDim> = postprocessor
+            .recompute_currents_and_densities(
+                self.voltage,
+                self.greens_functions,
+                self.self_energies,
+                self.spectral,
+            )?;
+        //let system_time = std::time::SystemTime::now();
+        //let datetime: chrono::DateTime<chrono::Utc> = system_time.into();
+        //let mut file = std::fs::File::create(format!("../results/inner_charge_{}.txt", datetime))?;
+        //for value in charge_and_current.charge_as_ref().net_charge().row_iter() {
+        //    let value = value[0].to_f64().unwrap().to_string();
+        //    writeln!(file, "{}", value)?;
+        //}
+
+        let result = charge_and_current.is_change_within_tolerance(
+            previous_charge_and_current,
+            self.convergence_settings.inner_tolerance(),
+        )?;
+        let _ = std::mem::replace(previous_charge_and_current, charge_and_current);
+        Ok(result)
+    }
+
+    fn single_iteration(&mut self) -> Result<(), InnerLoopError> {
+        // TODO Recompute se, check it's ok, recompute green's functions
+        self.self_energies.recalculate_contact_self_energy(
+            self.mesh,
+            self.hamiltonian,
+            self.spectral,
+        )?;
+        self.self_energies
+            .recalculate_localised_lo_lesser_self_energy_mixed(
+                self.scattering_scaling,
+                self.mesh,
+                self.spectral,
+                self.greens_functions,
+            )?;
+        self.self_energies
+            .recalculate_localised_lo_retarded_self_energy_mixed(
+                self.scattering_scaling,
+                self.mesh,
+                self.spectral,
+                self.greens_functions,
+            )?;
+
+        self.greens_functions.update_greens_functions(
+            self.voltage,
+            self.hamiltonian,
+            self.self_energies,
+            self.spectral,
+        )?;
+
+        Ok(())
+    }
+
+    fn run_loop(
+        &mut self,
+        previous_charge_and_current: &mut ChargeAndCurrent<T, BandDim>,
+    ) -> Result<(), InnerLoopError> {
+        self.term.move_cursor_to(0, 6)?;
+        self.term.clear_to_end_of_screen()?;
+        tracing::info!("Inner loop at iteration 1");
+        self.single_iteration()?;
+
+        let mut iteration = 0;
+        // Run to iteration == 2 because on the first iteration incoherent
+        // self energies will be trivially zero as the Greens functions are uninitialised
+        while !self.is_loop_converged(previous_charge_and_current)? | (iteration < 2) {
+            self.term.move_cursor_to(0, 6)?;
+            self.term.clear_to_end_of_screen()?;
+            tracing::info!("Inner loop at iteration {}", iteration + 2);
+            self.single_iteration()?;
+            iteration += 1;
+            if iteration >= self.convergence_settings.maximum_inner_iterations() {
+                return Err(InnerLoopError::OutOfIterations);
+            }
+        }
+
+        self.rate = Some(
+            self.self_energies
+                .calculate_localised_lo_scattering_rate(self.spectral, self.greens_functions)?,
+        );
+
+        Ok(())
+    }
+}
+
+#[cfg(feature = "ndarray")]
+impl<'a, T, GeometryDim, Conn, BandDim> Inner<T, BandDim>
+    for InnerLoop<
+        'a,
+        T,
+        GeometryDim,
+        Conn,
+        MMatrix<Complex<T>>,
+        SpectralSpace<T, WavevectorSpace<T, GeometryDim, Conn>>,
+        BandDim,
+    >
+where
+    T: NEGFFloat,
+    Complex<T>: ndarray::ScalarOperand,
     GeometryDim: SmallDim,
     BandDim: SmallDim,
     Conn: Connectivity<T, GeometryDim> + Send + Sync,

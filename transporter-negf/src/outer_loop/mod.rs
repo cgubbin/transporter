@@ -258,34 +258,28 @@ impl<
 /// A structure holding the information to carry out the outer iteration
 pub(crate) struct OuterLoop<'a, T, GeometryDim, Conn, BandDim, SpectralSpace>
 where
-    T: ComplexField,
-    <T as ComplexField>::RealField: ArgminFloat + Copy, // + ndarray::ScalarOperand,
+    T: crate::app::NEGFFloat, // + ndarray::ScalarOperand,
     BandDim: SmallDim,
     GeometryDim: SmallDim,
-    Conn: Connectivity<T::RealField, GeometryDim>,
-    DefaultAllocator: Allocator<T::RealField, GeometryDim>
+    Conn: Connectivity<T, GeometryDim>,
+    DefaultAllocator: Allocator<T, GeometryDim>
         + Allocator<
-            Matrix<
-                T::RealField,
-                Dynamic,
-                Const<1_usize>,
-                VecStorage<T::RealField, Dynamic, Const<1_usize>>,
-            >,
+            Matrix<T::RealField, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
             BandDim,
-        > + Allocator<T::RealField, BandDim>
-        + Allocator<[T::RealField; 3], BandDim>,
+        > + Allocator<T, BandDim>
+        + Allocator<[T; 3], BandDim>,
 {
     /// The convergence information for the outerloop and the spawned innerloop
-    convergence_settings: &'a Convergence<T::RealField>,
+    convergence_settings: &'a Convergence<T>,
     /// The mesh associated with the problem
-    mesh: &'a Mesh<T::RealField, GeometryDim, Conn>,
+    mesh: &'a Mesh<T, GeometryDim, Conn>,
     /// The spectral mesh and integration weights associated with the problem
     spectral: &'a SpectralSpace,
     /// The Hamiltonian associated with the problem
-    hamiltonian: &'a mut Hamiltonian<T::RealField>,
+    hamiltonian: &'a mut Hamiltonian<T>,
     // TODO A solution tracker, think about this IMPL. We already have a top-level tracker
-    tracker: LoopTracker<T::RealField, BandDim>,
-    info_desk: &'a DeviceInfoDesk<T::RealField, GeometryDim, BandDim>,
+    tracker: LoopTracker<T, BandDim>,
+    info_desk: &'a DeviceInfoDesk<T, GeometryDim, BandDim>,
     term: console::Term,
 }
 
@@ -300,8 +294,7 @@ impl<'a, T, GeometryDim, Conn, BandDim, SpectralSpace>
         &'a DeviceInfoDesk<T::RealField, GeometryDim, BandDim>,
     >
 where
-    T: ComplexField + Copy,
-    <T as ComplexField>::RealField: ArgminFloat + Copy, // + ndarray::ScalarOperand,
+    T: crate::app::NEGFFloat, // + ndarray::ScalarOperand,
     GeometryDim: SmallDim,
     BandDim: SmallDim,
     Conn: Connectivity<T::RealField, GeometryDim>,

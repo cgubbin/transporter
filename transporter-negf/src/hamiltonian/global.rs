@@ -143,10 +143,46 @@ impl<T: Copy + RealField> CsrAssembler<T> {
     }
 }
 
-/// High level constructors used to initialise the Hamiltonian
-impl<T: Copy + RealField> CsrAssembler<T> {
-    /// Assembles the fixed component of the Hamiltonian: ie that which is independent of potential and wavevector
-    pub(crate) fn assemble_fixed<Assembler>(
+pub(crate) trait CsrAssemblerMethods<T: Copy + RealField> {
+    type Backend;
+    fn assemble_fixed<Assembler>(
+        &self,
+        vertex_assembler: &Assembler,
+    ) -> Result<Self::Backend, BuildError>
+    where
+        Assembler: AssembleVertexHamiltonianMatrix<T> + HamiltonianInfoDesk<T>,
+        DefaultAllocator: Allocator<T, Assembler::GeometryDim> + Allocator<T, Assembler::BandDim>;
+
+    fn assemble_wavevector<Assembler>(
+        &self,
+        vertex_assembler: &Assembler,
+    ) -> Result<Self::Backend, BuildError>
+    where
+        Assembler: AssembleVertexHamiltonianDiagonal<T> + HamiltonianInfoDesk<T>,
+        DefaultAllocator: Allocator<T, Assembler::GeometryDim> + Allocator<T, Assembler::BandDim>;
+
+    fn assemble_potential<Assembler>(
+        &self,
+        vertex_assembler: &Assembler,
+    ) -> Result<Self::Backend, BuildError>
+    where
+        Assembler: VertexConnectivityAssembler + PotentialInfoDesk<T>,
+        DefaultAllocator: Allocator<T, Assembler::BandDim>;
+
+    fn assemble_potential_into<Assembler>(
+        vertex_assembler: &Assembler,
+        potential: &mut Self::Backend,
+    ) -> Result<(), BuildError>
+    where
+        Assembler: VertexConnectivityAssembler + PotentialInfoDesk<T>,
+        DefaultAllocator: Allocator<T, Assembler::BandDim>;
+}
+
+#[cfg(not(feature = "ndarray"))]
+impl<T: Copy + RealField> CsrAssemblerMethods<T> for CsrAssembler<T> {
+    type Backend = CsrMatrix<T>;
+
+    fn assemble_fixed<Assembler>(
         &self,
         vertex_assembler: &Assembler,
     ) -> Result<CsrMatrix<T>, BuildError>
@@ -162,11 +198,10 @@ impl<T: Copy + RealField> CsrAssembler<T> {
         Ok(matrix)
     }
 
-    /// Assembles the component of the Hamiltonian proportional to the transverse wavevector
-    pub(crate) fn assemble_wavevector<Assembler>(
+    fn assemble_wavevector<Assembler>(
         &self,
         vertex_assembler: &Assembler,
-    ) -> Result<CsrMatrix<T>, BuildError>
+    ) -> Result<Self::Backend, BuildError>
     where
         Assembler: AssembleVertexHamiltonianDiagonal<T> + HamiltonianInfoDesk<T>,
         DefaultAllocator: Allocator<T, Assembler::GeometryDim> + Allocator<T, Assembler::BandDim>,
@@ -179,11 +214,10 @@ impl<T: Copy + RealField> CsrAssembler<T> {
         Ok(matrix)
     }
 
-    /// Assembles the potential into a diagonal CsrMatrix: This method is only called in the constructor
-    pub(crate) fn assemble_potential<Assembler>(
+    fn assemble_potential<Assembler>(
         &self,
         vertex_assembler: &Assembler,
-    ) -> Result<CsrMatrix<T>, BuildError>
+    ) -> Result<Self::Backend, BuildError>
     where
         Assembler: VertexConnectivityAssembler + PotentialInfoDesk<T>,
         DefaultAllocator: Allocator<T, Assembler::BandDim>,
@@ -196,10 +230,9 @@ impl<T: Copy + RealField> CsrAssembler<T> {
         Ok(matrix)
     }
 
-    /// Assemble the potential into a pre-initialised CsrMatrix -> This method is called after each update of the potential
-    pub(crate) fn assemble_potential_into<Assembler>(
+    fn assemble_potential_into<Assembler>(
         vertex_assembler: &Assembler,
-        potential: &mut CsrMatrix<T>,
+        potential: &mut Self::Backend,
     ) -> Result<(), BuildError>
     where
         Assembler: VertexConnectivityAssembler + PotentialInfoDesk<T>,
@@ -210,12 +243,134 @@ impl<T: Copy + RealField> CsrAssembler<T> {
     }
 }
 
-/// Lower level constructors to compute the local assemblers  for each element in the mesh
-impl<T: Copy + RealField> CsrAssembler<T> {
+#[cfg(feature = "ndarray")]
+impl<T: Copy + RealField> CsrAssemblerMethods<T> for CsrAssembler<T> {
+    type Backend = sprs::CsMat<T>;
+
+    fn assemble_fixed<Assembler>(
+        &self,
+        vertex_assembler: &Assembler,
+    ) -> Result<Self::Backend, BuildError>
+    where
+        Assembler: AssembleVertexHamiltonianMatrix<T> + HamiltonianInfoDesk<T>,
+        DefaultAllocator: Allocator<T, Assembler::GeometryDim> + Allocator<T, Assembler::BandDim>,
+    {
+        let pattern = self.workspace.borrow().full_sparsity_pattern.clone();
+        let initial_matrix_values = vec![T::zero(); pattern.nnz()];
+        // Make an nalgebra_sparse to get an error if we fail to build
+        let matrix = CsrMatrix::try_from_pattern_and_values(pattern, initial_matrix_values)
+            .expect("CSR data must be valid by definition");
+
+        let mut matrix = sprs::CsMat::new(
+            (matrix.nrows(), matrix.nrows()),
+            matrix.row_offsets().to_vec(),
+            matrix.col_indices().to_vec(),
+            initial_matrix_values,
+        );
+        self.assemble_into_csr(&mut matrix, vertex_assembler)?;
+        Ok(matrix)
+    }
+
+    fn assemble_wavevector<Assembler>(
+        &self,
+        vertex_assembler: &Assembler,
+    ) -> Result<Self::Backend, BuildError>
+    where
+        Assembler: AssembleVertexHamiltonianDiagonal<T> + HamiltonianInfoDesk<T>,
+        DefaultAllocator: Allocator<T, Assembler::GeometryDim> + Allocator<T, Assembler::BandDim>,
+    {
+        let pattern = self.workspace.borrow().diagonal_sparsity_pattern.clone();
+        let initial_matrix_values = vec![T::zero(); pattern.nnz()];
+        let matrix = CsrMatrix::try_from_pattern_and_values(pattern, initial_matrix_values)
+            .expect("CSR data must be valid by definition");
+
+        let mut matrix = sprs::CsMat::new(
+            (matrix.nrows(), matrix.nrows()),
+            matrix.row_offsets().to_vec(),
+            matrix.col_indices().to_vec(),
+            initial_matrix_values,
+        );
+
+        self.assemble_into_csr_diagonal(&mut matrix, vertex_assembler)?;
+        Ok(matrix)
+    }
+
+    fn assemble_potential<Assembler>(
+        &self,
+        vertex_assembler: &Assembler,
+    ) -> Result<Self::Backend, BuildError>
+    where
+        Assembler: VertexConnectivityAssembler + PotentialInfoDesk<T>,
+        DefaultAllocator: Allocator<T, Assembler::BandDim>,
+    {
+        let pattern = self.workspace.borrow().diagonal_sparsity_pattern.clone();
+        let initial_matrix_values = vec![T::zero(); pattern.nnz()];
+        let matrix = CsrMatrix::try_from_pattern_and_values(pattern, initial_matrix_values)
+            .expect("CSR data must be valid by definition");
+
+        let mut matrix = sprs::CsMat::new(
+            (matrix.nrows(), matrix.nrows()),
+            matrix.row_offsets().to_vec(),
+            matrix.col_indices().to_vec(),
+            initial_matrix_values,
+        );
+
+        CsrAssembler::assemble_potential_into_csr_diagonal(&mut matrix, vertex_assembler)?;
+        Ok(matrix)
+    }
+
+    fn assemble_potential_into<Assembler>(
+        vertex_assembler: &Assembler,
+        potential: &mut Self::Backend,
+    ) -> Result<(), BuildError>
+    where
+        Assembler: VertexConnectivityAssembler + PotentialInfoDesk<T>,
+        DefaultAllocator: Allocator<T, Assembler::BandDim>,
+    {
+        CsrAssembler::assemble_potential_into_csr_diagonal(potential, vertex_assembler)?;
+        Ok(())
+    }
+}
+
+trait LocalCsrMethods<T: Copy + RealField> {
+    type Backend;
+
     /// Assembles the fixed component of the Hamiltonian into the CsrMatrix `csr`
     fn assemble_into_csr<Assembler>(
         &self,
-        csr: &mut CsrMatrix<T>,
+        csr: &mut Self::Backend,
+        vertex_assembler: &Assembler,
+    ) -> Result<(), BuildError>
+    where
+        Assembler: AssembleVertexHamiltonianMatrix<T> + HamiltonianInfoDesk<T>,
+        DefaultAllocator: Allocator<T, Assembler::GeometryDim> + Allocator<T, Assembler::BandDim>;
+
+    fn assemble_into_csr_diagonal<Assembler>(
+        &self,
+        csr: &mut Self::Backend,
+        vertex_assembler: &Assembler,
+    ) -> Result<(), BuildError>
+    where
+        Assembler: AssembleVertexHamiltonianDiagonal<T> + HamiltonianInfoDesk<T>,
+        DefaultAllocator: Allocator<T, Assembler::GeometryDim> + Allocator<T, Assembler::BandDim>;
+
+    /// Assemble the potential from the `element_assembler` into the diagonal CsrMatrix `csr`
+    fn assemble_potential_into_csr_diagonal<Assembler>(
+        csr: &mut Self::Backend,
+        vertex_assembler: &Assembler,
+    ) -> Result<(), CsrError>
+    where
+        Assembler: VertexConnectivityAssembler + PotentialInfoDesk<T>,
+        DefaultAllocator: Allocator<T, Assembler::BandDim>;
+}
+
+#[cfg(not(feature = "ndarray"))]
+impl<T: Copy + RealField> LocalCsrMethods<T> for CsrAssembler<T> {
+    type Backend = CsrMatrix<T>;
+
+    fn assemble_into_csr<Assembler>(
+        &self,
+        csr: &mut Self::Backend,
         vertex_assembler: &Assembler,
     ) -> Result<(), BuildError>
     where
@@ -251,7 +406,7 @@ impl<T: Copy + RealField> CsrAssembler<T> {
 
     fn assemble_into_csr_diagonal<Assembler>(
         &self,
-        csr: &mut CsrMatrix<T>,
+        csr: &mut Self::Backend,
         vertex_assembler: &Assembler,
     ) -> Result<(), BuildError>
     where
@@ -278,7 +433,6 @@ impl<T: Copy + RealField> CsrAssembler<T> {
         Ok(())
     }
 
-    /// Assemble the potential from the `element_assembler` into the diagonal CsrMatrix `csr`
     /// TODO -> This will panic when the diagonal contains zeros, which it may well do
     fn assemble_potential_into_csr_diagonal<Assembler>(
         csr: &mut CsrMatrix<T>,
@@ -306,6 +460,113 @@ impl<T: Copy + RealField> CsrAssembler<T> {
                             ));
                         }
                     }
+                } else {
+                    return Err(CsrError::Access(
+                        "The diagonal should always be filled by the pattern builder".into(),
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+#[cfg(feature = "ndarray")]
+impl<T: Copy + RealField> LocalCsrMethods<T> for CsrAssembler<T> {
+    type Backend = sprs::CsMat<T>;
+
+    fn assemble_into_csr<Assembler>(
+        &self,
+        csr: &mut Self::Backend,
+        vertex_assembler: &Assembler,
+    ) -> Result<(), BuildError>
+    where
+        Assembler: AssembleVertexHamiltonianMatrix<T> + HamiltonianInfoDesk<T>,
+        DefaultAllocator: Allocator<T, Assembler::GeometryDim> + Allocator<T, Assembler::BandDim>,
+    {
+        let sdim = vertex_assembler.solution_dim();
+        let num_single_band_rows = sdim * vertex_assembler.num_vertices(); // We have an issue with cells and nodes, this needs to be pinned down
+
+        let mut workspace = self.workspace.borrow_mut();
+
+        // Assemble the differential operator for the Hamiltonian
+        for n_row in 0..num_single_band_rows {
+            // This is still annoying because we have less connections at the edges so have to
+            // re-initialise this matrix on every loop. Can we refactor the mesh to avoid this problem
+            let num_connections = vertex_assembler.vertex_connection_count(n_row);
+            // The element matrix has `num_connections + 1` elements for each band in a nearest-neighbour model
+            // This is mainly just a pull from the `workspace`, the size only changes for the edge elements
+            // let mut element_matrix = self.workspace.into_inner().element_matrix.resize(
+            let vertex_matrix = workspace.vertex_matrix_mut();
+            let matrix_slice = vertex_matrix.columns_mut(0, num_connections + 1);
+            vertex_assembler.assemble_vertex_matrix_into(n_row, matrix_slice)?;
+            for n_band in 0..vertex_assembler.number_of_bands() {
+                let band_row = workspace.vertex_matrix().row(n_band);
+                let range_of_entries_in_row = csr.indptr().outer_inds_sz(n_row + n_row * n_band);
+                let mut values = range_of_entries_in_row
+                    .map(|idx| csr.data_mut()[idx])
+                    .collect::<Vec<_>>();
+                add_row_to_csr_row(&mut values, band_row);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn assemble_into_csr_diagonal<Assembler>(
+        &self,
+        csr: &mut Self::Backend,
+        vertex_assembler: &Assembler,
+    ) -> Result<(), BuildError>
+    where
+        Assembler: AssembleVertexHamiltonianDiagonal<T> + HamiltonianInfoDesk<T>,
+        DefaultAllocator: Allocator<T, Assembler::GeometryDim> + Allocator<T, Assembler::BandDim>,
+    {
+        let sdim = vertex_assembler.solution_dim();
+        let num_single_band_rows = sdim * vertex_assembler.num_vertices(); // We have an issue with cells and nodes, this needs to be pinned down
+
+        let mut workspace = self.workspace.borrow_mut();
+
+        // Assemble the differential operator for the Hamiltonian
+        for n_row in 0..num_single_band_rows {
+            let vertex_vector = workspace.vertex_vector_mut();
+            let vector_slice = nalgebra::DVectorSliceMut::from(vertex_vector);
+            vertex_assembler.assemble_vertex_diagonal_into(n_row, vector_slice)?;
+            for n_band in 0..vertex_assembler.number_of_bands() {
+                let band_row = workspace.vertex_vector().row(n_band)[0];
+                let csr_entry = csr.get_mut(n_row + n_row * n_band, n_row + n_row * n_band);
+                if let Some(diagonal_entry) = csr_entry {
+                    *diagonal_entry = band_row;
+                } else {
+                    return Err(BuildError::Csr(CsrError::Access(
+                        "The diagonal element was not initialised".into(),
+                    )));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn assemble_potential_into_csr_diagonal<Assembler>(
+        csr: &mut Self::Backend,
+        vertex_assembler: &Assembler,
+    ) -> Result<(), CsrError>
+    where
+        Assembler: VertexConnectivityAssembler + PotentialInfoDesk<T>,
+        DefaultAllocator: Allocator<T, Assembler::BandDim>,
+    {
+        let sdim = vertex_assembler.solution_dim();
+        let num_single_band_rows = sdim * vertex_assembler.num_vertices(); // We have an issue with cells and nodes, this needs to be pinned down
+        let mut _scratch = vec![0_usize; 1]; // Hacky, add a method;
+
+        // Assemble the potential into a diagonal
+        for n_row in 0..num_single_band_rows {
+            let potential = vertex_assembler.potential(n_row);
+            for n_band in 0..vertex_assembler.number_of_bands() {
+                let mut diagonal_entry =
+                    csr.get_mut(n_row + n_row * n_band, n_row + n_row * n_band);
+                if let Some(diagonal_entry) = diagonal_entry {
+                    *diagonal_entry = potential;
                 } else {
                     return Err(CsrError::Access(
                         "The diagonal should always be filled by the pattern builder".into(),

@@ -1,6 +1,6 @@
 use super::{OuterLoop, OuterLoopError};
 use crate::{
-    app::Calculation,
+    app::{Calculation, NEGFComplex, NEGFFloat},
     greens_functions::{mixed::MMatrix, AggregateGreensFunctions, GreensFunctionBuilder},
     inner_loop::{Inner, InnerLoop, InnerLoopBuilder},
     self_energy::{SelfEnergy, SelfEnergyBuilder},
@@ -70,7 +70,7 @@ where
 impl<T, GeometryDim, Conn, BandDim> Outer<T>
     for OuterLoop<'_, T, GeometryDim, Conn, BandDim, SpectralSpace<T, ()>>
 where
-    T: ArgminFloat + RealField + Copy, //+ ndarray::ScalarOperand,
+    T: NEGFFloat,
     Conn: Connectivity<T, GeometryDim> + Send + Sync,
     <Conn as Connectivity<T, GeometryDim>>::Element: Send + Sync,
     GeometryDim: SmallDim,
@@ -166,7 +166,7 @@ where
             self.convergence_settings.outer_tolerance(),
             self.convergence_settings.maximum_outer_iterations() as u64,
         )
-        .beta(T::from_f64(1.0).unwrap())
+        .beta(T::RealField::from_f64(1.0).unwrap())
         .memory(2);
         // let vec_para = potential.as_ref().iter().copied().collect::<Vec<_>>();
         // let initial_parameter = ndarray::Array1::from(vec_para);
@@ -188,7 +188,7 @@ where
         Ok(())
     }
 
-    fn potential_owned(&self) -> Potential<T> {
+    fn potential_owned(&self) -> Potential<T::RealField> {
         self.tracker.potential.clone()
     }
 }
@@ -205,7 +205,8 @@ impl<T, GeometryDim, Conn, BandDim> Outer<T>
         SpectralSpace<T, WavevectorSpace<T, GeometryDim, Conn>>,
     >
 where
-    T: ArgminFloat + RealField + Copy, // + ndarray::ScalarOperand,
+    T: NEGFFloat,
+    Complex<T>: NEGFComplex,
     Conn: Connectivity<T, GeometryDim> + Send + Sync,
     <Conn as Connectivity<T, GeometryDim>>::Element: Send + Sync,
     GeometryDim: SmallDim,
@@ -380,7 +381,7 @@ where
 impl<T, GeometryDim, Conn, BandDim, SpectralSpace>
     OuterLoop<'_, T, GeometryDim, Conn, BandDim, SpectralSpace>
 where
-    T: ArgminFloat + RealField + Copy, // + ndarray::ScalarOperand,
+    T: crate::app::NEGFFloat,
     Conn: Connectivity<T, GeometryDim>,
     GeometryDim: SmallDim,
     BandDim: SmallDim,
@@ -546,7 +547,7 @@ where
 impl<T, GeometryDim, Conn, BandDim>
     OuterLoop<'_, T, GeometryDim, Conn, BandDim, SpectralSpace<T, ()>>
 where
-    T: ArgminFloat + RealField + Copy, // + ndarray::ScalarOperand,
+    T: NEGFFloat,
     Conn: Connectivity<T, GeometryDim>,
     <Conn as Connectivity<T, GeometryDim>>::Element: Send + Sync,
     GeometryDim: SmallDim,
@@ -591,7 +592,7 @@ impl<T, GeometryDim, Conn, BandDim>
         SpectralSpace<T, WavevectorSpace<T, GeometryDim, Conn>>,
     >
 where
-    T: ArgminFloat + RealField + Copy, //+ ndarray::ScalarOperand,
+    T: NEGFFloat,
     Conn: Connectivity<T, GeometryDim>,
     <Conn as Connectivity<T, GeometryDim>>::Element: Send + Sync,
     GeometryDim: SmallDim,
@@ -643,7 +644,7 @@ impl<T, GeometryDim, Conn, BandDim>
         SpectralSpace<T, WavevectorSpace<T, GeometryDim, Conn>>,
     >
 where
-    T: ArgminFloat + RealField + Copy, // + ndarray::ScalarOperand,
+    T: NEGFFloat,
     Conn: Connectivity<T, GeometryDim>,
     <Conn as Connectivity<T, GeometryDim>>::Element: Send + Sync,
     GeometryDim: SmallDim,
@@ -945,7 +946,7 @@ where
 impl<T, GeometryDim, Conn, BandDim> conflux::core::FixedPointProblem
     for OuterLoop<'_, T, GeometryDim, Conn, BandDim, SpectralSpace<T, ()>>
 where
-    T: RealField + Copy + ArgminFloat, // + ndarray::ScalarOperand, // + conflux::core::FPFloat,
+    T: NEGFFloat,
     GeometryDim: SmallDim,
     BandDim: SmallDim,
     Conn: Connectivity<T, GeometryDim> + Send + Sync,
@@ -1016,7 +1017,8 @@ impl<T, GeometryDim, Conn, BandDim> conflux::core::FixedPointProblem
         SpectralSpace<T, WavevectorSpace<T, GeometryDim, Conn>>,
     >
 where
-    T: RealField + Copy + ArgminFloat, // + ndarray::ScalarOperand, // + conflux::core::FPFloat,
+    T: NEGFFloat,
+    Complex<T>: NEGFComplex,
     GeometryDim: SmallDim,
     BandDim: SmallDim,
     Conn: Connectivity<T, GeometryDim> + Send + Sync,

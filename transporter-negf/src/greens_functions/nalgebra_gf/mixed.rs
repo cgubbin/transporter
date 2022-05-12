@@ -6,9 +6,9 @@
 //! vastly reducing the numerical overhead
 
 use super::{
+    super::{GreensFunctionError, GreensFunctionInfoDesk, GreensFunctionMethods},
     aggregate::{AggregateGreensFunctionMethods, AggregateGreensFunctions},
     recursive::{left_connected_diagonal, right_connected_diagonal},
-    GreensFunctionError, GreensFunctionInfoDesk, GreensFunctionMethods,
 };
 use crate::{
     hamiltonian::Hamiltonian,

@@ -5,9 +5,9 @@
 //! progress the self-coherent iteration. This module provides methods for this optimal scenario,
 //! where the Green's functions are stored as sparse CsrMatrix.
 use super::{
+    super::{GreensFunctionError, GreensFunctionInfoDesk, GreensFunctionMethods},
     aggregate::{AggregateGreensFunctionMethods, AggregateGreensFunctions},
     recursive::{build_out_column, diagonal, left_connected_diagonal, right_connected_diagonal},
-    {GreensFunctionError, GreensFunctionInfoDesk, GreensFunctionMethods},
 };
 use crate::{
     hamiltonian::Hamiltonian,

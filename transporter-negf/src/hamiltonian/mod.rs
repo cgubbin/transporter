@@ -33,6 +33,7 @@ use crate::{
 };
 use nalgebra::{allocator::Allocator, DefaultAllocator, DimName, OPoint, RealField};
 use nalgebra_sparse::CsrMatrix;
+#[cfg(feature = "ndarray")]
 use sprs::CsMat;
 use transporter_mesher::{Connectivity, Mesh, SmallDim};
 
@@ -114,8 +115,20 @@ impl<T: Copy + RealField> Hamiltonian<T> {
     }
 
     /// Finds the total Hamiltonian at fixed `wavevector`
+    #[cfg(not(feature = "ndarray"))]
     pub(crate) fn calculate_total(&self, wavevector: T) -> CsrMatrix<T> {
         &self.fixed - &self.potential + &self.wavevector * wavevector.powi(2)
+    }
+
+    #[cfg(feature = "ndarray")]
+    pub(crate) fn calculate_total(&self, wavevector: T) -> CsMat<T> {
+        sprs::binop::csmat_binop(
+            sprs::binop::csmat_binop(self.fixed.view(), self.potential.view(), |x, y| x.sub(*y))
+                .view(),
+            self.wavevector.view(),
+            |x, y| x.add(*y * wavevector.powi(2)),
+        )
+        // &self.fixed - &self.potential + &self.wavevector * wavevector.powi(2)
     }
 }
 
@@ -171,11 +184,23 @@ where
 }
 
 // TODO Delete this impl when the Greens Functions have been updated
+#[cfg(not(feature = "ndarray"))]
 impl<T> AsRef<CsrMatrix<T>> for Hamiltonian<T>
 where
     T: Copy + RealField,
 {
     fn as_ref(&self) -> &CsrMatrix<T> {
+        &self.fixed
+    }
+}
+
+// TODO Delete this impl when the Greens Functions have been updated
+#[cfg(feature = "ndarray")]
+impl<T> AsRef<CsMat<T>> for Hamiltonian<T>
+where
+    T: Copy + RealField,
+{
+    fn as_ref(&self) -> &CsMat<T> {
         &self.fixed
     }
 }
@@ -222,17 +247,6 @@ where
         tracing::trace!("Assembling the dispersive diagonal");
         let wavevector = hamiltonian_constructor.assemble_wavevector(&vertex_assembler)?;
 
-        assert_eq!(
-            fixed.nrows(),
-            potential.nrows(),
-            "The fixed and potential components of a Hamiltonian must have equal dimension"
-        );
-        assert_eq!(
-            fixed.nrows(),
-            wavevector.nrows(),
-            "The fixed and wavevector components of a Hamiltonian must have equal dimension"
-        );
-
         Ok(Self {
             fixed,
             potential,
@@ -240,7 +254,43 @@ where
         })
     }
 
+    #[cfg(not(feature = "ndarray"))]
     pub(crate) fn num_rows(&self) -> usize {
         self.fixed.nrows()
+    }
+
+    #[cfg(feature = "ndarray")]
+    pub(crate) fn num_rows(&self) -> usize {
+        self.fixed.outer_dims()
+    }
+}
+
+pub(crate) trait AccessMethods<T> {
+    fn get_elements_at_source(&self) -> [T; 2];
+    fn get_elements_at_drain(&self) -> [T; 2];
+}
+
+#[cfg(not(feature = "ndarray"))]
+impl<T: Copy + RealField> AccessMethods<T> for CsrMatrix<T> {
+    fn get_elements_at_source(&self) -> [T; 2] {
+        let x = self.values();
+        todo!()
+    }
+
+    fn get_elements_at_drain(&self) -> [T; 2] {
+        self.values();
+        todo!()
+    }
+}
+
+#[cfg(feature = "ndarray")]
+impl<T: Copy + RealField> AccessMethods<T> for CsMat<T> {
+    fn get_elements_at_source(&self) -> [T; 2] {
+        [self.data()[0], self.data()[1]]
+    }
+
+    fn get_elements_at_drain(&self) -> [T; 2] {
+        let num_points = self.data().len();
+        [self.data()[num_points - 2], self.data()[num_points - 1]]
     }
 }

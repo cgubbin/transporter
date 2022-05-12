@@ -1,10 +1,8 @@
-use super::{Calculation, Configuration, Tracker};
+use super::{Calculation, Configuration, NEGFComplex, NEGFFloat, Tracker};
 use crate::outer_loop::{Outer, OuterLoopError, Potential};
 use crate::spectral::WavevectorSpace;
-use argmin::core::ArgminFloat;
-use nalgebra::{
-    allocator::Allocator, Const, DefaultAllocator, Dynamic, Matrix, RealField, VecStorage, U1,
-};
+use nalgebra::{allocator::Allocator, Const, DefaultAllocator, Dynamic, Matrix, VecStorage, U1};
+use num_complex::Complex;
 use transporter_mesher::{Mesh, Segment1dConnectivity, SmallDim};
 
 pub(crate) fn coherent_calculation_at_fixed_voltage<T, BandDim: SmallDim>(
@@ -16,7 +14,8 @@ pub(crate) fn coherent_calculation_at_fixed_voltage<T, BandDim: SmallDim>(
     term: &console::Term,
 ) -> Result<Potential<T>, OuterLoopError<T>>
 where
-    T: ArgminFloat + Copy + num_traits::NumCast + RealField, // + ndarray::ScalarOperand,
+    T: NEGFFloat,
+    Complex<T>: NEGFComplex,
     DefaultAllocator: Allocator<T, U1>
         + Allocator<T, BandDim>
         + Allocator<[T; 3], BandDim>
@@ -67,7 +66,7 @@ fn coherent_calculation_at_fixed_voltage_with_constant_mass<T, BandDim: SmallDim
     _term: &console::Term,
 ) -> Result<Potential<T>, OuterLoopError<T>>
 where
-    T: ArgminFloat + Copy + num_traits::NumCast + RealField, // + ndarray::ScalarOperand,
+    T: NEGFFloat,
     DefaultAllocator: Allocator<T, U1>
         + Allocator<T, BandDim>
         + Allocator<[T; 3], BandDim>
@@ -130,7 +129,8 @@ fn coherent_calculation_at_fixed_voltage_with_changing_mass<T, BandDim: SmallDim
     _term: &console::Term,
 ) -> Result<Potential<T>, OuterLoopError<T>>
 where
-    T: ArgminFloat + Copy + num_traits::NumCast + RealField, // + ndarray::ScalarOperand,
+    T: NEGFFloat,
+    Complex<T>: NEGFComplex,
     DefaultAllocator: Allocator<T, U1>
         + Allocator<T, BandDim>
         + Allocator<[T; 3], BandDim>
@@ -197,7 +197,8 @@ pub(crate) fn incoherent_calculation_at_fixed_voltage<T, BandDim: SmallDim>(
     term: &console::Term,
 ) -> Result<Potential<T>, OuterLoopError<T>>
 where
-    T: ArgminFloat + Copy + num_traits::NumCast + RealField, //+ ndarray::ScalarOperand,
+    T: NEGFFloat,
+    Complex<T>: NEGFComplex,
     DefaultAllocator: Allocator<T, U1>
         + Allocator<T, BandDim>
         + Allocator<[T; 3], BandDim>

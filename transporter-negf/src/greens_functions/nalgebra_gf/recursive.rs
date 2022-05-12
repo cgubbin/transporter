@@ -7,13 +7,10 @@
 //! - The full diagonal of the Green's function -> This is useful for calculating the charge density in a device
 //! - Any off-diagonal row of the Green's function -> This is useful for bracketing regions in which incoherent modelling is carried out
 //!
+use super::super::RecursionError;
 use nalgebra::{ComplexField, DVector, RealField};
 use nalgebra_sparse::CsrMatrix;
 use num_complex::Complex;
-
-/// Error for the recursive Green's function methods. Currently unimplemented
-#[derive(thiserror::Error, Debug, miette::Diagnostic)]
-pub enum RecursionError {}
 
 /// Calculates the left connected diagonal from the Hamiltonian of the system, and the self energy in the left lead.
 ///
