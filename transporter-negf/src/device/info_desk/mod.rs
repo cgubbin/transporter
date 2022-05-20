@@ -1,11 +1,15 @@
+//! Generates and returns compile-time defined material properties
+//!
+//! This module defines the `Material` enum which represents all materials implemented
+//! in the simulation software. It generates the parameters needed to run a simulation
+//! and passes them out through the `DeviceInfoDesk` trait.
+
 mod materials;
 
 pub(crate) use materials::Material;
 
 use super::Device;
-use nalgebra::{
-    allocator::Allocator, DefaultAllocator, OPoint, OVector, Point1, RealField, U1, U3,
-};
+use nalgebra::{allocator::Allocator, DefaultAllocator, OPoint, OVector, RealField, U1, U3};
 use std::marker::PhantomData;
 use transporter_mesher::{Assignment, SmallDim};
 
@@ -23,14 +27,22 @@ where
     pub(crate) dielectric_constants: Vec<[T; 3]>,
     /// Each layer in the stack has an effective doping density -> This should probably be a Point2<> for both doping types..
     pub(crate) donor_densities: Vec<T>,
+    /// Each layer in the stack has an effective doping density -> This should probably be a Point2<> for both doping types..
     pub(crate) acceptor_densities: Vec<T>,
+    /// The temperature the simulation is to be run at
     pub(crate) temperature: T,
-    // pub(crate) voltage_offsets: Vec<T>,
     /// An optional length for the internal leads -> if specified this length on each side of the device is solved for in equilibrium
     pub(crate) lead_length: Option<T>,
+    /// a marker for the spatial dimension of the device, to aid the higher-level impls
     marker: PhantomData<GeometryDim>,
 }
 
+/// This block calculates all the relevant quantities for the given `Assignment`
+///
+/// If the `Assignment` is the `Core` variation the point is entirely within a piecewise homogeneous region
+/// of the `Device` and the material parameter in that region can be returned.
+/// If the `Assignment` is the `Boundary` variant the point is located at the interface between 2 or more piecewise
+/// homogeneous regions and the material parameter is averaged over those in the adjacent regions.
 impl<T: Copy + RealField, GeometryDim: SmallDim, BandDim: SmallDim>
     DeviceInfoDesk<T, GeometryDim, BandDim>
 where
@@ -108,14 +120,16 @@ where
             donor_densities: Vec::new(),
             acceptor_densities: Vec::new(),
             temperature: T::zero(),
-            // voltage_offsets: Vec::new(),
             lead_length: None,
             marker: PhantomData,
         }
     }
 }
 
-/// Struct holding all the material information necessary to solve the problem
+/// Struct holding all the material information necessary to solve the problem for a single layer
+///
+/// This contains the information which can be determined at compile time -> ie that which is NOT defined by
+/// the end user
 pub struct LayerInfoDesk<T: RealField, BandDim: SmallDim>
 where
     DefaultAllocator: Allocator<T, BandDim> + Allocator<[T; 3], BandDim>,
@@ -128,25 +142,25 @@ where
     dielectric_constant: [T; 3],
 }
 
+/// A helper trait to build an instance of `DeviceInfoDesk`
 pub trait BuildInfoDesk<T: RealField, GeometryDim: SmallDim, BandDim: SmallDim>
 where
     DefaultAllocator: Allocator<T, BandDim> + Allocator<[T; 3], BandDim>,
 {
+    /// Builds a single instance of `DeviceInfoDesk`
     fn build_device_info_desk(&self) -> miette::Result<DeviceInfoDesk<T, GeometryDim, BandDim>>;
+    /// Assembles a `DeviceInfoDesk` from those of the constituent layers and the remaining external information
+    /// which is passed at run time
     fn assemble_from_layers_and_doping_densities(
         layers: Vec<LayerInfoDesk<T, BandDim>>,
         acceptor_density: Vec<T>,
         donor_density: Vec<T>,
         temperature: T,
-        // voltage_offsets: Vec<T>,
         lead_length: Option<T>,
     ) -> DeviceInfoDesk<T, GeometryDim, BandDim>;
 }
 
-/// SINGLE BAND
-///
-///
-
+/// A single band impl of the `BuildInfoDesk` trait
 impl<T: Copy + serde::de::DeserializeOwned + RealField, GeometryDim: SmallDim>
     BuildInfoDesk<T, GeometryDim, U1> for Device<T, GeometryDim>
 where
@@ -167,7 +181,6 @@ where
             acceptor_densities,
             donor_densities,
             self.temperature,
-            // self.voltage_offsets.clone(),
             self.lead_length,
         ))
     }
@@ -177,10 +190,8 @@ where
         acceptor_densities: Vec<T>,
         donor_densities: Vec<T>,
         temperature: T,
-        // voltage_offsets: Vec<T>,
         lead_length: Option<T>,
     ) -> DeviceInfoDesk<T, GeometryDim, U1> {
-        // Naive implementation: must be a better way to do this.
         let mut info_desk = DeviceInfoDesk::default();
         for (layer, (acceptor_density, donor_density)) in layers.into_iter().zip(
             acceptor_densities
@@ -196,55 +207,7 @@ where
             info_desk.donor_densities.push(donor_density);
         }
         info_desk.temperature = temperature;
-        // info_desk.voltage_offsets = voltage_offsets;
         info_desk.lead_length = lead_length;
         info_desk
-    }
-}
-
-// A single band implementation
-impl Material {
-    fn get_info<T: RealField>(&self) -> miette::Result<LayerInfoDesk<T, U1>>
-    where
-        DefaultAllocator: Allocator<T, U1> + Allocator<T, U1, U3>,
-    {
-        match self {
-            Material::GaAs => Ok(LayerInfoDesk::gaas()),
-            Material::AlGaAs => Ok(LayerInfoDesk::algaas()),
-            Material::SiC => Ok(LayerInfoDesk::sic()),
-            // _ => Err(eyre!(
-            //     "The material {} does not have a `get_info` implementation",
-            //     self
-            // )),
-        }
-    }
-}
-
-impl<T: RealField> LayerInfoDesk<T, U1> {
-    #[numeric_literals::replace_float_literals(T::from_f64(literal).unwrap())]
-    fn gaas() -> Self {
-        Self {
-            effective_mass: nalgebra::Vector1::new([0.067, 0.067, 0.067]),
-            band_offset: Point1::new(0.0),
-            dielectric_constant: [11.5, 11.5, 11.5],
-        }
-    }
-
-    #[numeric_literals::replace_float_literals(T::from_f64(literal).unwrap())]
-    fn algaas() -> Self {
-        Self {
-            effective_mass: nalgebra::Vector1::new([0.067, 0.067, 0.067]),
-            band_offset: Point1::new(0.3),
-            dielectric_constant: [11.5, 11.5, 11.5],
-        }
-    }
-
-    #[numeric_literals::replace_float_literals(T::from_f64(literal).unwrap())]
-    fn sic() -> Self {
-        Self {
-            effective_mass: nalgebra::Vector1::new([0.25, 0.25, 0.25]),
-            band_offset: Point1::new(0.1999),
-            dielectric_constant: [8.5, 8.5, 8.5],
-        }
     }
 }

@@ -1,5 +1,11 @@
+//! # Energy
+//!
+//! The energy space utilised to run a simulation. This is created based on the configuration
+//! with a fixed number `number_of_points` nodes linearly distributed in the provided `energy_range`
+
 use super::GenerateWeights;
-use nalgebra::{allocator::Allocator, DVector, DefaultAllocator, RealField, U1};
+use nalgebra::{allocator::Allocator, DefaultAllocator, RealField, U1};
+use ndarray::Array1;
 use num_traits::NumCast;
 use std::ops::Range;
 use transporter_mesher::{
@@ -63,7 +69,7 @@ impl<T, EnergyRange, IntegrationMethod> EnergySpaceBuilder<T, EnergyRange, Integ
 #[derive(Debug)]
 pub(crate) struct EnergySpace<T: Copy + RealField> {
     pub(crate) grid: Mesh1d<T>,
-    weights: DVector<T>,
+    weights: Array1<T>,
     integration_rule: super::IntegrationRule,
 }
 

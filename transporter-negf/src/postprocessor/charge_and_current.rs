@@ -1,17 +1,12 @@
 use super::PostProcessorError;
-use nalgebra::{
-    allocator::Allocator, Const, DVector, DefaultAllocator, Dynamic, Matrix, OVector, RealField,
-    VecStorage,
-};
+use nalgebra::{allocator::Allocator, DefaultAllocator, OVector, RealField};
+use ndarray::Array1;
 use transporter_mesher::SmallDim;
 
 #[derive(Clone)]
 pub(crate) struct ChargeAndCurrent<T, BandDim: SmallDim>
 where
-    DefaultAllocator: Allocator<
-        Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
-        BandDim,
-    >,
+    DefaultAllocator: Allocator<Array1<T>, BandDim>,
 {
     charge: Charge<T, BandDim>,
     current: Current<T, BandDim>,
@@ -21,14 +16,11 @@ impl<T, BandDim> ChargeAndCurrent<T, BandDim>
 where
     T: Copy + RealField,
     BandDim: SmallDim,
-    DefaultAllocator: Allocator<
-        Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
-        BandDim,
-    >,
+    DefaultAllocator: Allocator<Array1<T>, BandDim>,
 {
     pub(crate) fn new(
-        charge: OVector<DVector<T>, BandDim>,
-        current: OVector<DVector<T>, BandDim>,
+        charge: OVector<Array1<T>, BandDim>,
+        current: OVector<Array1<T>, BandDim>,
     ) -> color_eyre::Result<Self> {
         Ok(Self {
             charge: Charge::new(charge)?,
@@ -51,22 +43,22 @@ where
     fn charge_and_current_iter(
         &self,
         // ) -> std::iter::Chain<impl Iterator<Item = DVector<T>>, impl Iterator<Item = DVector<T>>> {
-    ) -> impl Iterator<Item = DVector<T>> {
+    ) -> impl Iterator<Item = Array1<T>> {
         self.charge_iter() //.chain(self.current_iter())
     }
 
     /// Returns an iterator over the held charge densities
     #[allow(clippy::needless_collect)]
-    fn charge_iter(&self) -> impl Iterator<Item = DVector<T>> {
-        let x: Vec<DVector<T>> = (0..BandDim::dim())
+    fn charge_iter(&self) -> impl Iterator<Item = Array1<T>> {
+        let x: Vec<Array1<T>> = (0..BandDim::dim())
             .map(|i| self.charge.charge[i].clone())
             .collect::<Vec<_>>();
         x.into_iter()
     }
 
     #[allow(clippy::needless_collect)] // Allowed so we can return a DVector over generic soup
-    fn current_iter(&self) -> impl Iterator<Item = DVector<T>> {
-        let x: Vec<DVector<T>> = (0..BandDim::dim())
+    fn current_iter(&self) -> impl Iterator<Item = Array1<T>> {
+        let x: Vec<Array1<T>> = (0..BandDim::dim())
             .map(|i| self.current.current[i].clone())
             .collect::<Vec<_>>();
         x.into_iter()
@@ -92,10 +84,16 @@ where
             .charge_and_current_iter()
             .zip(previous.charge_and_current_iter())
             .map(|(new, previous)| {
-                let norm = new.norm();
+                let norm = new.iter().fold(T::zero(), |acc, &x| acc + x * x).sqrt();
                 (new - previous, norm)
             })
-            .map(|(difference, norm)| difference.norm() / (norm)) // This breaks when norm is zero, need to compute currents for a result
+            .map(|(difference, norm)| {
+                difference
+                    .iter()
+                    .fold(T::zero(), |acc, &x| acc + x * x)
+                    .sqrt()
+                    / (norm)
+            }) // This breaks when norm is zero, need to compute currents for a result
             .filter(|&x| {
                 !((x != T::zero()) & !(x > T::zero())) // Hacky trick to filter NaN from the result
             })
@@ -106,60 +104,47 @@ where
 #[derive(Clone, Debug)]
 pub struct Charge<T, BandDim: SmallDim>
 where
-    DefaultAllocator: Allocator<
-        Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
-        BandDim,
-    >,
+    DefaultAllocator: Allocator<Array1<T>, BandDim>,
 {
-    charge: OVector<DVector<T>, BandDim>,
+    charge: OVector<Array1<T>, BandDim>,
 }
 
-impl<T: RealField, BandDim: SmallDim> AsRef<OVector<DVector<T>, BandDim>> for Charge<T, BandDim>
+impl<T: RealField, BandDim: SmallDim> AsRef<OVector<Array1<T>, BandDim>> for Charge<T, BandDim>
 where
-    DefaultAllocator: Allocator<
-        Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
-        BandDim,
-    >,
+    DefaultAllocator: Allocator<Array1<T>, BandDim>,
 {
-    fn as_ref(&self) -> &OVector<DVector<T>, BandDim> {
+    fn as_ref(&self) -> &OVector<Array1<T>, BandDim> {
         &self.charge
     }
 }
 
 impl<T: RealField, BandDim: SmallDim> Charge<T, BandDim>
 where
-    DefaultAllocator: Allocator<
-        Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
-        BandDim,
-    >,
+    DefaultAllocator: Allocator<Array1<T>, BandDim>,
 {
-    pub(crate) fn net_charge(&self) -> DVector<T> {
-        self.charge.iter().sum()
+    pub(crate) fn net_charge(&self) -> Array1<T> {
+        self.charge
+            .iter()
+            .fold(Array1::zeros(self.charge[0].len()), |acc, x| acc + x)
     }
 
-    pub(crate) fn as_ref_mut(&mut self) -> &mut OVector<DVector<T>, BandDim> {
+    pub(crate) fn as_ref_mut(&mut self) -> &mut OVector<Array1<T>, BandDim> {
         &mut self.charge
     }
 }
 #[derive(Clone)]
 pub struct Current<T, BandDim: SmallDim>
 where
-    DefaultAllocator: Allocator<
-        Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
-        BandDim,
-    >,
+    DefaultAllocator: Allocator<Array1<T>, BandDim>,
 {
-    current: OVector<DVector<T>, BandDim>,
+    current: OVector<Array1<T>, BandDim>,
 }
 
 impl<T, BandDim: SmallDim> Charge<T, BandDim>
 where
-    DefaultAllocator: Allocator<
-        Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
-        BandDim,
-    >,
+    DefaultAllocator: Allocator<Array1<T>, BandDim>,
 {
-    pub(crate) fn new(charge: OVector<DVector<T>, BandDim>) -> Result<Self, PostProcessorError> {
+    pub(crate) fn new(charge: OVector<Array1<T>, BandDim>) -> Result<Self, PostProcessorError> {
         let length = charge[0].shape();
         if charge.iter().all(|x| x.shape() == length) {
             Ok(Self { charge })
@@ -173,12 +158,9 @@ where
 
 impl<T, BandDim: SmallDim> Current<T, BandDim>
 where
-    DefaultAllocator: Allocator<
-        Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
-        BandDim,
-    >,
+    DefaultAllocator: Allocator<Array1<T>, BandDim>,
 {
-    pub(crate) fn new(current: OVector<DVector<T>, BandDim>) -> Result<Self, PostProcessorError> {
+    pub(crate) fn new(current: OVector<Array1<T>, BandDim>) -> Result<Self, PostProcessorError> {
         let length = current[0].shape();
         if current.iter().all(|x| x.shape() == length) {
             Ok(Self { current })
@@ -192,16 +174,15 @@ where
 
 impl<T: RealField, BandDim: SmallDim> Current<T, BandDim>
 where
-    DefaultAllocator: Allocator<
-        Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
-        BandDim,
-    >,
+    DefaultAllocator: Allocator<Array1<T>, BandDim>,
 {
-    pub(crate) fn net_current(&self) -> DVector<T> {
-        self.current.iter().sum()
+    pub(crate) fn net_current(&self) -> Array1<T> {
+        self.current
+            .iter()
+            .fold(Array1::zeros(self.current[0].len()), |acc, x| acc + x)
     }
 
-    pub(crate) fn as_ref_mut(&mut self) -> &mut OVector<DVector<T>, BandDim> {
+    pub(crate) fn as_ref_mut(&mut self) -> &mut OVector<Array1<T>, BandDim> {
         &mut self.current
     }
 }

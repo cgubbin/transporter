@@ -9,7 +9,7 @@ where
     pub(crate) inner_tolerance: T,
     pub(crate) maximum_outer_iterations: usize,
     pub(crate) maximum_inner_iterations: usize,
-    pub(crate) calculation_type: Calculation,
+    pub(crate) calculation_type: Calculation<T>,
 }
 
 impl<T: Copy + RealField> Convergence<T> {
@@ -29,7 +29,7 @@ impl<T: Copy + RealField> Convergence<T> {
         self.inner_tolerance
     }
 
-    pub(crate) fn calculation_type(&self) -> &Calculation {
+    pub(crate) fn calculation_type(&self) -> &Calculation<T> {
         &self.calculation_type
     }
 }

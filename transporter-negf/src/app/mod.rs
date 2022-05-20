@@ -9,7 +9,7 @@
 //! The command line interface.
 //!
 //! The App module drives the simulation. It hands command-line argument parsing,
-//! parses the configuration files and delegates to the numerical methods in other
+//! parses the configuration files and delegates to the solvers andnumerical methods in other
 //! sub-modules.
 
 #![warn(missing_docs)]
@@ -20,54 +20,26 @@ mod error;
 pub(crate) mod styles;
 mod telemetry;
 pub(crate) mod tracker;
-
-use calculations::coherent_calculation_at_fixed_voltage;
-use calculations::incoherent_calculation_at_fixed_voltage;
 pub use configuration::Configuration;
 pub(crate) use error::TransporterError;
-use telemetry::{get_subscriber, init_subscriber};
 pub use tracker::{Tracker, TrackerBuilder};
 
 use crate::{
     device::{info_desk::BuildInfoDesk, reader::Device},
+    outer_loop::OuterLoopError,
     outer_loop::Potential,
 };
-use argmin::core::ArgminFloat;
-use clap::{ArgEnum, Args, Parser};
-use nalgebra::{
-    allocator::Allocator, Const, DefaultAllocator, Dynamic, Matrix, RealField, VecStorage, U1,
+use calculations::{
+    coherent_calculation_at_fixed_voltage, incoherent_calculation_at_fixed_voltage,
 };
-use num_complex::Complex;
-use num_traits::{NumCast, ToPrimitive};
-use serde::{de::DeserializeOwned, Deserialize};
+use clap::{ArgEnum, Args, Parser};
+use miette::IntoDiagnostic;
+use nalgebra::{allocator::Allocator, DefaultAllocator, RealField, U1};
+use ndarray::Array1;
+use serde::Deserialize;
 use std::path::PathBuf;
+use telemetry::{get_subscriber, init_subscriber};
 use transporter_mesher::{Mesh, Mesh1d, Segment1dConnectivity, SmallDim};
-
-#[cfg(feature = "ndarray")]
-pub trait NEGFFloat: ArgminFloat + Copy + NumCast + RealField + ndarray::ScalarOperand {}
-
-#[cfg(not(feature = "ndarray"))]
-pub trait NEGFFloat: ArgminFloat + Copy + NumCast + RealField {}
-
-impl NEGFFloat for f32 {}
-impl NEGFFloat for f64 {}
-
-#[cfg(feature = "ndarray")]
-pub trait NEGFComplex: Copy + nalgebra::ComplexField + ndarray::ScalarOperand {}
-
-#[cfg(not(feature = "ndarray"))]
-pub trait NEGFComplex: Copy + nalgebra::ComplexField {}
-
-#[cfg(feature = "ndarray")]
-impl<T> NEGFComplex for Complex<T>
-where
-    T: NEGFFloat,
-    Complex<T>: ndarray::ScalarOperand,
-{
-}
-
-#[cfg(not(feature = "ndarray"))]
-impl<T> NEGFComplex for Complex<T> where T: NEGFFloat {}
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
@@ -87,7 +59,7 @@ struct GlobalOpts {
     log_level: LogLevel,
     /// The calculation type
     #[clap(arg_enum, short, long)]
-    calculation: Calculation,
+    calculation: CalculationDeserialize,
     /// The dimension of the calculation
     #[clap(arg_enum, short, long)]
     dimension: Dimension,
@@ -133,9 +105,30 @@ impl std::string::ToString for LogLevel {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, ArgEnum)]
-pub enum Calculation {
+/// The flavour of calculation to run, local variant with no voltage attached for deserialization
+enum CalculationDeserialize {
     Coherent,
     Incoherent,
+}
+
+// #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, ArgEnum)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+/// The flavour of calculation to run
+///
+/// A `Coherent` variation runs a calculation with no scattering -> an electron entering from a given contact
+/// can leave the system via any contact at the same energy.
+/// An `Incoherent` variation includes any scattering defined in the configuration file.
+pub enum Calculation<T: RealField> {
+    /// A calculation with no scattering.
+    Coherent {
+        /// The target voltage to ramp to
+        voltage_target: T,
+    },
+    /// A calculation with scattering
+    Incoherent {
+        /// The target voltage to ramp to
+        voltage_target: T,
+    },
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, ArgEnum)]
@@ -144,16 +137,12 @@ enum Dimension {
     D2,
 }
 
-use miette::IntoDiagnostic;
-
 /// Top level function to run the application
 ///
 /// This parses the configuration, and the device, identifies the calculation type and
 /// attempts to run it to completion.
-pub fn run<T>() -> miette::Result<()>
+pub fn run() -> miette::Result<()>
 where
-    T: NEGFFloat + DeserializeOwned + ToPrimitive, // + ndarray::ScalarOperand,
-    Complex<T>: NEGFComplex,
 {
     // Prepare terminal environment
     let term = console::Term::stdout();
@@ -168,9 +157,9 @@ where
     let (subscriber, _guard) = get_subscriber(cli.global_opts.log_level);
     init_subscriber(subscriber);
 
-    let __marker: std::marker::PhantomData<T> = std::marker::PhantomData;
+    let __marker: std::marker::PhantomData<f64> = std::marker::PhantomData;
 
-    let config: Configuration<T::RealField> = Configuration::build()?;
+    let config: Configuration<f64> = Configuration::build()?;
 
     let path = cli
         .global_opts
@@ -182,7 +171,7 @@ where
             // Initialise and pretty print device
             term.move_cursor_to(0, 0).into_diagnostic()?;
             tracing::trace!("Initialising device");
-            let device: Device<T::RealField, U1> = Device::build(path)?;
+            let device: Device<f64, U1> = Device::build(path)?;
             let mut device_display = device.display();
             if cli
                 .global_opts
@@ -203,23 +192,24 @@ where
             tracing::trace!("Initialising mesh");
 
             let voltage_target = device.voltage_offsets[1];
-            let mesh: Mesh1d<T::RealField> =
+            let mesh: Mesh1d<f64> =
                 build_mesh_with_config(&config, device).map_err(|e| miette::miette!("{:?}", e))?;
 
             term.move_cursor_to(0, 0).into_diagnostic()?;
             term.clear_to_end_of_screen().into_diagnostic()?;
+
             tracing::info!("Mesh initialised with {} elements", mesh.elements().len());
 
-            let tracker = tracker::TrackerBuilder::new(cli.global_opts.calculation)
+            let calculation = match cli.global_opts.calculation {
+                CalculationDeserialize::Coherent => Calculation::Coherent { voltage_target },
+                CalculationDeserialize::Incoherent => Calculation::Incoherent { voltage_target },
+            };
+
+            let tracker = tracker::TrackerBuilder::new(calculation)
                 .with_mesh(&mesh)
                 .with_info_desk(&info_desk)
                 .build()
                 .map_err(|e| miette::miette!("{:?}", e))?;
-
-            let calculation = match cli.global_opts.calculation {
-                Calculation::Coherent => CalculationB::Coherent { voltage_target },
-                Calculation::Incoherent => CalculationB::Incoherent { voltage_target },
-            };
 
             build_and_run(config, &mesh, &tracker, calculation, term)
                 .map_err(|e| miette::miette!("{:?}", e))?;
@@ -232,17 +222,18 @@ where
     Ok(())
 }
 
-pub fn build_mesh_with_config<T: Copy + DeserializeOwned + RealField + ToPrimitive>(
-    config: &Configuration<T>,
-    device: Device<T, U1>,
-) -> miette::Result<Mesh1d<T>>
+/// Builds the mesh in the device from the parsed configuration file
+pub fn build_mesh_with_config(
+    config: &Configuration<f64>,
+    device: Device<f64, U1>,
+) -> miette::Result<Mesh1d<f64>>
 where
-    DefaultAllocator: Allocator<T, U1>,
-    <DefaultAllocator as Allocator<T, U1>>::Buffer: Deserialize<'static>,
+    DefaultAllocator: Allocator<f64, U1>,
+    <DefaultAllocator as Allocator<f64, U1>>::Buffer: Deserialize<'static>,
 {
     // Get configuration stuff from the config, what do we want? Minimum element size, growth rate etc
 
-    let widths: Vec<T> = device
+    let widths: Vec<f64> = device
         .iter()
         .map(|layer| layer.thickness.coords[0])
         .collect();
@@ -254,47 +245,34 @@ where
             config.mesh.unit_size,
             &widths,
             config.mesh.elements_per_unit,
-            &nalgebra::Vector1::new(T::zero()),
+            &nalgebra::Vector1::new(0_f64),
         ),
     )
 }
 
-enum CalculationB<T: RealField> {
-    Coherent { voltage_target: T },
-    Incoherent { voltage_target: T },
-}
-
-use crate::outer_loop::OuterLoopError;
-
-fn build_and_run<T, BandDim: SmallDim>(
-    config: Configuration<T>,
-    mesh: &Mesh<T, U1, Segment1dConnectivity>,
-    tracker: &Tracker<'_, T, U1, BandDim>,
-    calculation_type: CalculationB<T>,
+fn build_and_run<BandDim: SmallDim>(
+    config: Configuration<f64>,
+    mesh: &Mesh<f64, U1, Segment1dConnectivity>,
+    tracker: &Tracker<'_, f64, U1, BandDim>,
+    calculation_type: Calculation<f64>,
     term: console::Term,
-) -> Result<(), TransporterError<T>>
+) -> Result<(), TransporterError<f64>>
 where
-    T: NEGFFloat, // + ndarray::ScalarOperand,
-    Complex<T>: NEGFComplex,
     //Tracker: crate::HamiltonianInfoDesk<T::RealField>,
-    DefaultAllocator: Allocator<T, U1>
-        + Allocator<T, BandDim>
-        + Allocator<[T; 3], BandDim>
-        + Allocator<
-            Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
-            BandDim,
-        >,
-    <DefaultAllocator as Allocator<T, U1>>::Buffer: Send + Sync,
-    <DefaultAllocator as Allocator<T, BandDim>>::Buffer: Send + Sync,
-    <DefaultAllocator as Allocator<[T; 3], BandDim>>::Buffer: Send + Sync,
+    DefaultAllocator: Allocator<f64, U1>
+        + Allocator<f64, BandDim>
+        + Allocator<[f64; 3], BandDim>
+        + Allocator<Array1<f64>, BandDim>,
+    <DefaultAllocator as Allocator<f64, U1>>::Buffer: Send + Sync,
+    <DefaultAllocator as Allocator<f64, BandDim>>::Buffer: Send + Sync,
+    <DefaultAllocator as Allocator<[f64; 3], BandDim>>::Buffer: Send + Sync,
 {
     // Todo allow an initial potential to be read from a file
-    let mut initial_potential: Potential<T> = Potential::from_vector(
-        nalgebra::DVector::from_element(mesh.num_nodes(), T::zero().real()),
-    );
+    let mut initial_potential: Potential<f64> =
+        Potential::from_vector(ndarray::Array1::from(vec![0_f64; mesh.num_nodes()]));
     match calculation_type {
-        CalculationB::Coherent { voltage_target } => {
-            let mut current_voltage = T::zero();
+        Calculation::Coherent { voltage_target } => {
+            let mut current_voltage = 0_f64;
             let mut voltage_step = config.global.voltage_step;
             while current_voltage <= voltage_target {
                 // Do a single calculation
@@ -317,7 +295,7 @@ where
                     Err(OuterLoopError::FixedPoint(fixed_point_error)) => match fixed_point_error {
                         conflux::core::FixedPointError::TooManyIterations(_cost) => {
                             current_voltage -= voltage_step;
-                            voltage_step /= T::one() + T::one();
+                            voltage_step /= 2_f64;
                         }
                         _ => {
                             return Err(OuterLoopError::FixedPoint(fixed_point_error).into());
@@ -331,8 +309,8 @@ where
                 current_voltage += voltage_step;
             }
         }
-        CalculationB::Incoherent { voltage_target } => {
-            let mut current_voltage = T::zero();
+        Calculation::Incoherent { voltage_target } => {
+            let mut current_voltage = 0_f64;
             let mut voltage_step = config.global.voltage_step;
             while current_voltage <= voltage_target {
                 // Do a single calculation
@@ -355,7 +333,7 @@ where
                     Err(OuterLoopError::FixedPoint(fixed_point_error)) => match fixed_point_error {
                         conflux::core::FixedPointError::TooManyIterations(_cost) => {
                             current_voltage -= voltage_step;
-                            voltage_step /= T::one() + T::one();
+                            voltage_step /= 2_f64;
                         }
                         _ => {
                             return Err(OuterLoopError::FixedPoint(fixed_point_error).into());

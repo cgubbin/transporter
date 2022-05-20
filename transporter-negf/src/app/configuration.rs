@@ -1,3 +1,8 @@
+//! # Configuration
+//!
+//! Reads the configuration options from the provided `config.toml` files and
+//! hands them to the other parts of the simulator
+
 use crate::spectral::IntegrationRule;
 use config::{Config, File};
 use miette::IntoDiagnostic;
@@ -5,12 +10,18 @@ use serde::{de::DeserializeOwned, Deserialize};
 use std::env;
 
 #[derive(Debug, Deserialize)]
+/// Struct to hold the global calculation configuration options
 #[allow(unused)]
 pub struct Configuration<T> {
+    /// Global quantities
     pub global: GlobalConfiguration<T>,
+    /// Mesh related quantities
     pub mesh: MeshConfiguration<T>,
+    /// Quantities related to the progress and convergence of the incoherent inner loop
     pub inner_loop: InnerConfiguration<T>,
+    /// Quantities related to the progress and convergence of the outerloop
     pub outer_loop: OuterConfiguration<T>,
+    /// Quantities related to the discretisation of the energy and wavevector grids
     pub spectral: SpectralConfiguration<T>,
 }
 
@@ -52,6 +63,8 @@ pub struct OuterConfiguration<T> {
 }
 
 impl<T: DeserializeOwned> Configuration<T> {
+    /// Builds the `Configuration` either from the `default.toml` or from a `RUN_MODE` dependent
+    /// auxiliary file
     pub fn build() -> miette::Result<Self> {
         // If I am running it here we should automatically be more debuggy
         let run_mode = env::var("RUN_MODE").unwrap_or_else(|_| "development".into());

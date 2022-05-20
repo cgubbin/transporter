@@ -1,7 +1,8 @@
 pub mod structures;
 
-use nalgebra_sparse::{pattern::SparsityPattern, CsrMatrix};
+use nalgebra_sparse::pattern::SparsityPattern;
 use rand::{thread_rng, Rng};
+use sprs::CsMat;
 
 fn generate_diagonal_sparsity_pattern(num_rows: usize) -> SparsityPattern {
     let mut row_offsets = Vec::with_capacity(num_rows + 1);
@@ -25,12 +26,20 @@ fn generate_diagonal_sparsity_pattern(num_rows: usize) -> SparsityPattern {
         .expect("Pattern data must be valid: {:?}")
 }
 
-pub fn construct_test_hamiltonian(num_rows: usize) -> CsrMatrix<f64> {
+pub fn construct_test_hamiltonian(num_rows: usize) -> CsMat<f64> {
     let mut rng = thread_rng();
     let sparsity_pattern = generate_diagonal_sparsity_pattern(num_rows);
     let number_of_entries = num_rows * 3 - 2; // Tridiagonal
     let values = (0..number_of_entries)
         .map(|_| rng.gen())
         .collect::<Vec<_>>();
-    CsrMatrix::try_from_pattern_and_values(sparsity_pattern, values).expect("Csr data is invalid")
+    let test_mat =
+        nalgebra_sparse::CsrMatrix::try_from_pattern_and_values(sparsity_pattern, values.clone())
+            .unwrap();
+    CsMat::new(
+        (test_mat.nrows(), test_mat.ncols()),
+        test_mat.row_offsets().to_vec(),
+        test_mat.col_indices().to_vec(),
+        values,
+    )
 }

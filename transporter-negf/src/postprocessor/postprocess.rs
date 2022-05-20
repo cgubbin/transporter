@@ -3,9 +3,8 @@ use crate::{
     greens_functions::AggregateGreensFunctionMethods, self_energy::SelfEnergy,
     spectral::SpectralDiscretisation,
 };
-use nalgebra::{
-    allocator::Allocator, Const, DefaultAllocator, Dynamic, Matrix, RealField, VecStorage,
-};
+use nalgebra::{allocator::Allocator, DefaultAllocator, RealField};
+use ndarray::Array1;
 use transporter_mesher::{Connectivity, SmallDim};
 
 pub(crate) trait PostProcess<T, BandDim: SmallDim, GeometryDim, Conn, Spectral, SelfEnergy>
@@ -14,10 +13,7 @@ where
     GeometryDim: SmallDim,
     Conn: Connectivity<T, GeometryDim>,
     Spectral: SpectralDiscretisation<T>,
-    DefaultAllocator: Allocator<
-            Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
-            BandDim,
-        > + Allocator<T, GeometryDim>,
+    DefaultAllocator: Allocator<Array1<T>, BandDim> + Allocator<T, GeometryDim>,
 {
     fn recompute_currents_and_densities<AggregateGreensFunctions>(
         &self,
@@ -40,10 +36,7 @@ pub(crate) trait PostProcessLOGenerationRate<
     SelfEnergy,
 > where
     Spectral: SpectralDiscretisation<T>,
-    DefaultAllocator: Allocator<
-            Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
-            BandDim,
-        > + Allocator<T, GeometryDim>,
+    DefaultAllocator: Allocator<Array1<T>, BandDim> + Allocator<T, GeometryDim>,
 {
     fn compute_momentum_resolved_lo_generation_rate<AggregateGreensFunctions>(
         &self,
@@ -86,11 +79,7 @@ where
     GeometryDim: SmallDim,
     BandDim: SmallDim,
     Spectral: SpectralDiscretisation<T>,
-    DefaultAllocator: Allocator<T, GeometryDim>
-        + Allocator<
-            Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
-            BandDim,
-        >,
+    DefaultAllocator: Allocator<T, GeometryDim> + Allocator<Array1<T>, BandDim>,
 {
     fn recompute_currents_and_densities<AggregateGreensFunctions>(
         &self,

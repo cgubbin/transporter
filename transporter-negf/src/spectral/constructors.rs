@@ -1,3 +1,7 @@
+//! # Constructors
+//!
+//! Factory builder methods for `SpectralSpace` objects
+
 use super::{
     energy::EnergySpaceBuilder, wavevector::BuildWavevectorSpace, GenerateWeights, SpectralSpace,
     WavevectorSpace,
@@ -7,6 +11,7 @@ use num_traits::NumCast;
 use std::ops::Range;
 use transporter_mesher::{Connectivity, Mesh, Segment1dConnectivity, SmallDim};
 
+/// A struct to ease the building of a spectral space from the configuration
 pub struct SpectralSpaceBuilder<
     T,
     RefEnergyRange,
@@ -23,8 +28,9 @@ pub struct SpectralSpaceBuilder<
     mesh: RefMesh,
 }
 
-impl<T> SpectralSpaceBuilder<T, (), (), (), ()> {
-    pub fn new() -> Self {
+impl<T> Default for SpectralSpaceBuilder<T, (), (), (), ()> {
+    /// Generate an uninitialised `SpectralSpaceBuilder`
+    fn default() -> Self {
         Self {
             number_of_energy_points: None,
             energy_range: (),
@@ -52,6 +58,7 @@ impl<
         RefMesh,
     >
 {
+    /// Attach the `number_of_energy_points` to use in the energy grid
     pub fn with_number_of_energy_points(self, number_of_energy_points: usize) -> Self {
         Self {
             number_of_energy_points: Some(number_of_energy_points),
@@ -64,6 +71,7 @@ impl<
         }
     }
 
+    /// Attach the `number_of_wavevector_points` to use in the wavevector grid
     pub(crate) fn with_number_of_wavevector_points(
         self,
         number_of_wavevector_points: usize,
@@ -79,6 +87,7 @@ impl<
         }
     }
 
+    /// Attach the `maximum_wavevector` to use in the wavevector grid
     pub(crate) fn with_maximum_wavevector(
         self,
         maximum_wavevector: T,
@@ -100,6 +109,7 @@ impl<
         }
     }
 
+    /// Attach the range of energies spanned by the grid
     pub fn with_energy_range(
         self,
         energy_range: Range<T>,
@@ -121,6 +131,7 @@ impl<
         }
     }
 
+    /// Attach an integration rule to use for the energy grid
     pub fn with_energy_integration_method<EnergyIntegrationMethod>(
         self,
         energy_integration_rule: EnergyIntegrationMethod,
@@ -142,6 +153,7 @@ impl<
         }
     }
 
+    /// Attach an integration rule to use for the wavevector grid
     pub(crate) fn with_wavevector_integration_method<WavevectorIntegrationMethod>(
         self,
         wavevector_integration_rule: WavevectorIntegrationMethod,
@@ -163,6 +175,8 @@ impl<
         }
     }
 
+    /// Attach the device mesh to the grid -> this only acts to inform the `GeometryDim` of the
+    /// problem so can probably be done in a smarter way
     pub(crate) fn with_mesh<GeometryDim: SmallDim, Conn: Connectivity<T, GeometryDim>>(
         self,
         mesh: &Mesh<T, GeometryDim, Conn>,
@@ -193,6 +207,7 @@ where
     T: Copy + RealField + NumCast,
     EnergyIntegrationRule: super::GenerateWeights<T, U1, Segment1dConnectivity>,
 {
+    /// Build a `Coherent` `SpectralSpace`, to be used when no scattering is present in the system
     pub fn build_coherent(self) -> SpectralSpace<T, ()> {
         let energy = super::energy::EnergySpaceBuilder::new()
             .with_integration_rule(self.energy_integration_rule)
@@ -220,6 +235,8 @@ where
     WavevectorIntegrationRule: GenerateWeights<T, U1, Segment1dConnectivity>,
     DefaultAllocator: Allocator<T, U1>,
 {
+    /// Build an `Incoherent` `SpectralSpace`, to be used when scattering is present in the system or the
+    /// effective mass is non-constant through the device
     pub(crate) fn build_incoherent(
         self,
     ) -> SpectralSpace<T, WavevectorSpace<T, U1, Segment1dConnectivity>> {

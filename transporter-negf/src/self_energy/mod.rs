@@ -1,30 +1,48 @@
+//! # Self Energy
+//!
+//! Self energies define how the closed electronic system described by a `Hamiltonian` interacts
+//! with it's external environment. They define the coherent interaction rates between the closed device
+//! and the extended source and drain contacts, and incoherent interactions between electrons
+//! within the system and phonons, photons or impurities.
+//!
+//! We only store the lesser and retarded self-energies for efficiency. The advanced self energy can be
+//! computed trivially by taking the conjugate transpose of the retarded self-energy and the greater self
+//! energy can then be computed by linear addition of the three
+
+/// The self-energies of the source and drain contacts which add and remove electrons
 mod contact;
+/// Self energies arising from interaction with longitudinal optic phonons
 mod lo_phonon;
+
 use crate::{
     error::{BuildError, CsrError},
     spectral::{SpectralDiscretisation, SpectralSpace, WavevectorSpace},
 };
-use nalgebra::{allocator::Allocator, ComplexField, DMatrix, DefaultAllocator, RealField};
+use nalgebra::{allocator::Allocator, ComplexField, DefaultAllocator, RealField};
 use nalgebra_sparse::{
     pattern::{SparsityPattern, SparsityPatternFormatError},
     CsrMatrix,
 };
+use ndarray::Array2;
 use num_complex::Complex;
+use sprs::CsMat;
 use std::marker::PhantomData;
 use transporter_mesher::{Connectivity, ElementMethods, Mesh, SmallDim};
 
-#[cfg(feature = "ndarray")]
-use ndarray::Array2;
-#[cfg(feature = "ndarray")]
-use sprs::CsMat;
-
 #[derive(thiserror::Error, Debug, miette::Diagnostic)]
+/// Error type for the self-energy computation
 pub(crate) enum SelfEnergyError {
     #[error(transparent)]
     Computation(#[from] anyhow::Error),
 }
 
 #[derive(Clone)]
+/// Self energy struct which contains the sparse contact components
+/// and dense incoherent components
+///
+/// All self-energies are stored in `Vec` with length equal to the total
+/// number of points in the simulation `SpectralSpace`, with ordering as
+/// defined in that sub-module
 pub struct SelfEnergy<T, GeometryDim, Conn>
 where
     T: RealField + Copy,
@@ -35,32 +53,26 @@ where
     pub(crate) ma: PhantomData<GeometryDim>,
     pub(crate) mc: PhantomData<Conn>,
     pub(crate) marker: PhantomData<T>,
-    #[cfg(not(feature = "ndarray"))]
-    pub(crate) contact_retarded: Vec<CsrMatrix<Complex<T>>>,
-    #[cfg(not(feature = "ndarray"))]
-    pub(crate) contact_lesser: Option<Vec<CsrMatrix<Complex<T>>>>,
-    #[cfg(not(feature = "ndarray"))]
-    pub(crate) incoherent_retarded: Option<Vec<DMatrix<Complex<T>>>>,
-    #[cfg(not(feature = "ndarray"))]
-    pub(crate) incoherent_lesser: Option<Vec<DMatrix<Complex<T>>>>,
-    #[cfg(feature = "ndarray")]
+    /// The retarded self energy at the device contacts
     pub(crate) contact_retarded: Vec<CsMat<Complex<T>>>,
-    #[cfg(feature = "ndarray")]
+    /// The lesser self-energy at the device contacts
     pub(crate) contact_lesser: Option<Vec<CsMat<Complex<T>>>>,
-    #[cfg(feature = "ndarray")]
+    /// The optional retarded self energy within the device
     pub(crate) incoherent_retarded: Option<Vec<Array2<Complex<T>>>>,
-    #[cfg(feature = "ndarray")]
+    /// The optional lesser self energy within the device
     pub(crate) incoherent_lesser: Option<Vec<Array2<Complex<T>>>>,
 }
 
+/// Factory struct to build out self-energy
 pub struct SelfEnergyBuilder<T, RefSpectral, RefMesh> {
     pub(crate) spectral: RefSpectral,
     pub(crate) mesh: RefMesh,
     marker: PhantomData<T>,
 }
 
-impl<T: ComplexField> SelfEnergyBuilder<T, (), ()> {
-    pub fn new() -> Self {
+impl<T: ComplexField> Default for SelfEnergyBuilder<T, (), ()> {
+    /// Initialise an empty `SelfEnergyBuilder`
+    fn default() -> Self {
         Self {
             spectral: (),
             mesh: (),
@@ -70,6 +82,7 @@ impl<T: ComplexField> SelfEnergyBuilder<T, (), ()> {
 }
 
 impl<T, RefSpectral, RefMesh> SelfEnergyBuilder<T, RefSpectral, RefMesh> {
+    /// Attach a spectral space
     pub fn with_spectral_discretisation<Spectral>(
         self,
         spectral: &Spectral,
@@ -81,6 +94,7 @@ impl<T, RefSpectral, RefMesh> SelfEnergyBuilder<T, RefSpectral, RefMesh> {
         }
     }
 
+    /// Attach a mesh
     pub fn with_mesh<Mesh>(self, mesh: &Mesh) -> SelfEnergyBuilder<T, RefSpectral, &Mesh> {
         SelfEnergyBuilder {
             spectral: self.spectral,
@@ -90,7 +104,8 @@ impl<T, RefSpectral, RefMesh> SelfEnergyBuilder<T, RefSpectral, RefMesh> {
     }
 }
 
-/// Coherent builder
+/// Builder for coherent self-energies, in which only the self-energies at the contacts
+/// are utilised
 impl<'a, T, GeometryDim, Conn>
     SelfEnergyBuilder<T, &'a SpectralSpace<T, ()>, &'a Mesh<T, GeometryDim, Conn>>
 where
@@ -99,11 +114,11 @@ where
     Conn: Connectivity<T, GeometryDim>,
     DefaultAllocator: Allocator<T, GeometryDim>,
 {
+    /// Build a coherent (k=0) spectral space
     pub fn build_coherent(self) -> Result<SelfEnergy<T, GeometryDim, Conn>, BuildError> {
         Ok(self.build_coherent_inner()?)
     }
 
-    #[cfg(not(feature = "ndarray"))]
     fn build_coherent_inner(self) -> Result<SelfEnergy<T, GeometryDim, Conn>, CsrError> {
         // Collect the indices of all elements at the boundaries
         let vertices_at_boundary: Vec<usize> = self
@@ -125,45 +140,9 @@ where
             .iter()
             .map(|_| Complex::from(T::zero()))
             .collect::<Vec<_>>();
+        // We serialize into a `CsrMatrix` because this allows us to handle errors in the event the pattern is invalid
         let matrix = CsrMatrix::try_from_pattern_and_values(pattern, initial_values)?;
-
-        Ok(SelfEnergy {
-            ma: PhantomData,
-            mc: PhantomData,
-            marker: PhantomData,
-            contact_retarded: vec![matrix; self.spectral.number_of_energies()],
-            contact_lesser: None,
-            incoherent_retarded: None,
-            incoherent_lesser: None,
-        })
-    }
-
-    #[cfg(feature = "ndarray")]
-    fn build_coherent_inner(self) -> Result<SelfEnergy<T, GeometryDim, Conn>, CsrError> {
-        // Collect the indices of all elements at the boundaries
-        let vertices_at_boundary: Vec<usize> = self
-            .mesh
-            .connectivity()
-            .iter()
-            .enumerate()
-            .filter_map(|(vertex_index, vertex_connectivity)| {
-                if vertex_connectivity.len() == 1 {
-                    Some(vertex_index)
-                } else {
-                    None
-                }
-            })
-            .collect();
-        let pattern =
-            construct_csr_pattern_from_vertices(&vertices_at_boundary, self.mesh.vertices().len())?;
-        let initial_values = vertices_at_boundary
-            .iter()
-            .map(|_| Complex::from(T::zero()))
-            .collect::<Vec<_>>();
-        let matrix = CsrMatrix::try_from_pattern_and_values(pattern, initial_values)?;
-
         // Re-serialize into a CsMat
-        // TODO do this in one step with a custom error handling rather than passing through the sparse function
         let matrix = CsMat::new(
             (matrix.nrows(), matrix.ncols()),
             matrix.row_offsets().to_vec(),
@@ -183,7 +162,7 @@ where
     }
 }
 
-/// InCoherent builder
+/// Builder for incoherent self-energies, where the dense matrices are necessary
 impl<'a, T, GeometryDim, Conn>
     SelfEnergyBuilder<
         T,
@@ -198,6 +177,7 @@ where
     DefaultAllocator: Allocator<T, GeometryDim>,
     <DefaultAllocator as Allocator<T, GeometryDim>>::Buffer: Send + Sync,
 {
+    /// Build an incoherent spectral space
     pub(crate) fn build_incoherent(
         self,
         lead_length: Option<T>,
@@ -205,59 +185,6 @@ where
         Ok(self.build_incoherent_inner(lead_length)?)
     }
 
-    #[cfg(not(feature = "ndarray"))]
-    fn build_incoherent_inner(
-        self,
-        lead_length: Option<T>,
-    ) -> Result<SelfEnergy<T, GeometryDim, Conn>, CsrError> {
-        let number_of_vertices_in_reservoir = if let Some(lead_length) = lead_length {
-            (lead_length * T::from_f64(1e-9).unwrap() / self.mesh.elements()[0].0.diameter())
-                .to_usize()
-                .unwrap()
-        } else {
-            0
-        };
-        let number_of_vertices_in_core =
-            self.mesh.vertices().len() - 2 * number_of_vertices_in_reservoir;
-
-        // Collect the indices of all elements at the boundaries
-        let vertices_at_boundary: Vec<usize> = self
-            .mesh
-            .connectivity()
-            .iter()
-            .enumerate()
-            .filter_map(|(vertex_index, vertex_connectivity)| {
-                if vertex_connectivity.len() == 1 {
-                    Some(vertex_index)
-                } else {
-                    None
-                }
-            })
-            .collect();
-        let pattern =
-            construct_csr_pattern_from_vertices(&vertices_at_boundary, self.mesh.vertices().len())?;
-        let initial_values = vertices_at_boundary
-            .iter()
-            .map(|_| Complex::from(T::zero()))
-            .collect::<Vec<_>>();
-        let csrmatrix = CsrMatrix::try_from_pattern_and_values(pattern, initial_values)?;
-
-        let dmatrix = DMatrix::zeros(number_of_vertices_in_core, number_of_vertices_in_core);
-        let num_spectral_points =
-            self.spectral.number_of_wavevector_points() * self.spectral.number_of_energy_points();
-
-        Ok(SelfEnergy {
-            ma: PhantomData,
-            mc: PhantomData,
-            marker: PhantomData,
-            contact_retarded: vec![csrmatrix.clone(); num_spectral_points],
-            contact_lesser: Some(vec![csrmatrix; num_spectral_points]),
-            incoherent_retarded: Some(vec![dmatrix.clone(); num_spectral_points]),
-            incoherent_lesser: Some(vec![dmatrix; num_spectral_points]),
-        })
-    }
-
-    #[cfg(feature = "ndarray")]
     fn build_incoherent_inner(
         self,
         lead_length: Option<T>,
@@ -295,7 +222,6 @@ where
             .collect::<Vec<_>>();
         let csrmatrix = CsrMatrix::try_from_pattern_and_values(pattern, initial_values)?;
         // Re-serialize into a CsMat
-        // TODO do this in one step with a custom error handling rather than passing through the sparse function
         let csrmatrix = CsMat::new(
             (csrmatrix.nrows(), csrmatrix.ncols()),
             csrmatrix.row_offsets().to_vec(),
@@ -360,47 +286,6 @@ where
         Ok(self.build_coherent_inner()?)
     }
 
-    #[cfg(not(feature = "ndarray"))]
-    fn build_coherent_inner(self) -> Result<SelfEnergy<T, GeometryDim, Conn>, CsrError> {
-        // TODO Should take a Vec<DMatrix<T>> -> which corresponds to the spectral space
-        // Collect the indices of all elements at the boundaries
-        let vertices_at_boundary: Vec<usize> = self
-            .mesh
-            .connectivity()
-            .iter()
-            .enumerate()
-            .filter_map(|(vertex_index, vertex_connectivity)| {
-                if vertex_connectivity.len() == 1 {
-                    Some(vertex_index)
-                } else {
-                    None
-                }
-            })
-            .collect();
-        let pattern =
-            construct_csr_pattern_from_vertices(&vertices_at_boundary, self.mesh.vertices().len())?;
-        let initial_values = vertices_at_boundary
-            .iter()
-            .map(|_| Complex::from(T::zero()))
-            .collect::<Vec<_>>();
-        let matrix = CsrMatrix::try_from_pattern_and_values(pattern, initial_values)?;
-
-        Ok(SelfEnergy {
-            ma: PhantomData,
-            mc: PhantomData,
-            marker: PhantomData,
-            contact_retarded: vec![
-                matrix;
-                self.spectral.number_of_wavevector_points()
-                    * self.spectral.number_of_energy_points()
-            ],
-            contact_lesser: None,
-            incoherent_retarded: None,
-            incoherent_lesser: None,
-        })
-    }
-
-    #[cfg(feature = "ndarray")]
     fn build_coherent_inner(self) -> Result<SelfEnergy<T, GeometryDim, Conn>, CsrError> {
         // TODO Should take a Vec<DMatrix<T>> -> which corresponds to the spectral space
         // Collect the indices of all elements at the boundaries

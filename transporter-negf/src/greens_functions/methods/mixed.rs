@@ -17,11 +17,8 @@ use crate::{
     spectral::SpectralDiscretisation,
 };
 use indicatif::{ParallelProgressIterator, ProgressBar, ProgressDrawTarget, ProgressStyle};
-use nalgebra::{
-    allocator::Allocator, ComplexField, Const, DMatrix, DVector, DefaultAllocator, Dynamic, Matrix,
-    OVector, RealField, VecStorage,
-};
-use nalgebra_sparse::CsrMatrix;
+use nalgebra::{allocator::Allocator, ComplexField, DefaultAllocator, OVector};
+use ndarray::{s, Array1, Array2};
 use num_complex::Complex;
 use rayon::prelude::*;
 use transporter_mesher::{Connectivity, ElementMethods, Mesh, SmallDim};
@@ -32,7 +29,7 @@ use transporter_mesher::{Connectivity, ElementMethods, Mesh, SmallDim};
 pub(crate) struct MMatrix<T> {
     source_diagonal: Vec<T>,
     pub(crate) drain_diagonal: Vec<T>,
-    pub(crate) core_matrix: DMatrix<T>,
+    pub(crate) core_matrix: Array2<T>,
 }
 
 impl<T: ComplexField> MMatrix<T> {
@@ -43,38 +40,37 @@ impl<T: ComplexField> MMatrix<T> {
         MMatrix {
             source_diagonal: vec![T::zero(); number_of_vertices_in_reservoir],
             drain_diagonal: vec![T::zero(); number_of_vertices_in_reservoir],
-            core_matrix: DMatrix::zeros(number_of_vertices_in_core, number_of_vertices_in_core),
+            core_matrix: Array2::zeros((number_of_vertices_in_core, number_of_vertices_in_core)),
         }
     }
 
-    pub(crate) fn core_as_ref(&self) -> &DMatrix<T> {
+    pub(crate) fn core_as_ref(&self) -> &Array2<T> {
         &self.core_matrix
     }
 }
 
-impl<'a, T, GeometryDim, BandDim>
-    AggregateGreensFunctions<'a, T, MMatrix<Complex<T>>, GeometryDim, BandDim>
+impl<'a, GeometryDim, BandDim>
+    AggregateGreensFunctions<'a, f64, MMatrix<Complex<f64>>, GeometryDim, BandDim>
 where
-    T: RealField + Copy + Clone + Send + Sync,
     GeometryDim: SmallDim + Send + Sync,
     BandDim: SmallDim,
-    DefaultAllocator: Allocator<T, BandDim> + Allocator<[T; 3], BandDim>,
+    DefaultAllocator: Allocator<f64, BandDim> + Allocator<[f64; 3], BandDim>,
 {
     #[tracing::instrument(name = "Updating Greens Functions", skip_all)]
     pub(crate) fn update_greens_functions<Conn, Spectral>(
         &mut self,
-        voltage: T,
-        hamiltonian: &Hamiltonian<T>,
-        self_energy: &SelfEnergy<T, GeometryDim, Conn>,
+        voltage: f64,
+        hamiltonian: &Hamiltonian<f64>,
+        self_energy: &SelfEnergy<f64, GeometryDim, Conn>,
         spectral_space: &Spectral,
     ) -> Result<(), GreensFunctionError>
     where
-        Conn: Connectivity<T, GeometryDim> + Send + Sync,
-        Spectral: SpectralDiscretisation<T>,
-        DefaultAllocator: Allocator<T, GeometryDim>,
-        <DefaultAllocator as Allocator<T, GeometryDim>>::Buffer: Send + Sync,
-        <DefaultAllocator as Allocator<T, BandDim>>::Buffer: Send + Sync,
-        <DefaultAllocator as Allocator<[T; 3], BandDim>>::Buffer: Send + Sync,
+        Conn: Connectivity<f64, GeometryDim> + Send + Sync,
+        Spectral: SpectralDiscretisation<f64>,
+        DefaultAllocator: Allocator<f64, GeometryDim>,
+        <DefaultAllocator as Allocator<f64, GeometryDim>>::Buffer: Send + Sync,
+        <DefaultAllocator as Allocator<f64, BandDim>>::Buffer: Send + Sync,
+        <DefaultAllocator as Allocator<[f64; 3], BandDim>>::Buffer: Send + Sync,
     {
         // In the coherent transport case we only need the retarded and lesser Greens functions (see Lake 1997)
         self.update_aggregate_retarded_greens_function(hamiltonian, self_energy, spectral_space)?;
@@ -89,14 +85,14 @@ where
 
     pub(crate) fn update_aggregate_retarded_greens_function<Conn, Spectral>(
         &mut self,
-        hamiltonian: &Hamiltonian<T>,
-        self_energy: &SelfEnergy<T, GeometryDim, Conn>,
+        hamiltonian: &Hamiltonian<f64>,
+        self_energy: &SelfEnergy<f64, GeometryDim, Conn>,
         spectral_space: &Spectral,
     ) -> Result<(), GreensFunctionError>
     where
-        Conn: Connectivity<T, GeometryDim> + Send + Sync,
-        Spectral: SpectralDiscretisation<T>,
-        DefaultAllocator: Allocator<T, GeometryDim>,
+        Conn: Connectivity<f64, GeometryDim> + Send + Sync,
+        Spectral: SpectralDiscretisation<f64>,
+        DefaultAllocator: Allocator<f64, GeometryDim>,
     {
         let term = console::Term::stdout();
         term.move_cursor_to(0, 7).unwrap();
@@ -130,8 +126,8 @@ where
                     wavevector,
                     hamiltonian,
                     &MMatrix {
-                        source_diagonal: vec![self_energy.contact_retarded[index].values()[0]],
-                        drain_diagonal: vec![self_energy.contact_retarded[index].values()[1]],
+                        source_diagonal: vec![self_energy.contact_retarded[index].data()[0]],
+                        drain_diagonal: vec![self_energy.contact_retarded[index].data()[1]],
                         core_matrix: self_energy.incoherent_retarded.as_deref().unwrap()[index]
                             .clone(),
                     },
@@ -142,18 +138,18 @@ where
 
     pub(crate) fn update_aggregate_lesser_greens_function<Conn, Spectral>(
         &mut self,
-        voltage: T,
-        hamiltonian: &Hamiltonian<T>,
-        self_energy: &SelfEnergy<T, GeometryDim, Conn>,
+        voltage: f64,
+        hamiltonian: &Hamiltonian<f64>,
+        self_energy: &SelfEnergy<f64, GeometryDim, Conn>,
         spectral_space: &Spectral,
     ) -> Result<(), GreensFunctionError>
     where
-        Conn: Connectivity<T, GeometryDim> + Send + Sync,
-        Spectral: SpectralDiscretisation<T>,
-        DefaultAllocator: Allocator<T, GeometryDim>,
-        <DefaultAllocator as Allocator<T, GeometryDim>>::Buffer: Send + Sync,
-        <DefaultAllocator as Allocator<T, BandDim>>::Buffer: Send + Sync,
-        <DefaultAllocator as Allocator<[T; 3], BandDim>>::Buffer: Send + Sync,
+        Conn: Connectivity<f64, GeometryDim> + Send + Sync,
+        Spectral: SpectralDiscretisation<f64>,
+        DefaultAllocator: Allocator<f64, GeometryDim>,
+        <DefaultAllocator as Allocator<f64, GeometryDim>>::Buffer: Send + Sync,
+        <DefaultAllocator as Allocator<f64, BandDim>>::Buffer: Send + Sync,
+        <DefaultAllocator as Allocator<[f64; 3], BandDim>>::Buffer: Send + Sync,
     {
         let term = console::Term::stdout();
         term.move_cursor_to(0, 7).unwrap();
@@ -192,19 +188,19 @@ where
                 // );
                 let mut contact_lesser = self_energy.contact_retarded[index].clone();
                 contact_lesser
-                    .values_mut()
+                    .data_mut()
                     .iter_mut()
-                    .for_each(|val| *val = Complex::new(T::zero(), T::one()) * (*val - val.conj()));
-                contact_lesser.values_mut()[0] *= Complex::new(T::zero(), source);
-                contact_lesser.values_mut()[1] *= Complex::new(T::zero(), drain);
+                    .for_each(|val| *val = Complex::new(0_f64, 1_f64) * (*val - val.conj()));
+                contact_lesser.data_mut()[0] *= Complex::new(0_f64, source);
+                contact_lesser.data_mut()[1] *= Complex::new(0_f64, drain);
 
                 let internal_lesser = compute_internal_lesser_self_energies(
                     energy,
                     wavevector,
                     hamiltonian,
                     [
-                        self_energy.contact_retarded[index].values()[0],
-                        self_energy.contact_retarded[index].values()[1],
+                        self_energy.contact_retarded[index].data()[0],
+                        self_energy.contact_retarded[index].data()[1],
                     ],
                     self.retarded[0].matrix.drain_diagonal.len(),
                     [source, drain],
@@ -222,8 +218,8 @@ where
                     hamiltonian,
                     &self.retarded[index].matrix,
                     &MMatrix {
-                        source_diagonal: vec![contact_lesser.values()[0]],
-                        drain_diagonal: vec![contact_lesser.values()[1]],
+                        source_diagonal: vec![contact_lesser.data()[0]],
+                        drain_diagonal: vec![contact_lesser.data()[1]],
                         core_matrix: se_lesser_core,
                     },
                     &[source, drain],
@@ -233,17 +229,14 @@ where
     }
 }
 
-impl<T> GreensFunctionMethods<T> for MMatrix<Complex<T>>
-where
-    T: RealField + Copy,
-{
-    type SelfEnergy = MMatrix<Complex<T>>;
+impl GreensFunctionMethods<f64> for MMatrix<Complex<f64>> {
+    type SelfEnergy = MMatrix<Complex<f64>>;
 
     fn generate_retarded_into(
         &mut self,
-        energy: T,
-        wavevector: T,
-        hamiltonian: &Hamiltonian<T>,
+        energy: f64,
+        wavevector: f64,
+        hamiltonian: &Hamiltonian<f64>,
         self_energy: &Self::SelfEnergy,
     ) -> Result<(), GreensFunctionError> {
         // The number of entries is n_rows + 2 * (n_rows - 2 * n_lead - 1)
@@ -271,8 +264,13 @@ where
             number_of_vertices_in_reservoir,
             number_of_vertices_in_reservoir,
         )?;
-        let left_internal_self_energy = g_00[(g_00.shape().0 - 1, 0)]
-            * hamiltonian.row(number_of_vertices_in_reservoir).values()[2].powi(2);
+        let left_internal_self_energy = g_00[g_00.shape()[0] - 1]
+            * hamiltonian
+                .outer_view(number_of_vertices_in_reservoir)
+                .unwrap()
+                .data()[2]
+                .powi(2);
+
         let g_ll = right_connected_diagonal(
             energy,
             &hamiltonian,
@@ -280,22 +278,28 @@ where
             number_of_vertices_in_reservoir,
             number_of_vertices_in_reservoir,
         )?;
-        let right_internal_self_energy = g_ll[(0, 0)]
+        let right_internal_self_energy = g_ll[0]
             * hamiltonian
-                .row(hamiltonian.nrows() - 1 - number_of_vertices_in_reservoir)
-                .values()[2]
+                .outer_view(hamiltonian.rows() - 1 - number_of_vertices_in_reservoir)
+                .unwrap()
+                .data()[2]
                 .powi(2);
 
         // TODO Casting to Complex here is verbose and wasteful, can we try not to do this?
         // Maybe the Hamiltonian needs to be made in terms of `ComplexField`?
-        let values = hamiltonian.values();
-        let mut y = Vec::with_capacity(values.len());
-        for value in values {
-            y.push(Complex::from(*value));
+        let data = hamiltonian.data();
+        let mut y = Vec::with_capacity(data.len());
+        for x in data {
+            y.push(Complex::from(*x));
         }
-        let mut dense_hamiltonian = nalgebra_sparse::convert::serial::convert_csr_dense(
-            &CsrMatrix::try_from_pattern_and_values(hamiltonian.pattern().clone(), y).unwrap(),
-        );
+        let mut dense_hamiltonian = sprs::CsMat::new(
+            hamiltonian.shape(),
+            hamiltonian.indptr().raw_storage().to_vec(),
+            hamiltonian.indices().to_vec(),
+            y,
+        )
+        .to_dense();
+
         dense_hamiltonian[(
             number_of_vertices_in_reservoir,
             number_of_vertices_in_reservoir,
@@ -304,18 +308,19 @@ where
             number_of_vertices_in_reservoir + number_of_vertices_in_core - 1,
             number_of_vertices_in_reservoir + number_of_vertices_in_core - 1,
         )] += right_internal_self_energy;
+        let dense_hamiltonian = dense_hamiltonian.slice(s![
+            number_of_vertices_in_reservoir
+                ..number_of_vertices_in_reservoir + number_of_vertices_in_core,
+            number_of_vertices_in_reservoir
+                ..number_of_vertices_in_reservoir + number_of_vertices_in_core
+        ]);
 
-        let mut matrix = DMatrix::identity(number_of_vertices_in_core, number_of_vertices_in_core)
-            * Complex::from(energy)
-            - dense_hamiltonian.slice(
-                (
-                    number_of_vertices_in_reservoir,
-                    number_of_vertices_in_reservoir,
-                ),
-                (number_of_vertices_in_core, number_of_vertices_in_core),
-            ); //TODO Do we have to convert? Seems dumb. Should we store H in dense form too?&ham;
-        if matrix.try_inverse_mut() {
-            self.core_matrix.copy_from(&matrix);
+        let matrix = Array2::from_diag_elem(number_of_vertices_in_core, Complex::from(energy))
+            - dense_hamiltonian;
+
+        let matrix = ndarray_linalg::solve::Inverse::inv(&matrix);
+        if let Ok(matrix) = matrix {
+            self.core_matrix = matrix;
         } else {
             return Err(GreensFunctionError::Inversion);
         }
@@ -332,21 +337,28 @@ where
             number_of_vertices_in_core - 1,
             number_of_vertices_in_core - 1,
         )];
-        let mut previous_hopping_element = hamiltonian
-            .row(number_of_vertices_in_reservoir + number_of_vertices_in_core - 1)
-            .values()[2];
+        let mut previous_hopping_element = Complex::from(
+            hamiltonian
+                .outer_view(number_of_vertices_in_reservoir + number_of_vertices_in_core - 1)
+                .unwrap()
+                .data()[2],
+        );
         self.drain_diagonal
             .iter_mut()
             .zip(
                 hamiltonian
-                    .row_iter()
+                    .outer_iterator()
                     .zip(right_diagonal.into_iter())
                     .skip(number_of_vertices_in_reservoir + number_of_vertices_in_core - 1),
             )
             .for_each(|(element, (hamiltonian_row, right_diagonal_element))| {
-                let hopping_element = hamiltonian_row.values()[2];
+                let hopping_element = if hamiltonian_row.data().len() == 3 {
+                    Complex::from(hamiltonian_row.data()[2])
+                } else {
+                    Complex::from(hamiltonian_row.data()[0])
+                };
                 *element = right_diagonal_element
-                    * (Complex::from(T::one())
+                    * (Complex::from(1_f64)
                         + right_diagonal_element
                             * previous
                             * hopping_element
@@ -360,29 +372,32 @@ where
             energy,
             &hamiltonian,
             &self_energies_at_external_contacts,
-            hamiltonian.nrows(),
+            hamiltonian.rows(),
             number_of_vertices_in_reservoir,
         )?;
         previous = self.core_matrix[(0, 0)];
-        previous_hopping_element = hamiltonian.row(number_of_vertices_in_reservoir).values()[2];
+        previous_hopping_element = Complex::from(
+            hamiltonian
+                .outer_view(number_of_vertices_in_reservoir)
+                .unwrap()
+                .data()[2],
+        );
         self.source_diagonal
             .iter_mut()
-            .zip(
-                left_diagonal
-                    .into_iter()
-                    .take(number_of_vertices_in_reservoir),
-            )
+            .zip(left_diagonal.iter().take(number_of_vertices_in_reservoir))
             .rev()
             .enumerate()
             .for_each(|(idx, (element, left_diagonal_element))| {
-                let row = hamiltonian.row(number_of_vertices_in_reservoir - 1 - idx);
-                let hopping_element = if row.values().len() == 3 {
-                    T::from_real(row.values()[0])
+                let row = hamiltonian
+                    .outer_view(number_of_vertices_in_reservoir - 1 - idx)
+                    .unwrap();
+                let hopping_element = if row.data().len() == 3 {
+                    Complex::from(row.data()[0])
                 } else {
-                    T::from_real(row.values()[1])
+                    Complex::from(row.data()[1])
                 };
                 *element = left_diagonal_element
-                    * (Complex::from(T::one())
+                    * (Complex::from(1_f64)
                         + left_diagonal_element
                             * previous
                             * hopping_element
@@ -407,28 +422,29 @@ where
     // We also never generate the advanced greens function, instead transiently calculating it in `generate_lesser_into`. Maybe we will in future
     fn generate_advanced_into(
         &mut self,
-        _retarded: &MMatrix<Complex<T>>,
+        _retarded: &MMatrix<Complex<f64>>,
     ) -> Result<(), GreensFunctionError> {
         unimplemented!()
     }
 
     fn generate_lesser_into(
         &mut self,
-        _energy: T,
-        _wavevector: T,
-        _hamiltonian: &Hamiltonian<T>,
-        retarded_greens_function: &MMatrix<Complex<T>>,
-        lesser_self_energy: &MMatrix<Complex<T>>,
-        fermi_functions: &[T],
+        _energy: f64,
+        _wavevector: f64,
+        _hamiltonian: &Hamiltonian<f64>,
+        retarded_greens_function: &MMatrix<Complex<f64>>,
+        lesser_self_energy: &MMatrix<Complex<f64>>,
+        fermi_functions: &[f64],
     ) -> Result<(), GreensFunctionError> {
         // Expensive matrix inversion
+        let advanced = retarded_greens_function.core_matrix.t().mapv(|x| x.conj());
         self.core_matrix
             .iter_mut()
             .zip(
-                (&retarded_greens_function.core_matrix
-                    * &lesser_self_energy.core_matrix
-                    * retarded_greens_function.core_matrix.transpose().conjugate())
-                .iter(),
+                (&retarded_greens_function
+                    .core_matrix
+                    .dot(&lesser_self_energy.core_matrix.dot(&advanced)))
+                    .iter(),
             )
             .for_each(|(element, &value)| {
                 *element = value;
@@ -439,29 +455,29 @@ where
             .iter_mut()
             .zip(retarded_greens_function.source_diagonal.iter())
             .for_each(|(element, g_r)| {
-                let spectral_density = Complex::new(T::zero(), T::one()) * (g_r - g_r.conj());
-                *element = Complex::new(T::zero(), fermi_functions[0]) * spectral_density;
+                let spectral_density = Complex::new(0_f64, 1_f64) * (g_r - g_r.conj());
+                *element = Complex::new(0_f64, fermi_functions[0]) * spectral_density;
             });
         self.drain_diagonal
             .iter_mut()
             .zip(retarded_greens_function.drain_diagonal.iter())
             .for_each(|(element, g_r)| {
-                let spectral_density = Complex::new(T::zero(), T::one()) * (g_r - g_r.conj());
-                *element = Complex::new(T::zero(), fermi_functions[1]) * spectral_density;
+                let spectral_density = Complex::new(0_f64, 1_f64) * (g_r - g_r.conj());
+                *element = Complex::new(0_f64, fermi_functions[1]) * spectral_density;
             });
 
         Ok(())
     }
 }
 
-fn compute_internal_lesser_self_energies<T: RealField + Copy>(
-    energy: T,
-    wavevector: T,
-    hamiltonian: &Hamiltonian<T>,
-    edge_retarded_self_energies: [Complex<T>; 2],
+fn compute_internal_lesser_self_energies(
+    energy: f64,
+    wavevector: f64,
+    hamiltonian: &Hamiltonian<f64>,
+    edge_retarded_self_energies: [Complex<f64>; 2],
     number_of_vertices_in_reservoir: usize,
-    fermi_functions: [T; 2],
-) -> Result<[Complex<T>; 2], GreensFunctionError> {
+    fermi_functions: [f64; 2],
+) -> Result<[Complex<f64>; 2], GreensFunctionError> {
     let retarded_self_energies_internal = compute_internal_retarded_self_energies(
         energy,
         wavevector,
@@ -473,20 +489,18 @@ fn compute_internal_lesser_self_energies<T: RealField + Copy>(
     let lesser_se = retarded_self_energies_internal
         .iter()
         .zip(fermi_functions.into_iter())
-        .map(|(s_re, f)| {
-            Complex::new(T::zero(), f) * Complex::new(T::zero(), T::one()) * (s_re - s_re.conj())
-        })
+        .map(|(s_re, f)| Complex::new(0_f64, f) * Complex::new(0_f64, 1_f64) * (s_re - s_re.conj()))
         .collect::<Vec<_>>();
     Ok([lesser_se[0], lesser_se[1]])
 }
 
-fn compute_internal_retarded_self_energies<T: RealField + Copy>(
-    energy: T,
-    wavevector: T,
-    hamiltonian: &Hamiltonian<T>,
-    edge_retarded_self_energies: [Complex<T>; 2],
+fn compute_internal_retarded_self_energies(
+    energy: f64,
+    wavevector: f64,
+    hamiltonian: &Hamiltonian<f64>,
+    edge_retarded_self_energies: [Complex<f64>; 2],
     number_of_vertices_in_reservoir: usize,
-) -> Result<[Complex<T>; 2], GreensFunctionError> {
+) -> Result<[Complex<f64>; 2], GreensFunctionError> {
     let self_energies_at_external_contacts = (
         edge_retarded_self_energies[0],
         edge_retarded_self_energies[1],
@@ -503,8 +517,12 @@ fn compute_internal_retarded_self_energies<T: RealField + Copy>(
         number_of_vertices_in_reservoir,
         number_of_vertices_in_reservoir,
     )?;
-    let left_internal_self_energy = g_00[(g_00.shape().0 - 1, 0)]
-        * hamiltonian.row(number_of_vertices_in_reservoir).values()[2].powi(2);
+    let left_internal_self_energy = g_00[g_00.shape()[0] - 1]
+        * hamiltonian
+            .outer_view(number_of_vertices_in_reservoir)
+            .unwrap()
+            .data()[2]
+            .powi(2);
     let g_ll = right_connected_diagonal(
         energy,
         &hamiltonian,
@@ -512,47 +530,45 @@ fn compute_internal_retarded_self_energies<T: RealField + Copy>(
         number_of_vertices_in_reservoir,
         number_of_vertices_in_reservoir,
     )?;
-    let right_internal_self_energy = g_ll[(0, 0)]
+    let right_internal_self_energy = g_ll[0]
         * hamiltonian
-            .row(hamiltonian.nrows() - 1 - number_of_vertices_in_reservoir)
-            .values()[2]
+            .outer_view(hamiltonian.rows() - 1 - number_of_vertices_in_reservoir)
+            .unwrap()
+            .data()[2]
             .powi(2);
     Ok([left_internal_self_energy, right_internal_self_energy])
 }
 
 /// Implementation of the accumulator methods for a sparse AggregateGreensFunction
-impl<T, BandDim, GeometryDim, Conn, Spectral>
+impl<BandDim, GeometryDim, Conn, Spectral>
     AggregateGreensFunctionMethods<
-        T,
+        f64,
         BandDim,
         GeometryDim,
         Conn,
         Spectral,
-        SelfEnergy<T, GeometryDim, Conn>,
-    > for AggregateGreensFunctions<'_, T, MMatrix<Complex<T>>, GeometryDim, BandDim>
+        SelfEnergy<f64, GeometryDim, Conn>,
+    > for AggregateGreensFunctions<'_, f64, MMatrix<Complex<f64>>, GeometryDim, BandDim>
 where
-    T: RealField + Copy,
     GeometryDim: SmallDim,
     BandDim: SmallDim,
-    Conn: Connectivity<T, GeometryDim>,
-    Spectral: SpectralDiscretisation<T>,
-    DefaultAllocator: Allocator<
-            Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
-            BandDim,
-        > + Allocator<T, BandDim>
-        + Allocator<[T; 3], BandDim>
-        + Allocator<T, GeometryDim>,
+    Conn: Connectivity<f64, GeometryDim>,
+    Spectral: SpectralDiscretisation<f64>,
+    DefaultAllocator: Allocator<Array1<f64>, BandDim>
+        + Allocator<f64, BandDim>
+        + Allocator<[f64; 3], BandDim>
+        + Allocator<f64, GeometryDim>,
 {
     fn accumulate_into_charge_density_vector(
         &self,
-        mesh: &Mesh<T, GeometryDim, Conn>,
+        mesh: &Mesh<f64, GeometryDim, Conn>,
         spectral_space: &Spectral,
-    ) -> Result<Charge<T, BandDim>, crate::postprocessor::PostProcessorError> {
-        let mut charges: Vec<DVector<T>> = Vec::with_capacity(BandDim::dim());
+    ) -> Result<Charge<f64, BandDim>, crate::postprocessor::PostProcessorError> {
+        let mut charges: Vec<Array1<f64>> = Vec::with_capacity(BandDim::dim());
         // Sum over the diagonal of the calculated spectral density
         // TODO Only one band
         let mut summed_diagonal = vec![
-            T::zero();
+            0_f64;
             self.retarded[0].as_ref().drain_diagonal.len() * 2
                 + self.retarded[0].as_ref().core_matrix.nrows()
         ];
@@ -566,7 +582,7 @@ where
             .enumerate()
         {
             let wavevector = if spectral_space.number_of_wavevector_points() == 1 {
-                T::one()
+                1_f64
             } else {
                 wavevector
             };
@@ -578,23 +594,25 @@ where
                 .zip(spectral_space.iter_energy_weights())
                 .zip(spectral_space.iter_energy_widths())
                 .fold(
-                    DVector::zeros(summed_diagonal.len()),
-                    |sum, ((value, weight), width)| {
+                    Array1::zeros(summed_diagonal.len()),
+                    |sum: Array1<Complex<f64>>, ((value, weight), width)| {
                         let matrix = &value.matrix;
-                        let diagonal = DVector::from(
+                        let diagonal = Array1::from(
                             matrix
                                 .source_diagonal
                                 .iter()
-                                .chain(matrix.core_matrix.diagonal().iter())
+                                .chain(matrix.core_matrix.diag().iter())
                                 .chain(matrix.drain_diagonal.iter())
                                 .copied()
                                 .collect::<Vec<_>>(),
-                        );
-                        sum + diagonal
-                            * Complex::from(
+                        )
+                        .mapv(|x| {
+                            x * Complex::from(
                                 weight * width // Weighted by the integration weight from the `SpectralSpace` and the diameter of the element in the grid
-                                / T::from_f64(crate::constants::ELECTRON_CHARGE).unwrap(), // The Green's function is an inverse energy stored in eV
+                            / crate::constants::ELECTRON_CHARGE, // The Green's function is an inverse energy stored in eV
                             )
+                        });
+                        sum + diagonal
                     },
                 );
             summed_diagonal
@@ -602,14 +620,14 @@ where
                 .zip(
                     new_diagonal
                         .iter()
-                        .map(|&x| -(Complex::new(T::zero(), T::one()) * x).re),
+                        .map(|&x| -(Complex::new(0_f64, 1_f64) * x).re),
                 )
                 .for_each(|(ele, new)| *ele += wavevector * weight * width * new);
         }
 
         // Separate out the diagonals for each `BandDim` into their own charge vector
         for band_number in 0..BandDim::dim() {
-            charges.push(DVector::from(
+            charges.push(Array1::from(
                 summed_diagonal
                     .iter()
                     .skip(band_number)
@@ -635,21 +653,18 @@ where
                     [idx, idx - 1]
                 }
                 .into_iter()
-                .fold(T::zero(), |acc, idx| {
-                    acc + mesh.elements()[idx].0.diameter() / (T::one() + T::one())
+                .fold(0_f64, |acc, idx| {
+                    acc + mesh.elements()[idx].0.diameter() / 2_f64
                 });
 
                 let prefactor = match spectral_space.number_of_wavevector_points() {
                     1 => {
-                        T::from_f64(
-                            crate::constants::BOLTZMANN
-                                * crate::constants::ELECTRON_CHARGE
-                                * crate::constants::ELECTRON_MASS
-                                / 2.
-                                / std::f64::consts::PI.powi(2)
-                                / crate::constants::HBAR.powi(2),
-                        )
-                        .unwrap()
+                        crate::constants::BOLTZMANN
+                            * crate::constants::ELECTRON_CHARGE
+                            * crate::constants::ELECTRON_MASS
+                            / 2.
+                            / std::f64::consts::PI.powi(2)
+                            / crate::constants::HBAR.powi(2)
                             * self.info_desk.temperature
                             * self
                                 .info_desk
@@ -657,12 +672,9 @@ where
                             / diameter
                     }
                     _ => {
-                        T::from_f64(
-                            crate::constants::ELECTRON_CHARGE
-                                / 2_f64
-                                / std::f64::consts::PI.powi(2),
-                        )
-                        .unwrap()
+                        crate::constants::ELECTRON_CHARGE
+                            / 2_f64
+                            / std::f64::consts::PI.powi(2)
                             / diameter
                     }
                 };
@@ -670,19 +682,19 @@ where
             }
         }
 
-        Charge::new(OVector::<DVector<T>, BandDim>::from_iterator(
+        Charge::new(OVector::<Array1<f64>, BandDim>::from_iterator(
             charges.into_iter(),
         ))
     }
 
     fn accumulate_into_current_density_vector(
         &self,
-        voltage: T,
-        mesh: &Mesh<T, GeometryDim, Conn>,
-        self_energy: &SelfEnergy<T, GeometryDim, Conn>,
+        voltage: f64,
+        mesh: &Mesh<f64, GeometryDim, Conn>,
+        self_energy: &SelfEnergy<f64, GeometryDim, Conn>,
         spectral_space: &Spectral,
-    ) -> Result<Current<T, BandDim>, crate::postprocessor::PostProcessorError> {
-        let mut currents: Vec<DVector<T>> = Vec::with_capacity(BandDim::dim());
+    ) -> Result<Current<f64, BandDim>, crate::postprocessor::PostProcessorError> {
+        let mut currents: Vec<Array1<f64>> = Vec::with_capacity(BandDim::dim());
         let _number_of_vertices_in_internal_lead = self.retarded[0].as_ref().source_diagonal.len();
 
         let summed_current = self
@@ -693,11 +705,11 @@ where
             .zip(spectral_space.iter_energy_widths())
             .zip(spectral_space.iter_energies())
             .fold(
-                vec![T::zero(); mesh.elements().len() * BandDim::dim()],
+                vec![0_f64; mesh.elements().len() * BandDim::dim()],
                 |sum, ((((gf_r, se_r), weight), width), energy)| {
                     // Gamma = i (\Sigma_r - \Sigma_a) -> in coherent transport \Sigma has only two non-zero elements
-                    let gamma_source = -(T::one() + T::one()) * se_r.values()[0].im;
-                    let gamma_drain = -(T::one() + T::one()) * se_r.values()[1].im;
+                    let gamma_source = -2_f64 * se_r.data()[0].im;
+                    let gamma_drain = -2_f64 * se_r.data()[1].im;
                     // Zero order Fermi integrals
                     let fermi_source = self.info_desk.get_fermi_integral_at_source(energy);
                     let fermi_drain = self.info_desk.get_fermi_integral_at_drain(energy, voltage);
@@ -714,7 +726,8 @@ where
                         * gamma_source
                         * gamma_drain
                         * (fermi_source - fermi_drain)
-                        * T::from_f64(0.01_f64.powi(2) / 1e5).unwrap(); // Convert to x 10^5 A / cm^2
+                        * 0.01_f64.powi(2)
+                        / 1e5; // Convert to x 10^5 A / cm^2
 
                     sum.into_iter()
                         .map(|sum| sum + abs_gf_r_1n_with_factor)
@@ -723,7 +736,7 @@ where
             );
         // Separate out the diagonals for each `BandDim` into their own charge vector
         for band_number in 0..BandDim::dim() {
-            currents.push(DVector::from(
+            currents.push(Array1::from(
                 summed_current
                     .iter()
                     .skip(band_number)
@@ -736,21 +749,18 @@ where
         for (n_band, current) in currents.iter_mut().enumerate() {
             for (current_at_element, element) in current.iter_mut().zip(mesh.elements()) {
                 let region = element.1;
-                let prefactor = T::from_f64(
-                    crate::constants::BOLTZMANN
-                        * crate::constants::ELECTRON_CHARGE.powi(2)
-                        * crate::constants::ELECTRON_MASS
-                        / 2.
-                        / std::f64::consts::PI.powi(2)
-                        / crate::constants::HBAR.powi(3),
-                )
-                .unwrap()
+                let prefactor = crate::constants::BOLTZMANN
+                    * crate::constants::ELECTRON_CHARGE.powi(2)
+                    * crate::constants::ELECTRON_MASS
+                    / 2.
+                    / std::f64::consts::PI.powi(2)
+                    / crate::constants::HBAR.powi(3)
                     * self.info_desk.temperature
                     * self.info_desk.effective_masses[region][n_band][1];
                 *current_at_element *= prefactor;
             }
         }
-        Current::new(OVector::<DVector<T>, BandDim>::from_iterator(
+        Current::new(OVector::<Array1<f64>, BandDim>::from_iterator(
             currents.into_iter(),
         ))
     }

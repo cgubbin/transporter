@@ -1,5 +1,10 @@
-/// This module provides the discrete energy and wavevector spaces necessary to
-/// scaffold the Green's functions and their relation to the electron density
+//! # Spectral
+//! This module provides the discrete energy and wavevector spaces necessary to
+//! scaffold the Green's functions and their relation to the electron density
+//!
+//! A spectral space consists of an `EnergySpace` and an optional `WavevectorSpace`
+//! the latter only necessary to run an incoherent calculation
+
 mod constructors;
 mod energy;
 mod wavevector;
@@ -8,28 +13,51 @@ pub use constructors::SpectralSpaceBuilder;
 pub(crate) use wavevector::WavevectorSpace;
 
 use energy::EnergySpace;
-use nalgebra::{allocator::Allocator, DVector, DefaultAllocator, RealField};
+use nalgebra::{allocator::Allocator, DefaultAllocator, RealField};
+use ndarray::{Array1, ArrayView1, Axis};
 use transporter_mesher::{Connectivity, ElementMethods, Mesh, SmallDim};
 
+/// Trait for methods associated with the spectral-space
 pub trait SpectralDiscretisation<T: RealField + Send>: Send + Sync {
+    /// A mixed iterator over both the wavevector and energy grids, in the order they are
+    /// stored in the GreensFunction and SelfEnergies
     type Iter: Iterator<Item = T> + Clone;
+    /// The total number of unique points in the energy and wavevector grids
     fn total_number_of_points(&self) -> usize {
         self.number_of_energy_points() * self.number_of_wavevector_points()
     }
+    /// The total number of points in the energy grid
     fn number_of_energy_points(&self) -> usize;
+    /// The total number of points in the wavevector grid
     fn number_of_wavevector_points(&self) -> usize;
-    fn integrate(&self, integrand: &[T]) -> T;
-    fn integrate_over_wavevector(&self, integrand: &[T]) -> T;
-    fn integrate_over_energy(&self, integrand: &[T]) -> T;
+    /// Integrate a quantity defined discretely on the full grid over both energy and wavevector
+    /// Panics if the `ArrayView1` has a different amount of entries to `self.total_number_of_points`
+    fn integrate(&self, integrand: ArrayView1<T>) -> T;
+    /// Integrate a quantity at fixed energy over the wavevector grid
+    /// Panics if the `ArrayView1` has a different amount of entries to `self.number_of_wavevector_points`
+    fn integrate_over_wavevector(&self, integrand: ArrayView1<T>) -> T;
+    /// Integrate a quantity at fixed wavevector over the energy grid
+    /// Panics if the `ArrayView1` has a different amount of entries to `self.number_of_energy_points`
+    fn integrate_over_energy(&self, integrand: ArrayView1<T>) -> T;
+    /// Return the energy at `index` in the energy grid
     fn energy_at(&self, index: usize) -> T;
+    /// Return the wavevector at `index` in the wavevector grid
     fn wavevector_at(&self, index: usize) -> T;
+    /// Returns an iterator over the energies in the energy grid
     fn iter_energies(&self) -> Self::Iter;
+    /// Returns an iterator over the wavevectors in the wavevetor grid
     fn iter_wavevectors(&self) -> Self::Iter;
+    /// Returns an iterator over the weights of the energies in the energy grid
     fn iter_energy_weights(&self) -> Self::Iter;
+    /// Returns an iterator over the weights of wavevectors in the wavevector grid
     fn iter_wavevector_weights(&self) -> Self::Iter;
+    /// Returns an iterator over the widths (dE) of energies in the energy grid
     fn iter_energy_widths(&self) -> Self::Iter;
+    /// Returns an iterator over the widths (dk) of wavevectors in the wavevector grid
     fn iter_wavevector_widths(&self) -> Self::Iter;
+    /// Identifies the two weights of the points bracketing energy `target_energy` in the energy grid
     fn identify_bracketing_weights(&self, target_energy: T) -> color_eyre::Result<[T; 2]>;
+    /// Identifies the two indices of the points bracketing energy `target_energy` in the energy grid
     fn identify_bracketing_indices(&self, target_energy: T) -> color_eyre::Result<[usize; 2]>;
 }
 
@@ -68,36 +96,57 @@ where
         self.wavevector.num_points()
     }
 
-    fn integrate(&self, integrand: &[T]) -> T {
+    fn integrate(&self, integrand: ArrayView1<T>) -> T {
         assert_eq!(
             integrand.len(),
             self.total_number_of_points(),
             "The integrand must be evaluated on the e-k grid"
         );
-        let chunked_iterator = integrand.chunks(self.number_of_wavevector_points());
-        let energy_integrand: Vec<T> = chunked_iterator
-            .map(|wavevector_integrand_at_fixed_energy| {
-                self.integrate_over_wavevector(wavevector_integrand_at_fixed_energy)
-            })
-            .collect();
+        let chunked_iterator =
+            integrand.axis_chunks_iter(Axis(0), self.number_of_wavevector_points());
+        let energy_integrand: Array1<T> = Array1::from(
+            chunked_iterator
+                .map(|wavevector_integrand_at_fixed_energy| {
+                    self.integrate_over_wavevector(wavevector_integrand_at_fixed_energy)
+                })
+                .collect::<Vec<_>>(),
+        );
 
-        self.integrate_over_energy(&energy_integrand)
+        self.integrate_over_energy(energy_integrand.view())
     }
 
-    fn integrate_over_wavevector(&self, integrand: &[T]) -> T {
+    fn integrate_over_wavevector(&self, integrand: ArrayView1<T>) -> T {
         assert_eq!(
             integrand.len(),
             self.number_of_wavevector_points(),
             "The integrand must be evaluated on the k grid"
         );
 
-        integrand
-            .iter()
-            .zip(self.energy.weights())
-            .fold(T::zero(), |sum, (&point, &weight)| sum + point * weight)
+        let point = self.wavevector.points().take(1).collect::<Vec<_>>()[0];
+        let dim = point.coords.shape().1;
+
+        match dim {
+            1_usize => integrand
+                .iter()
+                .zip(self.iter_wavevector_weights())
+                .zip(self.iter_wavevector_widths())
+                .zip(self.wavevector.points())
+                .fold(
+                    T::zero(),
+                    |sum, (((&integrand, weight), width), wavevector)| {
+                        sum + integrand
+                            * weight
+                            * width
+                            * wavevector.coords[0]
+                            * T::from_f64(std::f64::consts::PI).unwrap()
+                    },
+                ),
+            // If we are not in 1D we panic
+            _ => unimplemented!(),
+        }
     }
 
-    fn integrate_over_energy(&self, integrand: &[T]) -> T {
+    fn integrate_over_energy(&self, integrand: ArrayView1<T>) -> T {
         assert!(
             integrand.len() == self.energy.num_points(),
             "We can only integrate if the Greens functions are evaluated on-grid"
@@ -105,8 +154,11 @@ where
 
         integrand
             .iter()
-            .zip(self.energy.weights())
-            .fold(T::zero(), |sum, (&point, &weight)| sum + point * weight)
+            .zip(self.iter_energy_weights())
+            .zip(self.iter_energy_widths())
+            .fold(T::zero(), |sum, ((&integrand, weight), width)| {
+                sum + integrand * weight * width
+            })
     }
 
     fn energy_at(&self, index: usize) -> T {
@@ -205,11 +257,11 @@ impl<T: RealField + Copy> SpectralDiscretisation<T> for SpectralSpace<T, ()> {
         1
     }
 
-    fn integrate(&self, integrand: &[T]) -> T {
+    fn integrate(&self, integrand: ArrayView1<T>) -> T {
         self.integrate_over_energy(integrand)
     }
 
-    fn integrate_over_energy(&self, integrand: &[T]) -> T {
+    fn integrate_over_energy(&self, integrand: ArrayView1<T>) -> T {
         assert!(
             integrand.len() == self.energy.num_points(),
             "We can only integrate if the Greens functions are evaluated on-grid"
@@ -221,7 +273,7 @@ impl<T: RealField + Copy> SpectralDiscretisation<T> for SpectralSpace<T, ()> {
             .fold(T::zero(), |sum, (&point, &weight)| sum + point * weight)
     }
 
-    fn integrate_over_wavevector(&self, _: &[T]) -> T {
+    fn integrate_over_wavevector(&self, _: ArrayView1<T>) -> T {
         unreachable!()
     }
 
@@ -309,6 +361,7 @@ pub enum IntegrationRule {
     ThreePoint,
 }
 
+/// trait to generate weights for the spectral space
 pub trait GenerateWeights<T, GeometryDim, Conn>
 where
     T: Copy + RealField,
@@ -316,8 +369,10 @@ where
     Conn: Connectivity<T, GeometryDim>,
     DefaultAllocator: Allocator<T, GeometryDim>,
 {
+    /// Return a reference to the `SpectralSpace` integration rule
     fn query_integration_rule(&self) -> IntegrationRule;
-    fn generate_weights_from_grid(&self, grid: &Mesh<T, GeometryDim, Conn>) -> DVector<T>;
+    /// Returns the weights as an owned vector
+    fn generate_weights_from_grid(&self, grid: &Mesh<T, GeometryDim, Conn>) -> Array1<T>;
 }
 
 impl<T, GeometryDim, Conn> GenerateWeights<T, GeometryDim, Conn> for IntegrationRule
@@ -330,7 +385,7 @@ where
     fn query_integration_rule(&self) -> IntegrationRule {
         *self
     }
-    fn generate_weights_from_grid(&self, grid: &Mesh<T, GeometryDim, Conn>) -> DVector<T> {
+    fn generate_weights_from_grid(&self, grid: &Mesh<T, GeometryDim, Conn>) -> Array1<T> {
         let num_points = grid.vertices().len();
         // A closure generating the weight for a given point index
         let weight = |idx: usize| -> T {
@@ -366,6 +421,6 @@ where
                 }
             }
         };
-        DVector::from_iterator(num_points, (0..num_points).map(weight))
+        Array1::from_iter((0..num_points).map(weight))
     }
 }

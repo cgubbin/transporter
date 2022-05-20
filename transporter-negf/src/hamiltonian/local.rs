@@ -2,13 +2,14 @@
 //!
 //! This submodule constructs the components of the Hamiltonian differential operator, and diagonal
 //! for a single element of the mesh, over `NumBands` (ie: the number of carrier bands in the problem).
-use super::{BuildError, HamiltonianInfoDesk};
-use crate::constants::{ELECTRON_CHARGE, ELECTRON_MASS, HBAR};
-use crate::utilities::assemblers::{VertexAssembler, VertexConnectivityAssembler};
-use nalgebra::{
-    allocator::Allocator, DMatrix, DMatrixSliceMut, DVectorSliceMut, DefaultAllocator, OPoint,
-    OVector, RealField,
+
+use super::{BuildError, HamiltonianInfoDesk, PotentialInfoDesk};
+use crate::{
+    constants::{ELECTRON_CHARGE, ELECTRON_MASS, HBAR},
+    utilities::assemblers::{VertexAssembler, VertexConnectivityAssembler},
 };
+use nalgebra::{allocator::Allocator, DefaultAllocator, OPoint, OVector, RealField};
+use ndarray::{Array2, ArrayViewMut1, ArrayViewMut2};
 use transporter_mesher::{Assignment, Connectivity, Mesh, SmallDim};
 
 /// Helper trait to construct the diagonal elements of a differential operator
@@ -20,7 +21,7 @@ pub(crate) trait AssembleVertexHamiltonianDiagonal<T: RealField>:
     fn assemble_vertex_diagonal_into(
         &self,
         vertex_index: usize,
-        output: DVectorSliceMut<T>,
+        output: ArrayViewMut1<T>,
     ) -> Result<(), BuildError>;
 }
 
@@ -33,7 +34,7 @@ pub(crate) trait AssembleVertexHamiltonianMatrix<T: RealField>:
     fn assemble_vertex_matrix_into(
         &self,
         vertex_index: usize,
-        output: DMatrixSliceMut<T>,
+        output: ArrayViewMut2<T>,
     ) -> Result<(), BuildError>;
 
     fn assemble_vertex_matrix(
@@ -41,9 +42,9 @@ pub(crate) trait AssembleVertexHamiltonianMatrix<T: RealField>:
         vertex_index: usize,
         num_connections: usize,
         num_bands: usize,
-    ) -> Result<DMatrix<T>, BuildError> {
-        let mut output = DMatrix::from_element(num_bands, num_connections + 1, T::zero());
-        self.assemble_vertex_matrix_into(vertex_index, DMatrixSliceMut::from(&mut output))?;
+    ) -> Result<Array2<T>, BuildError> {
+        let mut output = Array2::zeros((num_bands, num_connections + 1));
+        self.assemble_vertex_matrix_into(vertex_index, output.view_mut())?;
         Ok(output)
     }
 }
@@ -67,12 +68,13 @@ where
     }
 }
 
-impl<T, GeometryDim: SmallDim, Conn, InfoDesk> super::PotentialInfoDesk<T>
+/// Re-implement `PotentialInfoDesk` for the element assembler as a pass-through
+impl<T, GeometryDim: SmallDim, Conn, InfoDesk> PotentialInfoDesk<T>
     for VertexAssembler<'_, T, InfoDesk, Mesh<T, GeometryDim, Conn>>
 where
     T: RealField,
     Conn: Connectivity<T, GeometryDim>,
-    InfoDesk: super::PotentialInfoDesk<T>,
+    InfoDesk: PotentialInfoDesk<T>,
     DefaultAllocator: Allocator<T, GeometryDim> + Allocator<T, InfoDesk::BandDim>,
 {
     type BandDim = InfoDesk::BandDim;
@@ -86,7 +88,6 @@ where
 ///
 /// This allows us to define element specific methods, which contrast the generic methods
 /// in the assembly traits above
-/// TODO is this true? What does this really gain us?
 pub(crate) struct VertexInMesh<'a, InfoDesk, Mesh> {
     /// A reference to an impl of `HamiltonianInfoDesk`
     info_desk: &'a InfoDesk,
@@ -205,7 +206,7 @@ where
     fn assemble_vertex_matrix_into(
         &self,
         vertex_index: usize,
-        output: DMatrixSliceMut<T>,
+        output: ArrayViewMut2<T>,
     ) -> Result<(), BuildError> {
         // Construct the element at `element_index`
         let vertex = VertexInMesh::from_mesh_vertex_index_and_info_desk(
@@ -222,7 +223,7 @@ where
 /// their column indices in the final hamiltonian matrix. In one spatial dimension the differential operator is given by
 /// ' - \hbar^2 \left[d / dz 1/m_{\parallel} d/dz + 1/m_{\parallel} d^2/dz^2\right]'
 fn assemble_vertex_differential_operator<T, InfoDesk, Conn>(
-    mut output: DMatrixSliceMut<T>,
+    mut output: ArrayViewMut2<T>,
     vertex: &VertexInMesh<InfoDesk, Mesh<T, InfoDesk::GeometryDim, Conn>>,
     num_bands: usize,
 ) -> Result<(), BuildError>
@@ -234,13 +235,13 @@ where
 {
     let shape = output.shape();
 
-    if shape.1 != vertex.connection_count() + 1 {
+    if shape[1] != vertex.connection_count() + 1 {
         return Err(BuildError::MissizedAllocator(
             "Output matrix should have `n_conns * n_neighbour + 1` columns".into(),
         ));
     }
 
-    if shape.0 != num_bands {
+    if shape[0] != num_bands {
         return Err(BuildError::MissizedAllocator(
             "Output matrix should have `n_bands` rows".into(),
         ));
@@ -249,7 +250,7 @@ where
     // The position and band independent prefactor
     let prefactor = -T::from_f64(HBAR * HBAR / ELECTRON_CHARGE / ELECTRON_MASS / 2.)
         .expect("Prefactor must fit in T");
-    for (band_index, mut row) in output.row_iter_mut().enumerate() {
+    for (band_index, mut row) in output.outer_iter_mut().enumerate() {
         // Get the indices of the elements connected to `element` and their displacements from `element`
         let deltas = vertex.deltas_by_dimension();
         let connections = vertex.connectivity_by_dimension();
@@ -332,10 +333,6 @@ fn construct_internal<T: Copy + RealField>(
 ) -> [T; 3] {
     // Get the first derivative differential operator
     let first_derivatives = first_derivative(delta_m, delta_p, prefactor);
-    // Get the second derivative differential operator
-    // let l = effective_masses.len();
-    // let second_derivatives =
-    // second_derivative(delta_m, delta_p, effective_masses[l - 1], prefactor);
     let second_derivatives = second_derivative(
         delta_m,
         delta_p,
@@ -343,22 +340,13 @@ fn construct_internal<T: Copy + RealField>(
         prefactor,
     );
     // Get the first derivative of the mass
-    // let mass_first_derivatives = mass_first_derivative(delta_m, delta_p, effective_masses);
     let mass_first_derivative =
         (effective_masses[1] - effective_masses[0]) / (T::one() + T::one()) / (delta_m + delta_p);
-    // let mass_first_derivative = T::zero();
 
     [
         second_derivatives[0] + first_derivatives[0] * mass_first_derivative,
         second_derivatives[1] + first_derivatives[1] * mass_first_derivative,
         second_derivatives[2] + first_derivatives[2] * mass_first_derivative,
-        // if effective_masses.len() == 3 {
-        //     second_derivatives[2]
-        //         - first_derivatives[2] * mass_first_derivatives
-        //             / T::from_f64(ELECTRON_MASS).expect("Electron mass must fit in T")
-        // } else {
-        //     T::zero()
-        // },
     ]
 }
 
@@ -407,7 +395,7 @@ where
     fn assemble_vertex_diagonal_into(
         &self,
         vertex_index: usize,
-        output: DVectorSliceMut<T>,
+        output: ArrayViewMut1<T>,
     ) -> Result<(), BuildError> {
         let vertex = VertexInMesh::from_mesh_vertex_index_and_info_desk(
             self.mesh,
@@ -420,7 +408,7 @@ where
 
 /// Assembles the wavevector component along the element diagonal
 fn assemble_vertex_diagonal<T, InfoDesk, Conn>(
-    mut output: DVectorSliceMut<T>,
+    mut output: ArrayViewMut1<T>,
     vertex: &VertexInMesh<InfoDesk, Mesh<T, InfoDesk::GeometryDim, Conn>>,
     num_bands: usize,
 ) -> Result<(), BuildError>
@@ -432,27 +420,21 @@ where
 {
     let shape = output.shape();
 
-    if shape.1 != 1 {
+    if shape[0] != num_bands {
         return Err(BuildError::MissizedAllocator(
-            "Output matrix should have `n_conns * n_neighbour + 1` columns".into(),
-        ));
-    }
-    if shape.0 != num_bands {
-        return Err(BuildError::MissizedAllocator(
-            "Output matrix should have `num_bands` rows".into(),
+            "Output vector should have `num_bands` rows".into(),
         ));
     }
 
     let prefactor =
         T::from_f64(HBAR * HBAR / ELECTRON_CHARGE / 2.).expect("Prefactor must fit in T");
-    for (band_index, mut row) in output.row_iter_mut().enumerate() {
+    for (band_index, mut row) in output.outer_iter_mut().enumerate() {
         let effective_masses = vertex.effective_mass(vertex.index(), band_index);
 
         //TODO For brevity this is a one-dimensional implementation. We can improve this at a later date if we want to
         let parallel_mass =
             effective_masses[0] * T::from_f64(ELECTRON_MASS).expect("Electron mass must fit in T");
-        let ele = row.get_mut(0).unwrap();
-        *ele = prefactor / parallel_mass;
+        row.fill(prefactor / parallel_mass);
     }
     Ok(())
 }

@@ -9,6 +9,7 @@ use transporter_mesher::SmallDim;
 
 #[derive(Debug, Deserialize)]
 #[serde(bound(deserialize = "'de: 'static"))]
+/// A top-level device struct holding the geometrical information, and experimental constraints
 pub struct Device<T: DeserializeOwned + RealField, GeometryDim: SmallDim>
 where
     DefaultAllocator: Allocator<T, GeometryDim>,
@@ -34,6 +35,7 @@ where
 
 #[derive(Debug, Deserialize)]
 #[serde(bound(deserialize = "'de: 'static"))]
+/// Struct to hold the user-defined information for a single device layer.
 pub struct Layer<T: DeserializeOwned + RealField, GeometryDim: SmallDim>
 where
     DefaultAllocator: Allocator<T, GeometryDim>,
@@ -50,6 +52,7 @@ where
     DefaultAllocator: Allocator<T, GeometryDim>,
     <DefaultAllocator as Allocator<T, GeometryDim>>::Buffer: Deserialize<'static>,
 {
+    /// Builds an instance of `Device` from a given path to a configuration file
     pub fn build(path: PathBuf) -> miette::Result<Self> {
         let s = Config::builder()
             .add_source(File::from(path))

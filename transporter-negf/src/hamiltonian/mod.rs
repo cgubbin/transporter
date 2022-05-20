@@ -3,11 +3,11 @@
 //! Creates a Hamiltonian structure for use in the NEGF calculation:
 //!
 //! The Hamiltonian has three components:
-//! - `fixed`: Holds the component which is unchanging through the calculation
-//! - `potential`: Holds the contribution from the electrostatic potential at the current step
+//! - `fixed`: Holds the component which is unchanging through the calculation -> this is defined by the geometry and band structure
+//! - `potential`: Holds the diagonal contribution from the electrostatic potential at the current step
 //! - `wavevector`: Holds the dispersive part, proportional to the transverse electronic wavevector
 //!
-//! A Hamiltonian is constructed through the `HamiltonianBuilder` class from `mesh: Mesh` and `tracker: Tracker` as
+//! A Hamiltonian is constructed through the `HamiltonianBuilder` class from a `mesh: Mesh` and a `tracker: Tracker` as
 //!
 //! ```ignore
 //! HamiltonianBuilder::new()
@@ -17,7 +17,7 @@
 //! ```
 //!
 //! The Hamiltonian matrix is of dimension `num_elements * num_bands` where `num_elements` is the number of elements in the mesh
-//! and `num_bands` is the number of conduction bands considered in the problem. The independent Hamiltonians for each band are stacked
+//! and `num_bands` is the number of transport bands considered in the problem. The independent Hamiltonians for each band are stacked
 //! in block-diagonal form. The Hamiltonian is evaluated in the elements of the mesh, contrasting the potential which is evaluated at the
 //! nodes of the mesh.
 //!
@@ -32,32 +32,18 @@ use crate::{
     utilities::assemblers::VertexAssemblerBuilder,
 };
 use nalgebra::{allocator::Allocator, DefaultAllocator, DimName, OPoint, RealField};
-use nalgebra_sparse::CsrMatrix;
-#[cfg(feature = "ndarray")]
 use sprs::CsMat;
 use transporter_mesher::{Connectivity, Mesh, SmallDim};
 
 #[derive(Debug)]
-/// The Hamiltonian wrapper. Data is stored in `CsrMatrix` as the differential operator is sparse, although the constructor
+/// The Hamiltonian wrapper. Data is stored in `CsMat` as the differential operator is sparse, although the constructor
 /// should be generic it is intended to work with nearest neighbour coupling schemes
 pub struct Hamiltonian<T: Copy + RealField> {
     /// Contains the fixed component of the Hamiltonian, comprising the differential operator and conduction offsets
-    #[cfg(not(feature = "ndarray"))]
-    fixed: CsrMatrix<T>,
-    /// The CsrMatrix containing the potential at the current stage of the calculation, this is diagonal
-    #[cfg(not(feature = "ndarray"))]
-    potential: CsrMatrix<T>,
-    /// The wavevector dependent component. This component is multiplied by the wavevector during the calculation
-    #[cfg(not(feature = "ndarray"))]
-    wavevector: CsrMatrix<T>,
-    /// Contains the fixed component of the Hamiltonian, comprising the differential operator and conduction offsets
-    #[cfg(feature = "ndarray")]
     fixed: CsMat<T>,
     /// The CsrMatrix containing the potential at the current stage of the calculation, this is diagonal
-    #[cfg(feature = "ndarray")]
     potential: CsMat<T>,
     /// The wavevector dependent component. This component is multiplied by the wavevector during the calculation
-    #[cfg(feature = "ndarray")]
     wavevector: CsMat<T>,
 }
 
@@ -66,30 +52,25 @@ pub trait HamiltonianInfoDesk<T: RealField>: PotentialInfoDesk<T>
 where
     DefaultAllocator: Allocator<T, Self::BandDim>,
 {
-    /// Type alias for the number of carrier bands in the problem
-    // type BandDim: SmallDim;
-    /// Type alias for the geometry of the problem (1D, 2D,...)
+    /// Type alias for the spatial dimension of the problem (1D, 2D,...)
     type GeometryDim: SmallDim;
-    /// Find the level of all the bands considered in the system in region `region_index`
+    /// Returns the level of all the bands considered in the system in region `region_index`
     fn get_band_levels(&self, region_index: usize) -> &OPoint<T, Self::BandDim>;
-    /// Find the effective mass along the three Cartesian axis
+    /// Returns the effective mass along the three Cartesian axis [x, y, z]
     fn get_effective_mass(&self, region_index: usize, band_index: usize) -> &[T; 3];
-    /// Return the potential at mesh element `element` index by averaging over the values at each vertex providec
-    // fn potential(&self, vertex_indices: &[usize]) -> T;
-    /// Return the geometrical dimension as a `usize`
+    /// Return the geometrical dimension as a `usize`, 1D->1, 2D->2, ...
     fn geometry_dim(&self) -> usize {
         Self::GeometryDim::dim()
     }
-    // Return the number of bands as a `usize`
-    // fn number_of_bands(&self) -> usize {
-    // Self::BandDim::dim()
-    // }
 }
 
+/// An InfoDesk trait providing all the information to construct the potential contribution to a `Hamiltonian`
 pub trait PotentialInfoDesk<T: RealField> {
+    /// A type alias for the number of bands considered in the transport problem
     type BandDim: SmallDim;
     /// Return the potential at mesh element `element` index by averaging over the values at each vertex providec
     fn potential(&self, vertex_index: usize) -> T;
+    /// Returns the number of bands in the problem as a `usize
     fn number_of_bands(&self) -> usize {
         Self::BandDim::dim()
     }
@@ -114,13 +95,6 @@ impl<T: Copy + RealField> Hamiltonian<T> {
         CsrAssembler::assemble_potential_into(&vertex_assembler, &mut self.potential)
     }
 
-    /// Finds the total Hamiltonian at fixed `wavevector`
-    #[cfg(not(feature = "ndarray"))]
-    pub(crate) fn calculate_total(&self, wavevector: T) -> CsrMatrix<T> {
-        &self.fixed - &self.potential + &self.wavevector * wavevector.powi(2)
-    }
-
-    #[cfg(feature = "ndarray")]
     pub(crate) fn calculate_total(&self, wavevector: T) -> CsMat<T> {
         sprs::binop::csmat_binop(
             sprs::binop::csmat_binop(self.fixed.view(), self.potential.view(), |x, y| x.sub(*y))
@@ -128,7 +102,6 @@ impl<T: Copy + RealField> Hamiltonian<T> {
             self.wavevector.view(),
             |x, y| x.add(*y * wavevector.powi(2)),
         )
-        // &self.fixed - &self.potential + &self.wavevector * wavevector.powi(2)
     }
 }
 
@@ -138,9 +111,9 @@ pub struct HamiltonianBuilder<RefInfoDesk, RefMesh> {
     mesh: RefMesh,
 }
 
-impl HamiltonianBuilder<(), ()> {
+impl Default for HamiltonianBuilder<(), ()> {
     /// Initialize an empty instand of HamiltonianBuilder
-    pub fn new() -> Self {
+    fn default() -> Self {
         Self {
             info_desk: (),
             mesh: (),
@@ -149,7 +122,7 @@ impl HamiltonianBuilder<(), ()> {
 }
 
 impl<RefInfoDesk, RefMesh> HamiltonianBuilder<RefInfoDesk, RefMesh> {
-    /// Attach a mesh
+    /// Attach a mesh instance
     pub fn with_mesh<Mesh>(self, mesh: &Mesh) -> HamiltonianBuilder<RefInfoDesk, &Mesh> {
         HamiltonianBuilder {
             info_desk: self.info_desk,
@@ -183,28 +156,6 @@ where
     }
 }
 
-// TODO Delete this impl when the Greens Functions have been updated
-#[cfg(not(feature = "ndarray"))]
-impl<T> AsRef<CsrMatrix<T>> for Hamiltonian<T>
-where
-    T: Copy + RealField,
-{
-    fn as_ref(&self) -> &CsrMatrix<T> {
-        &self.fixed
-    }
-}
-
-// TODO Delete this impl when the Greens Functions have been updated
-#[cfg(feature = "ndarray")]
-impl<T> AsRef<CsMat<T>> for Hamiltonian<T>
-where
-    T: Copy + RealField,
-{
-    fn as_ref(&self) -> &CsMat<T> {
-        &self.fixed
-    }
-}
-
 impl<T> Hamiltonian<T>
 where
     T: Copy + RealField,
@@ -212,7 +163,7 @@ where
     /// Build the operator components for the Hamiltonian
     ///
     /// This function takes the components provided to `HamiltonianBuilder` and constructs the three
-    /// `CsrMatrix` comprising a `Hamiltonian`
+    /// `CsMat` comprising a `Hamiltonian`
     fn build_operator<C, InfoDesk>(
         info_desk: &InfoDesk,
         mesh: &Mesh<T, InfoDesk::GeometryDim, C>,
@@ -254,39 +205,22 @@ where
         })
     }
 
-    #[cfg(not(feature = "ndarray"))]
-    pub(crate) fn num_rows(&self) -> usize {
-        self.fixed.nrows()
-    }
-
-    #[cfg(feature = "ndarray")]
+    /// Return the number of rows in the full `Hamiltonian` matrix
     pub(crate) fn num_rows(&self) -> usize {
         self.fixed.outer_dims()
     }
 }
 
+/// A helper trait to get the elements at the source contact and drain contact
+/// This is only really valid in 1D but this is NOT reflected in the current impl
 pub(crate) trait AccessMethods<T> {
     fn get_elements_at_source(&self) -> [T; 2];
     fn get_elements_at_drain(&self) -> [T; 2];
 }
 
-#[cfg(not(feature = "ndarray"))]
-impl<T: Copy + RealField> AccessMethods<T> for CsrMatrix<T> {
-    fn get_elements_at_source(&self) -> [T; 2] {
-        let x = self.values();
-        todo!()
-    }
-
-    fn get_elements_at_drain(&self) -> [T; 2] {
-        self.values();
-        todo!()
-    }
-}
-
-#[cfg(feature = "ndarray")]
 impl<T: Copy + RealField> AccessMethods<T> for CsMat<T> {
     fn get_elements_at_source(&self) -> [T; 2] {
-        [self.data()[0], self.data()[1]]
+        [self.data()[1], self.data()[0]]
     }
 
     fn get_elements_at_drain(&self) -> [T; 2] {

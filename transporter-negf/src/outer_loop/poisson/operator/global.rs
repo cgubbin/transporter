@@ -6,11 +6,13 @@
 use super::local::{AssembleVertexPoissonDiagonal, AssembleVertexPoissonMatrix};
 use super::{super::super::CsrError, BuildError, PoissonInfoDesk};
 use crate::utilities::assemblers::VertexConnectivityAssembler;
-use nalgebra::{allocator::Allocator, DVector, DefaultAllocator, RealField};
+use nalgebra::{allocator::Allocator, DefaultAllocator, RealField};
 use nalgebra_sparse::{
     pattern::{SparsityPattern, SparsityPatternFormatError},
     CsrMatrix,
 };
+use ndarray::{s, Array1};
+use sprs::CsMat;
 use std::cell::RefCell;
 
 /// An assembler for CSR matrices.
@@ -28,14 +30,14 @@ struct CsrAssemblerWorkspace<T: RealField> {
     /// The complete SparsityPattern
     full_sparsity_pattern: SparsityPattern,
     /// Scratch space for the element_matrix constructor
-    vertex_matrix: DVector<T>,
+    vertex_matrix: Array1<T>,
 }
 
 impl<T: RealField> CsrAssemblerWorkspace<T> {
-    fn vertex_matrix(&self) -> &DVector<T> {
+    fn vertex_matrix(&self) -> &Array1<T> {
         &self.vertex_matrix
     }
-    fn vertex_matrix_mut(&mut self) -> &mut DVector<T> {
+    fn vertex_matrix_mut(&mut self) -> &mut Array1<T> {
         &mut self.vertex_matrix
     }
 }
@@ -60,7 +62,7 @@ impl<T: Copy + RealField> CsrAssembler<T> {
             workspace: RefCell::new(CsrAssemblerWorkspace {
                 diagonal_sparsity_pattern,
                 full_sparsity_pattern,
-                vertex_matrix: DVector::from_element(
+                vertex_matrix: Array1::from_elem(
                     vertex_assembler.vertex_connection_count(1) + 1,
                     T::zero(),
                 ),
@@ -133,15 +135,23 @@ impl<T: Copy + RealField> CsrAssembler<T> {
     pub(crate) fn assemble_operator<Assembler>(
         &self,
         vertex_assembler: &Assembler,
-    ) -> Result<CsrMatrix<T>, BuildError>
+    ) -> Result<CsMat<T>, BuildError>
     where
         Assembler: AssembleVertexPoissonMatrix<T> + PoissonInfoDesk<T>,
         DefaultAllocator: Allocator<T, Assembler::GeometryDim> + Allocator<T, Assembler::BandDim>,
     {
         let pattern = self.workspace.borrow().full_sparsity_pattern.clone();
         let initial_matrix_values = vec![T::zero(); pattern.nnz()];
-        let mut matrix = CsrMatrix::try_from_pattern_and_values(pattern, initial_matrix_values)
+        let matrix = CsrMatrix::try_from_pattern_and_values(pattern, initial_matrix_values.clone())
             .map_err(CsrError::from)?;
+
+        let mut matrix = CsMat::new(
+            (matrix.nrows(), matrix.ncols()),
+            matrix.row_offsets().to_vec(),
+            matrix.col_indices().to_vec(),
+            initial_matrix_values,
+        );
+
         self.assemble_into_csr(&mut matrix, vertex_assembler)?;
         Ok(matrix)
     }
@@ -150,14 +160,14 @@ impl<T: Copy + RealField> CsrAssembler<T> {
     pub(crate) fn assemble_static_source<Assembler>(
         &self,
         vertex_assembler: &Assembler,
-    ) -> Result<DVector<T>, BuildError>
+    ) -> Result<Array1<T>, BuildError>
     where
         Assembler: AssembleVertexPoissonDiagonal<T> + PoissonInfoDesk<T>,
         DefaultAllocator: Allocator<T, Assembler::GeometryDim> + Allocator<T, Assembler::BandDim>,
     {
         let pattern = self.workspace.borrow().diagonal_sparsity_pattern.clone();
         let initial_matrix_values = vec![T::zero(); pattern.nnz()];
-        let mut diagonal = DVector::from(initial_matrix_values);
+        let mut diagonal = Array1::from(initial_matrix_values);
         self.assemble_static_charges(&mut diagonal, vertex_assembler)?;
         Ok(diagonal)
     }
@@ -166,15 +176,23 @@ impl<T: Copy + RealField> CsrAssembler<T> {
     pub(crate) fn assemble_diagonal_quantity<Assembler>(
         &self,
         vertex_assembler: &Assembler,
-    ) -> Result<CsrMatrix<T>, BuildError>
+    ) -> Result<CsMat<T>, BuildError>
     where
         Assembler: AssembleVertexPoissonMatrix<T> + PoissonInfoDesk<T>,
         DefaultAllocator: Allocator<T, Assembler::GeometryDim> + Allocator<T, Assembler::BandDim>,
     {
         let pattern = self.workspace.borrow().diagonal_sparsity_pattern.clone();
         let initial_matrix_values = vec![T::zero(); pattern.nnz()];
-        let mut matrix = CsrMatrix::try_from_pattern_and_values(pattern, initial_matrix_values)
-            .expect("CSR data must be valid by definition");
+
+        let mut matrix = CsMat::new(
+            (
+                pattern.major_offsets().len() - 1,
+                pattern.major_offsets().len() - 1,
+            ),
+            pattern.major_offsets().to_vec(),
+            pattern.minor_indices().to_vec(),
+            initial_matrix_values,
+        );
         CsrAssembler::assemble_into_csr_diagonal(&mut matrix, vertex_assembler)?;
         Ok(matrix)
     }
@@ -182,7 +200,7 @@ impl<T: Copy + RealField> CsrAssembler<T> {
     /// Assemble the diagonal into a pre-initialised CsrMatrix -> This method is called after each iteration to update the changing charge and jacobian diagonal
     pub(crate) fn assemble_diagonal_into<Assembler>(
         element_assembler: &Assembler,
-        quantity: &mut CsrMatrix<T>,
+        quantity: &mut CsMat<T>,
     ) -> Result<(), BuildError>
     where
         Assembler: AssembleVertexPoissonMatrix<T> + PoissonInfoDesk<T>,
@@ -198,7 +216,7 @@ impl<T: Copy + RealField> CsrAssembler<T> {
     /// Assembles the fixed component of the Hamiltonian into the CsrMatrix `csr`
     fn assemble_into_csr<Assembler>(
         &self,
-        csr: &mut CsrMatrix<T>,
+        csr: &mut CsMat<T>,
         vertex_assembler: &Assembler,
     ) -> Result<(), BuildError>
     where
@@ -219,13 +237,12 @@ impl<T: Copy + RealField> CsrAssembler<T> {
             // This is mainly just a pull from the `workspace`, the size only changes for the edge elements
             // let mut element_matrix = self.workspace.into_inner().element_matrix.resize(
             let vertex_matrix = workspace.vertex_matrix_mut();
-            let matrix_slice = vertex_matrix.rows_mut(0, num_connections + 1);
+            let matrix_slice = vertex_matrix.slice_mut(s![0..num_connections + 1]);
             // let matrix_slice = nalgebra::DVectorSliceMut::from(vertex_matrix);
             vertex_assembler.assemble_vertex_matrix_into(n_row, matrix_slice)?;
             let row = workspace.vertex_matrix();
-            let mut csr_row = csr.row_mut(n_row);
-            let values = csr_row.values_mut();
-            add_row_to_csr_row(values, row);
+            let csr_row = csr.outer_view_mut(n_row).unwrap();
+            add_row_to_csr_row(csr_row, row);
         }
 
         Ok(())
@@ -233,7 +250,7 @@ impl<T: Copy + RealField> CsrAssembler<T> {
 
     fn assemble_static_charges<Assembler>(
         &self,
-        csr: &mut DVector<T>,
+        csr: &mut Array1<T>,
         vertex_assembler: &Assembler,
     ) -> Result<(), BuildError>
     where
@@ -251,27 +268,18 @@ impl<T: Copy + RealField> CsrAssembler<T> {
     /// Assemble the potential from the `element_assembler` into the diagonal CsrMatrix `csr`
     /// TODO -> This will panic when the diagonal contains zeros, which it may well do
     fn assemble_into_csr_diagonal<Assembler>(
-        csr: &mut CsrMatrix<T>,
-        vertex_assembler: &Assembler,
+        csr: &mut CsMat<T>,
+        _vertex_assembler: &Assembler,
     ) -> Result<(), BuildError>
     where
         Assembler: AssembleVertexPoissonMatrix<T> + PoissonInfoDesk<T>,
         DefaultAllocator: Allocator<T, Assembler::GeometryDim> + Allocator<T, Assembler::BandDim>,
     {
-        let sdim = vertex_assembler.solution_dim();
-        let num_single_band_rows = sdim * vertex_assembler.num_vertices(); // We have an issue with cells and nodes, this needs to be pinned down
-
         // Assemble the potential into a diagonal
-        for n_row in 0..num_single_band_rows {
-            // let potential = vertex_assembler.potential(n_row);
+        for diagonal_element in csr.diag_iter_mut() {
             let value = T::zero(); // TODO get the value
-            let mut csr_row = csr.row_mut(n_row);
-            let diagonal_entry = csr_row.get_entry_mut(n_row);
-            if let Some(diagonal_entry) = diagonal_entry {
-                match diagonal_entry {
-                    nalgebra_sparse::SparseEntryMut::NonZero(x) => *x = value,
-                    _ => unreachable!(),
-                }
+            if let Some(diagonal_element) = diagonal_element {
+                *diagonal_element = value;
             } else {
                 return Err(BuildError::Csr(CsrError::Access(
                     "Necessary element not present in CSR Matrix".into(),
@@ -299,12 +307,15 @@ where
 /// Adds a whole row to the CsrMatrix -> This assumes the new row `local_row` has the same ordering as
 /// the Csr column indices of `row_values`, or that the elements of `local_row` are ordered in terms of
 /// increasing column index
-fn add_row_to_csr_row<T>(row_values: &mut [T], local_row: &DVector<T>)
-where
+// TODO Is this allocation the right way around?
+fn add_row_to_csr_row<T>(
+    mut local_row: sprs::CsVecBase<&[usize], &mut [T], T>,
+    row_values: &Array1<T>,
+) where
     T: Copy + RealField,
 {
-    for (row_value, value) in row_values.iter_mut().zip(local_row.into_iter()) {
-        *row_value += *value;
+    for (row_value, (_, value)) in row_values.iter().zip(local_row.iter_mut()) {
+        *value += *row_value;
     }
 }
 

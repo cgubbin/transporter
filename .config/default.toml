@@ -1,13 +1,14 @@
 [global]
 number_of_bands = 1
+voltage_step = 0.01
 
 [inner_loop]
-maximum_iterations = 100
-tolerance = 1e-5
+maximum_iterations = 20
+tolerance = 1e-4
 
 [outer_loop]
-maximum_iterations = 2000
-tolerance = 1e-5
+maximum_iterations = 50
+tolerance = 1e-4
 
 [mesh]
 unit_size = 1e-9
@@ -15,11 +16,11 @@ elements_per_unit = 4
 maximum_growth_rate = 1.2
 
 [spectral]
-number_of_energy_points = 100
+number_of_energy_points = 750
 minimum_energy = 0.0
-maximum_energy = 0.25
+maximum_energy = 0.3
 energy_integration_rule = "ThreePoint"
-number_of_wavevector_points = 50
+number_of_wavevector_points = 100
 maximum_wavevector = 1e9
 wavevector_integration_rule = "ThreePoint"
 

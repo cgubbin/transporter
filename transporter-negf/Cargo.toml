@@ -6,14 +6,18 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-argmin = { git = "https://github.com/argmin-rs/argmin", features = ["nalgebral"] }
+# argmin = { git = "https://github.com/argmin-rs/argmin", features=["ndarrayl"]}
+# argmin = { git = "https://github.com/cgubbin/argmin", tag="v0.5.1", features=["nalgebral"]}
+argmin = { version = "0.5.1", features=["ndarrayl"]}
 chrono = "0.4.19"
 clap = { version = "3.1.6", features = ["derive"] }
 color-eyre = "0.6.1"
 config = { version = "0.12.0", default-features = false, features = ["toml"] }
 nalgebra = { version = "=0.30.0", features = ["compare", "serde-serialize"] }
 nalgebra-sparse = { version = "0.6.0", features = ["compare", "proptest-support"] }
-ndarray = {version = "0.15.3", optional=true}
+ndarray = { version = "0.15", features=["blas"]}
+blas-src = { version = "0.8.0", default-features = false, features = ["openblas"] }
+openblas-src = { version = "0.10", features = ["cblas", "system"] }
 num-complex = "0.4.0"
 num-traits = "0.2.14"
 numeric_literals = "0.2.0"
@@ -35,7 +39,9 @@ thiserror = "1.0.30"
 anyhow = "1.0.56"
 miette = { version = "4.5.0", features = ["fancy"] }
 tracing-appender = "0.2.2"
-sprs = "0.11.0"
+sprs = {version = "0.11.0"}
+ndarray-linalg = { git = "https://github.com/cgubbin/ndarray-linalg", features = ["intel-mkl-system"]}
+ndarray-stats = "0.5.0"
 
 [dependencies.conflux]
 git = "https://github.com/cgubbin/conflux"
@@ -54,11 +60,10 @@ utilities = { path = "utilities" }
 codegen-units = 1
 
 [profile.bench]
-debug = true
 codegen-units = 1 
 
 [[bench]]
-name = "sparse"
+name = "recursive_greens_functions"
 harness = false
 
 

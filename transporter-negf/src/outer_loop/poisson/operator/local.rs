@@ -4,9 +4,8 @@
 //! for a single element of the mesh, over `NumBands` (ie: the number of carrier bands in the problem).
 use super::{BuildError, PoissonInfoDesk};
 use crate::constants::{ELECTRON_CHARGE, EPSILON_0};
-use nalgebra::{
-    allocator::Allocator, DVector, DVectorSliceMut, DefaultAllocator, OPoint, OVector, RealField,
-};
+use nalgebra::{allocator::Allocator, DefaultAllocator, OPoint, OVector, RealField};
+use ndarray::{Array1, ArrayViewMut1};
 use transporter_mesher::{Assignment, Connectivity, Mesh};
 
 use crate::utilities::assemblers::{VertexAssembler, VertexConnectivityAssembler};
@@ -29,16 +28,16 @@ pub(crate) trait AssembleVertexPoissonMatrix<T: RealField>:
     fn assemble_vertex_matrix_into(
         &self,
         vertex_index: usize,
-        output: DVectorSliceMut<T>,
+        output: ArrayViewMut1<T>,
     ) -> Result<(), BuildError>;
 
     fn assemble_vertex_matrix(
         &self,
         vertex_index: usize,
         num_connections: usize,
-    ) -> Result<DVector<T>, BuildError> {
-        let mut output = DVector::zeros(num_connections + 1);
-        self.assemble_vertex_matrix_into(vertex_index, DVectorSliceMut::from(&mut output))?;
+    ) -> Result<Array1<T>, BuildError> {
+        let mut output = Array1::zeros(num_connections + 1);
+        self.assemble_vertex_matrix_into(vertex_index, ArrayViewMut1::from(&mut output))?;
         Ok(output)
     }
 }
@@ -203,7 +202,7 @@ where
     fn assemble_vertex_matrix_into(
         &self,
         vertex_index: usize,
-        output: DVectorSliceMut<T>,
+        output: ArrayViewMut1<T>,
     ) -> Result<(), BuildError> {
         // Construct the element at `element_index`
         let vertex = VertexInMesh::from_mesh_vertex_index_and_info_desk(
@@ -220,7 +219,7 @@ where
 /// their column indices in the final hamiltonian matrix. In one spatial dimension the differential operator is given by
 /// ' -  \left[d / dz \epsilon_{\perp} d/dz + \epsilon_{\perp} d^2/dz^2\right]'
 fn assemble_vertex_differential_operator<T, InfoDesk, Conn>(
-    mut output: DVectorSliceMut<T>,
+    mut output: ArrayViewMut1<T>,
     vertex: &VertexInMesh<InfoDesk, Mesh<T, InfoDesk::GeometryDim, Conn>>,
 ) -> Result<(), BuildError>
 where
@@ -231,7 +230,7 @@ where
 {
     let shape = output.shape();
 
-    if shape.0 != vertex.connection_count() + 1 {
+    if shape[0] != vertex.connection_count() + 1 {
         return Err(BuildError::MissizedAllocator(
             "Output matrix should have `n_conns * n_neighbour + 1` columns".into(),
         ));

@@ -20,15 +20,15 @@ pub(crate) use convergence::Convergence;
 pub(crate) use methods::{Outer, Potential};
 
 use crate::{
-    app::Tracker,
+    app::{Calculation, Tracker},
     device::info_desk::DeviceInfoDesk,
     error::{BuildError, CsrError},
-    hamiltonian::Hamiltonian,
+    hamiltonian::{Hamiltonian, PotentialInfoDesk},
     postprocessor::{Charge, ChargeAndCurrent},
 };
-use argmin::core::ArgminFloat;
 use miette::Diagnostic;
-use nalgebra::{allocator::Allocator, ComplexField, DVector, DefaultAllocator};
+use nalgebra::{allocator::Allocator, DefaultAllocator, RealField};
+use ndarray::Array1;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::marker::PhantomData;
@@ -92,7 +92,7 @@ impl<T> OuterLoopBuilder<T, (), (), (), (), (), ()> {
 }
 
 impl<
-        T: ComplexField,
+        T: RealField,
         RefConvergenceSettings,
         RefMesh,
         RefSpectral,
@@ -258,15 +258,13 @@ impl<
 /// A structure holding the information to carry out the outer iteration
 pub(crate) struct OuterLoop<'a, T, GeometryDim, Conn, BandDim, SpectralSpace>
 where
-    T: crate::app::NEGFFloat, // + ndarray::ScalarOperand,
+    T: RealField + Copy,
     BandDim: SmallDim,
     GeometryDim: SmallDim,
     Conn: Connectivity<T, GeometryDim>,
     DefaultAllocator: Allocator<T, GeometryDim>
-        + Allocator<
-            Matrix<T::RealField, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
-            BandDim,
-        > + Allocator<T, BandDim>
+        + Allocator<Array1<T::RealField>, BandDim>
+        + Allocator<T, BandDim>
         + Allocator<[T; 3], BandDim>,
 {
     /// The convergence information for the outerloop and the spawned innerloop
@@ -286,35 +284,27 @@ where
 impl<'a, T, GeometryDim, Conn, BandDim, SpectralSpace>
     OuterLoopBuilder<
         T,
-        &'a Convergence<T::RealField>,
-        &'a Mesh<T::RealField, GeometryDim, Conn>,
+        &'a Convergence<T>,
+        &'a Mesh<T, GeometryDim, Conn>,
         &'a SpectralSpace,
-        &'a mut Hamiltonian<T::RealField>,
-        &'a Tracker<'a, T::RealField, GeometryDim, BandDim>,
-        &'a DeviceInfoDesk<T::RealField, GeometryDim, BandDim>,
+        &'a mut Hamiltonian<T>,
+        &'a Tracker<'a, T, GeometryDim, BandDim>,
+        &'a DeviceInfoDesk<T, GeometryDim, BandDim>,
     >
 where
-    T: crate::app::NEGFFloat, // + ndarray::ScalarOperand,
+    T: RealField + Copy,
     GeometryDim: SmallDim,
     BandDim: SmallDim,
-    Conn: Connectivity<T::RealField, GeometryDim>,
-    DefaultAllocator: Allocator<T::RealField, GeometryDim>
-        + Allocator<T::RealField, BandDim>
-        + Allocator<[T::RealField; 3], BandDim>
-        + Allocator<
-            Matrix<
-                T::RealField,
-                Dynamic,
-                Const<1_usize>,
-                VecStorage<T::RealField, Dynamic, Const<1_usize>>,
-            >,
-            BandDim,
-        >,
+    Conn: Connectivity<T, GeometryDim>,
+    DefaultAllocator: Allocator<T, GeometryDim>
+        + Allocator<T, BandDim>
+        + Allocator<[T; 3], BandDim>
+        + Allocator<Array1<T>, BandDim>,
 {
     /// Build out the OuterLoop -> Generic over the SpectralSpace so the OuterLoop can do both coherent and incoherent transport
     pub(crate) fn build(
         self,
-        voltage: T::RealField,
+        voltage: T,
     ) -> color_eyre::Result<OuterLoop<'a, T, GeometryDim, Conn, BandDim, SpectralSpace>> {
         let tracker = LoopTracker::from_global_tracker(self.tracker, voltage);
         Ok(OuterLoop {
@@ -330,10 +320,12 @@ where
 
     pub(crate) fn build_coherent(
         self,
-        voltage: T::RealField,
+        voltage: T,
     ) -> color_eyre::Result<OuterLoop<'a, T, GeometryDim, Conn, BandDim, SpectralSpace>> {
         let mut tracker = LoopTracker::from_global_tracker(self.tracker, voltage);
-        tracker.calculation = Calculation::Coherent;
+        tracker.calculation = Calculation::Coherent {
+            voltage_target: voltage,
+        };
         Ok(OuterLoop {
             convergence_settings: self.convergence_settings,
             mesh: self.mesh,
@@ -346,27 +338,15 @@ where
     }
 }
 
-use crate::app::Calculation;
-use nalgebra::RealField;
-use nalgebra::{Const, Dynamic, Matrix, VecStorage};
-
-pub(crate) struct LoopTracker<T: nalgebra::RealField, BandDim: SmallDim>
+pub(crate) struct LoopTracker<T: RealField, BandDim: SmallDim>
 where
-    DefaultAllocator: Allocator<
-        Matrix<
-            T::RealField,
-            Dynamic,
-            Const<1_usize>,
-            VecStorage<T::RealField, Dynamic, Const<1_usize>>,
-        >,
-        BandDim,
-    >,
+    DefaultAllocator: Allocator<Array1<T>, BandDim>,
 {
     charge_and_currents: ChargeAndCurrent<T, BandDim>,
     potential: Potential<T>,
-    fermi_level: DVector<T>,
+    fermi_level: Array1<T>,
     iteration: usize,
-    calculation: Calculation,
+    calculation: Calculation<T>,
     pub(crate) scattering_scaling: T,
     pub(crate) current_residual: T,
     voltage: T,
@@ -374,22 +354,14 @@ where
 
 impl<T: Copy + RealField, BandDim: SmallDim> LoopTracker<T, BandDim>
 where
-    DefaultAllocator: Allocator<
-        Matrix<
-            T::RealField,
-            Dynamic,
-            Const<1_usize>,
-            VecStorage<T::RealField, Dynamic, Const<1_usize>>,
-        >,
-        BandDim,
-    >,
+    DefaultAllocator: Allocator<Array1<T>, BandDim>,
 {
     pub(crate) fn from_global_tracker<GeometryDim: SmallDim>(
         global_tracker: &Tracker<'_, T, GeometryDim, BandDim>,
         voltage: T,
     ) -> Self
     where
-        DefaultAllocator: Allocator<T::RealField, GeometryDim>
+        DefaultAllocator: Allocator<T, GeometryDim>
             + Allocator<T::RealField, BandDim>
             + Allocator<[T::RealField; 3], BandDim>,
     {
@@ -400,7 +372,7 @@ where
                 global_tracker.charge().clone(),
                 global_tracker.current().clone(),
             ),
-            fermi_level: DVector::from(
+            fermi_level: Array1::from(
                 (0..global_tracker.num_vertices())
                     .map(|_| T::zero())
                     .collect::<Vec<_>>(),
@@ -425,7 +397,7 @@ where
         &mut self.potential
     }
 
-    pub(crate) fn fermi_level(&self) -> &DVector<T> {
+    pub(crate) fn fermi_level(&self) -> &Array1<T> {
         &self.fermi_level
     }
 
@@ -433,7 +405,7 @@ where
         self.potential = potential;
     }
 
-    pub(crate) fn fermi_level_mut(&mut self) -> &mut DVector<T> {
+    pub(crate) fn fermi_level_mut(&mut self) -> &mut Array1<T> {
         &mut self.fermi_level
     }
 
@@ -450,8 +422,8 @@ where
             "../results/{calculation}_potential_{}V_{}_scaling.txt",
             self.voltage, self.scattering_scaling
         ))?;
-        for value in self.potential.as_ref().row_iter() {
-            let value = value[0].to_f64().unwrap().to_string();
+        for value in self.potential.as_ref().iter() {
+            let value = value.to_f64().unwrap().to_string();
             writeln!(file, "{}", value)?;
         }
 
@@ -460,13 +432,8 @@ where
             "../results/{calculation}_charge_{}V_{}_scaling.txt",
             self.voltage, self.scattering_scaling
         ))?;
-        for value in self
-            .charge_and_currents
-            .charge_as_ref()
-            .net_charge()
-            .row_iter()
-        {
-            let value = value[0].to_f64().unwrap().to_string();
+        for value in self.charge_and_currents.charge_as_ref().net_charge().iter() {
+            let value = value.to_f64().unwrap().to_string();
             writeln!(file, "{}", value)?;
         }
 
@@ -488,19 +455,9 @@ where
     }
 }
 
-use crate::hamiltonian::PotentialInfoDesk;
-
 impl<T: Copy + RealField, BandDim: SmallDim> PotentialInfoDesk<T> for LoopTracker<T, BandDim>
 where
-    DefaultAllocator: Allocator<
-        Matrix<
-            T::RealField,
-            Dynamic,
-            Const<1_usize>,
-            VecStorage<T::RealField, Dynamic, Const<1_usize>>,
-        >,
-        BandDim,
-    >,
+    DefaultAllocator: Allocator<Array1<T>, BandDim>,
 {
     type BandDim = BandDim;
     fn potential(&self, vertex_index: usize) -> T {

@@ -1,5 +1,6 @@
+lead_length = 59.0
 temperature = 300.0
-voltage_offsets = [0.0, 0.0]
+voltage_offsets = [0.0, 0.2]
 
 [[layers]]
 thickness = [50.0]

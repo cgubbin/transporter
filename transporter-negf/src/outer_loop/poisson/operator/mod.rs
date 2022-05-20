@@ -8,9 +8,9 @@ use crate::device::info_desk::DeviceInfoDesk;
 use crate::outer_loop::Potential;
 use crate::postprocessor::Charge;
 use crate::utilities::assemblers::VertexAssemblerBuilder;
-use nalgebra::{allocator::Allocator, DVector, DefaultAllocator, RealField};
-use nalgebra::{Const, Dynamic, Matrix, VecStorage};
-use nalgebra_sparse::CsrMatrix;
+use nalgebra::{allocator::Allocator, DefaultAllocator, RealField};
+use ndarray::Array1;
+use sprs::CsMat;
 use transporter_mesher::{Connectivity, Mesh, SmallDim};
 
 pub(crate) trait PoissonOperator {
@@ -35,14 +35,11 @@ where
     DefaultAllocator: Allocator<T, BandDim>
         + Allocator<T, GeometryDim>
         + Allocator<[T; 3], BandDim>
-        + Allocator<
-            Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
-            BandDim,
-        >,
+        + Allocator<Array1<T>, BandDim>,
 {
-    type Operator = CsrMatrix<T>;
-    type Source = DVector<T>;
-    fn build_operator(&self) -> Result<CsrMatrix<T>, BuildError> {
+    type Operator = CsMat<T>;
+    type Source = Array1<T>;
+    fn build_operator(&self) -> Result<CsMat<T>, BuildError> {
         // Build out the constructors
         let vertex_assembler = VertexAssemblerBuilder::new()
             .with_info_desk(self.info_desk)
@@ -52,7 +49,7 @@ where
             CsrAssembler::from_vertex_assembler(&vertex_assembler)?;
         poisson_operator_constructor.assemble_operator(&vertex_assembler)
     }
-    fn build_source(&self) -> Result<DVector<T>, BuildError> {
+    fn build_source(&self) -> Result<Array1<T>, BuildError> {
         // Build out the constructors
         let vertex_assembler = VertexAssemblerBuilder::new()
             .with_info_desk(self.info_desk)

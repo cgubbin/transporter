@@ -1,8 +1,9 @@
 temperature = 300.0
-voltage_offsets = [0.0, 0.05]
+lead_length = 51.0
+voltage_offsets = [0.0, 0.11]
 
 [[layers]]
-thickness = [50.0]
+thickness = [100.0]
 material = "GaAs"
 acceptor_density = 0.0
 donor_density = 1e24
@@ -38,7 +39,7 @@ acceptor_density = 0.0
 donor_density = 1e18
 
 [[layers]]
-thickness = [50.0]
+thickness = [100.0]
 material = "GaAs"
 acceptor_density = 0.0
 donor_density = 1e24

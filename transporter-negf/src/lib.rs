@@ -42,6 +42,8 @@
 #![allow(dead_code)]
 #![allow(clippy::type_complexity)]
 
+extern crate openblas_src;
+
 /// The command line global application, tracing and display primitives
 pub mod app;
 

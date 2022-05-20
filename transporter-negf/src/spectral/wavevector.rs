@@ -1,5 +1,12 @@
+//! # Wavevector
+//!
+//! The wavevector space utilised to run a simulation. This is created based on the configuration
+//! with a fixed number `number_of_points` nodes linearly distributed from zero wavevector to the provided
+//! cut-off `maximum_wavevector`. The wavevector grid inherits the `GeometryDim` from the simulation
+
 use super::GenerateWeights;
-use nalgebra::{allocator::Allocator, DVector, DefaultAllocator, OPoint, RealField, U1};
+use nalgebra::{allocator::Allocator, DefaultAllocator, OPoint, RealField, U1};
+use ndarray::Array1;
 use num_traits::NumCast;
 use transporter_mesher::{
     create_line_segment_from_endpoints_and_number_of_points, Connectivity, Mesh,
@@ -69,7 +76,7 @@ where
     DefaultAllocator: Allocator<T, GeometryDim>,
 {
     pub(crate) grid: Mesh<T, GeometryDim, Conn>,
-    weights: DVector<T>,
+    weights: Array1<T>,
     integration_rule: super::IntegrationRule,
 }
 
@@ -109,53 +116,6 @@ where
         }
     }
 }
-
-//impl<T, IntegrationRule> BuildWavevectorSpace<T, IntegrationRule, U1, Segment1dConnectivity>
-//    for WavevectorSpaceBuilder<T, IntegrationRule, U1>
-//where
-//    T: Copy + RealField + NumCast,
-//    IntegrationRule: GenerateWeights<T, U1, Segment1dConnectivity>,
-//{
-//    fn build(self) -> WavevectorSpace<T, IntegrationRule, U1, Segment1dConnectivity> {
-//        // Build the energy mesh in meV
-//        let grid = create_line_segment_from_endpoints_and_number_of_points(
-//            std::ops::Range {
-//                start: T::zero(),
-//                end: self.maximum_wavevector.unwrap(),
-//            },
-//            self.number_of_points.unwrap(),
-//        );
-//        let weights = self.integration_rule.generate_weights_from_grid(&grid);
-//        WavevectorSpace {
-//            grid,
-//            weights,
-//            integration_rule: self.integration_rule,
-//        }
-//    }
-//}
-
-//impl<T, IntegrationRule> WavevectorSpaceBuilder<T, IntegrationRule, U1>
-//where
-//    T: Copy + RealField + NumCast,
-//    IntegrationRule: GenerateWeights<T, U1, Segment1dConnectivity>,
-//{
-//    pub(crate) fn build(self) -> WavevectorSpace<T, IntegrationRule, U1, Segment1dConnectivity> {
-//        // Build the energy mesh in meV
-//        let grid = create_line_segment_from_endpoints_and_number_of_points(
-//            std::ops::Range {
-//                start: T::zero(),
-//                end: self.maximum_wavevector.unwrap(),
-//            },
-//            self.number_of_points.unwrap(),
-//        );
-//        let weights = self.integration_rule.generate_weights_from_grid(&grid);
-//        WavevectorSpace {
-//            grid,
-//            weights,
-//            integration_rule: self.integration_rule,
-//        }
-//    }
-//}
 
 impl<T: Copy + RealField, GeometryDim: SmallDim, Conn: Connectivity<T, GeometryDim>>
     WavevectorSpace<T, GeometryDim, Conn>

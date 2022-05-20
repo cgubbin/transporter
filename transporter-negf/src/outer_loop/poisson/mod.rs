@@ -5,9 +5,9 @@ use operator::PoissonOperator;
 use super::{methods::OuterLoopInfoDesk, BuildError};
 use crate::device::info_desk::DeviceInfoDesk;
 use crate::postprocessor::Charge;
-use argmin::core::{Error, Jacobian, Operator};
-use nalgebra::{allocator::Allocator, DMatrix, DVector, DefaultAllocator, RealField};
-use nalgebra_sparse::CsrMatrix;
+use argmin::core::{ArgminOp, Error};
+use nalgebra::{allocator::Allocator, DefaultAllocator, RealField};
+use ndarray::{Array1, Array2};
 use std::marker::PhantomData;
 use transporter_mesher::{Connectivity, Mesh, SmallDim};
 
@@ -37,8 +37,10 @@ impl<T: Copy + RealField> Default for PoissonProblemBuilder<T, (), (), (), ()> {
     }
 }
 
-impl<T: Copy + RealField, RefCharge, RefInfoDesk, RefInitial, RefMesh>
+impl<T, RefCharge, RefInfoDesk, RefInitial, RefMesh>
     PoissonProblemBuilder<T, RefCharge, RefInfoDesk, RefInitial, RefMesh>
+where
+    T: Copy + RealField,
 {
     pub(crate) fn with_charge<Charge>(
         self,
@@ -93,7 +95,7 @@ impl<T: Copy + RealField, RefCharge, RefInfoDesk, RefInitial, RefMesh>
     }
 }
 
-impl<'a, T: Copy + RealField, GeometryDim, Conn, BandDim>
+impl<'a, T, GeometryDim, Conn, BandDim>
     PoissonProblemBuilder<
         T,
         &'a Charge<T, BandDim>,
@@ -102,16 +104,14 @@ impl<'a, T: Copy + RealField, GeometryDim, Conn, BandDim>
         &'a Mesh<T, GeometryDim, Conn>,
     >
 where
+    T: Copy + RealField,
     GeometryDim: SmallDim,
     BandDim: SmallDim,
     Conn: Connectivity<T, GeometryDim>,
     DefaultAllocator: Allocator<T, GeometryDim>
         + Allocator<T, BandDim>
         + Allocator<[T; 3], BandDim>
-        + Allocator<
-            Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
-            BandDim,
-        >,
+        + Allocator<Array1<T>, BandDim>,
 {
     pub(crate) fn build(
         self,
@@ -122,7 +122,7 @@ where
             mesh: self.mesh,
             operator: self.build_operator()?,
             source: self.build_source()?,
-            fermi_level: DVector::from(self.info_desk.determine_fermi_level(
+            fermi_level: Array1::from(self.info_desk.determine_fermi_level(
                 self.mesh,
                 self.initial_potential,
                 self.charge,
@@ -141,28 +141,24 @@ where
     DefaultAllocator: Allocator<T, BandDim>
         + Allocator<T, GeometryDim>
         + Allocator<[T; 3], BandDim>
-        + Allocator<
-            Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
-            BandDim,
-        >,
+        + Allocator<Array1<T>, BandDim>,
 {
     charge: &'a Charge<T, BandDim>,
     info_desk: &'a DeviceInfoDesk<T, GeometryDim, BandDim>,
     mesh: &'a Mesh<T, GeometryDim, Conn>,
     // The differential operator \nabla \epsilon \nabla \phi
-    operator: CsrMatrix<T>,
+    operator: sprs::CsMat<T>,
     // The static component of the system: the source term q * (N_D - N_A)
-    source: DVector<T>,
+    source: ndarray::Array1<T>,
     // Fermi level -> changes through the calculation
-    fermi_level: DVector<T>,
+    fermi_level: ndarray::Array1<T>,
     //
     initial_values: Potential<T>,
 }
 
 use super::Potential;
-use nalgebra::{Const, Dynamic, Matrix, VecStorage};
 
-impl<T, GeometryDim, Conn, BandDim> Operator for PoissonProblem<'_, T, GeometryDim, Conn, BandDim>
+impl<T, GeometryDim, Conn, BandDim> ArgminOp for PoissonProblem<'_, T, GeometryDim, Conn, BandDim>
 where
     T: Copy + RealField + argmin::core::ArgminFloat,
     GeometryDim: SmallDim,
@@ -171,19 +167,20 @@ where
     DefaultAllocator: Allocator<T, BandDim>
         + Allocator<T, GeometryDim>
         + Allocator<[T; 3], BandDim>
-        + Allocator<
-            Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
-            BandDim,
-        >,
+        + Allocator<Array1<T>, BandDim>,
 {
-    type Param = DVector<T>;
-    type Output = DVector<T>;
+    type Param = Array1<T>;
+    type Output = Array1<T>;
+    type Hessian = ();
+    type Jacobian = Array2<T>;
+    type Float = T;
 
     fn apply(&self, p: &Self::Param) -> Result<Self::Output, Error> {
         // let p = p - DVector::from(vec![p[0]; p.len()]);
         // n * e
         // let p = p - DVector::from(vec![p[2]; p.len()]);
-        let p = p - DVector::from(vec![p.mean(); p.len()]);
+        let mean = p.mean().unwrap();
+        let p = Array1::from(p.iter().map(|x| *x - mean).collect::<Vec<_>>());
         // TODO Should we be updating the charge density using the recalculated electronic potential
         let free_charge = self.info_desk.update_source_vector(
             self.mesh,
@@ -195,13 +192,13 @@ where
         // Neumann condition -> half source at the system boundary
         source[0] /= T::one() + T::one();
         source[self.source.len() - 1] /= T::one() + T::one();
-        let mean_source = source.mean();
+        let mean_source = source.mean().unwrap();
         for element in source.iter_mut() {
             *element -= mean_source;
         }
 
         // Set the third element to zero...
-        let operator = self.operator.clone();
+        let operator = self.operator.clone().to_dense();
         //operator.values_mut()[5] = T::zero();
         //operator.values_mut()[6] = T::one();
         //operator.values_mut()[7] = T::zero();
@@ -212,45 +209,24 @@ where
         // println!("{:?}", self.operator);
         // panic!();
 
-        Ok(&operator * (p + self.initial_values.as_ref()) + &source)
+        Ok(operator.dot(&(p + self.initial_values.as_ref())) + &source)
     }
-}
-
-impl<T, GeometryDim, Conn, BandDim> Jacobian for PoissonProblem<'_, T, GeometryDim, Conn, BandDim>
-where
-    T: Copy + RealField,
-    GeometryDim: SmallDim,
-    BandDim: SmallDim,
-    Conn: Connectivity<T, GeometryDim>,
-    DefaultAllocator: Allocator<T, BandDim>
-        + Allocator<T, GeometryDim>
-        + Allocator<[T; 3], BandDim>
-        + Allocator<
-            Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
-            BandDim,
-        >,
-{
-    type Param = DVector<T>;
-    type Jacobian = DMatrix<T>;
 
     fn jacobian(&self, p: &Self::Param) -> Result<Self::Jacobian, Error> {
         // let p = p - DVector::from(vec![p[2]; p.len()]);
-        let p = p - DVector::from(vec![p.mean(); p.len()]);
+        let mean = p.mean().unwrap();
+        let p = Array1::from(p.iter().map(|x| *x - mean).collect::<Vec<_>>());
         let jacobian_diagonal = self.info_desk.compute_jacobian_diagonal(
             &self.fermi_level,
             &(&p + self.initial_values.as_ref()),
             self.mesh,
         );
-        let mut jacobian_csr = self.operator.diagonal_as_csr();
-        for (val, &value) in jacobian_csr
-            .values_mut()
-            .iter_mut()
-            .zip(jacobian_diagonal.iter())
-        {
+        let mut jacobian_csr = self.operator.diag();
+        for ((_, val), &value) in jacobian_csr.iter_mut().zip(jacobian_diagonal.iter()) {
             *val = value;
         }
-        jacobian_csr.values_mut()[0] /= T::one() + T::one();
-        jacobian_csr.values_mut()[jacobian_diagonal.len() - 1] /= T::one() + T::one();
+        *jacobian_csr.get_mut(0).unwrap() /= T::one() + T::one();
+        *jacobian_csr.get_mut(jacobian_diagonal.len() - 1).unwrap() /= T::one() + T::one();
 
         // Set the third element to zero...
         let operator = self.operator.clone();
@@ -259,9 +235,8 @@ where
         // operator.values_mut()[7] = T::zero();
         // jacobian_csr.values_mut()[2] = T::zero();
 
-        let jacobian = &operator + jacobian_csr;
-        Ok(nalgebra_sparse::convert::serial::convert_csr_dense(
-            &jacobian,
-        ))
+        let jacobian =
+            &operator.to_dense() + &Array2::from_diag(&Array1::from(jacobian_csr.data().to_vec()));
+        Ok(jacobian)
     }
 }

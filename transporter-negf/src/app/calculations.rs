@@ -1,31 +1,33 @@
-use super::{Calculation, Configuration, NEGFComplex, NEGFFloat, Tracker};
-use crate::outer_loop::{Outer, OuterLoopError, Potential};
-use crate::spectral::WavevectorSpace;
-use nalgebra::{allocator::Allocator, Const, DefaultAllocator, Dynamic, Matrix, VecStorage, U1};
-use num_complex::Complex;
+//! # Calculations
+//!
+//! Delegated functions from `App` to run coherent and incoherent calculations with fixed applied voltage
+//!
+
+use super::{Calculation, Configuration, Tracker};
+use crate::{
+    outer_loop::{Outer, OuterLoopError, Potential},
+    spectral::WavevectorSpace,
+};
+use nalgebra::{allocator::Allocator, DefaultAllocator, U1};
+use ndarray::Array1;
 use transporter_mesher::{Mesh, Segment1dConnectivity, SmallDim};
 
-pub(crate) fn coherent_calculation_at_fixed_voltage<T, BandDim: SmallDim>(
-    voltage: T,
-    initial_potential: Potential<T>,
-    config: &Configuration<T>,
-    mesh: &Mesh<T, U1, Segment1dConnectivity>,
-    tracker: &Tracker<'_, T, U1, BandDim>,
+pub(crate) fn coherent_calculation_at_fixed_voltage<BandDim: SmallDim>(
+    voltage: f64,
+    initial_potential: Potential<f64>,
+    config: &Configuration<f64>,
+    mesh: &Mesh<f64, U1, Segment1dConnectivity>,
+    tracker: &Tracker<'_, f64, U1, BandDim>,
     term: &console::Term,
-) -> Result<Potential<T>, OuterLoopError<T>>
+) -> Result<Potential<f64>, OuterLoopError<f64>>
 where
-    T: NEGFFloat,
-    Complex<T>: NEGFComplex,
-    DefaultAllocator: Allocator<T, U1>
-        + Allocator<T, BandDim>
-        + Allocator<[T; 3], BandDim>
-        + Allocator<
-            Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
-            BandDim,
-        >,
-    <DefaultAllocator as Allocator<T, U1>>::Buffer: Send + Sync,
-    <DefaultAllocator as Allocator<T, BandDim>>::Buffer: Send + Sync,
-    <DefaultAllocator as Allocator<[T; 3], BandDim>>::Buffer: Send + Sync,
+    DefaultAllocator: Allocator<f64, U1>
+        + Allocator<f64, BandDim>
+        + Allocator<[f64; 3], BandDim>
+        + Allocator<Array1<f64>, BandDim>,
+    <DefaultAllocator as Allocator<f64, U1>>::Buffer: Send + Sync,
+    <DefaultAllocator as Allocator<f64, BandDim>>::Buffer: Send + Sync,
+    <DefaultAllocator as Allocator<[f64; 3], BandDim>>::Buffer: Send + Sync,
 {
     // if all the masses are equal we do not need to discretise wavevectors for a coherent calculation
     term.move_cursor_to(0, 1)?;
@@ -57,34 +59,30 @@ where
     }
 }
 
-fn coherent_calculation_at_fixed_voltage_with_constant_mass<T, BandDim: SmallDim>(
-    voltage: T,
-    initial_potential: Potential<T>,
-    config: &Configuration<T>,
-    mesh: &Mesh<T, U1, Segment1dConnectivity>,
-    tracker: &Tracker<'_, T, U1, BandDim>,
+fn coherent_calculation_at_fixed_voltage_with_constant_mass<BandDim: SmallDim>(
+    voltage: f64,
+    initial_potential: Potential<f64>,
+    config: &Configuration<f64>,
+    mesh: &Mesh<f64, U1, Segment1dConnectivity>,
+    tracker: &Tracker<'_, f64, U1, BandDim>,
     _term: &console::Term,
-) -> Result<Potential<T>, OuterLoopError<T>>
+) -> Result<Potential<f64>, OuterLoopError<f64>>
 where
-    T: NEGFFloat,
-    DefaultAllocator: Allocator<T, U1>
-        + Allocator<T, BandDim>
-        + Allocator<[T; 3], BandDim>
-        + Allocator<
-            Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
-            BandDim,
-        >,
-    <DefaultAllocator as Allocator<T, U1>>::Buffer: Send + Sync,
-    <DefaultAllocator as Allocator<T, BandDim>>::Buffer: Send + Sync,
-    <DefaultAllocator as Allocator<[T; 3], BandDim>>::Buffer: Send + Sync,
+    DefaultAllocator: Allocator<f64, U1>
+        + Allocator<f64, BandDim>
+        + Allocator<[f64; 3], BandDim>
+        + Allocator<Array1<f64>, BandDim>,
+    <DefaultAllocator as Allocator<f64, U1>>::Buffer: Send + Sync,
+    <DefaultAllocator as Allocator<f64, BandDim>>::Buffer: Send + Sync,
+    <DefaultAllocator as Allocator<[f64; 3], BandDim>>::Buffer: Send + Sync,
 {
     // Build calculation independent structures
-    let mut hamiltonian = crate::hamiltonian::HamiltonianBuilder::new()
+    let mut hamiltonian = crate::hamiltonian::HamiltonianBuilder::default()
         .with_mesh(mesh)
         .with_info_desk(tracker)
         .build()?;
 
-    let spectral_space_builder = crate::spectral::SpectralSpaceBuilder::new()
+    let spectral_space_builder = crate::spectral::SpectralSpaceBuilder::default()
         .with_number_of_energy_points(config.spectral.number_of_energy_points)
         .with_energy_range(std::ops::Range {
             start: config.spectral.minimum_energy,
@@ -98,14 +96,16 @@ where
         maximum_outer_iterations: config.outer_loop.maximum_iterations,
         inner_tolerance: config.inner_loop.tolerance,
         maximum_inner_iterations: config.inner_loop.maximum_iterations,
-        calculation_type: Calculation::Coherent,
+        calculation_type: Calculation::Coherent {
+            voltage_target: 0_f64,
+        },
     };
     let mut outer_loop: crate::outer_loop::OuterLoop<
-        T,
+        f64,
         U1,
         Segment1dConnectivity,
         BandDim,
-        crate::spectral::SpectralSpace<T::RealField, ()>,
+        crate::spectral::SpectralSpace<f64, ()>,
     > = crate::outer_loop::OuterLoopBuilder::new()
         .with_mesh(mesh)
         .with_hamiltonian(&mut hamiltonian)
@@ -120,35 +120,31 @@ where
     Ok(outer_loop.potential_owned())
 }
 
-fn coherent_calculation_at_fixed_voltage_with_changing_mass<T, BandDim: SmallDim>(
-    voltage: T,
-    initial_potential: Potential<T>,
-    config: &Configuration<T>,
-    mesh: &Mesh<T, U1, Segment1dConnectivity>,
-    tracker: &Tracker<'_, T, U1, BandDim>,
+fn coherent_calculation_at_fixed_voltage_with_changing_mass<BandDim: SmallDim>(
+    voltage: f64,
+    initial_potential: Potential<f64>,
+    config: &Configuration<f64>,
+    mesh: &Mesh<f64, U1, Segment1dConnectivity>,
+    tracker: &Tracker<'_, f64, U1, BandDim>,
     _term: &console::Term,
-) -> Result<Potential<T>, OuterLoopError<T>>
+) -> Result<Potential<f64>, OuterLoopError<f64>>
 where
-    T: NEGFFloat,
-    Complex<T>: NEGFComplex,
-    DefaultAllocator: Allocator<T, U1>
-        + Allocator<T, BandDim>
-        + Allocator<[T; 3], BandDim>
-        + Allocator<
-            Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
-            BandDim,
-        >,
-    <DefaultAllocator as Allocator<T, U1>>::Buffer: Send + Sync,
-    <DefaultAllocator as Allocator<T, BandDim>>::Buffer: Send + Sync,
-    <DefaultAllocator as Allocator<[T; 3], BandDim>>::Buffer: Send + Sync,
+    DefaultAllocator: Allocator<f64, U1>
+        + Allocator<f64, BandDim>
+        + Allocator<[f64; 3], BandDim>
+        + Allocator<Array1<f64>, BandDim>,
+    <DefaultAllocator as Allocator<f64, U1>>::Buffer: Send + Sync,
+    <DefaultAllocator as Allocator<f64, BandDim>>::Buffer: Send + Sync,
+    <DefaultAllocator as Allocator<[f64; 3], BandDim>>::Buffer: Send + Sync,
 {
     // Build calculation independent structures
-    let mut hamiltonian = crate::hamiltonian::HamiltonianBuilder::new()
+    let mut hamiltonian = crate::hamiltonian::HamiltonianBuilder::default()
         .with_mesh(mesh)
         .with_info_desk(tracker)
         .build()?;
 
-    let spectral_space_builder = crate::spectral::SpectralSpaceBuilder::new()
+    let spectral_space_builder = crate::spectral::SpectralSpaceBuilder::default()
+        .with_mesh(mesh)
         .with_number_of_energy_points(config.spectral.number_of_energy_points)
         .with_energy_range(std::ops::Range {
             start: config.spectral.minimum_energy,
@@ -157,8 +153,8 @@ where
         .with_energy_integration_method(config.spectral.energy_integration_rule)
         .with_maximum_wavevector(config.spectral.maximum_wavevector)
         .with_number_of_wavevector_points(config.spectral.number_of_wavevector_points)
-        .with_wavevector_integration_method(config.spectral.wavevector_integration_rule)
-        .with_mesh(mesh);
+        .with_wavevector_integration_method(config.spectral.wavevector_integration_rule);
+
     let spectral_space = spectral_space_builder.build_incoherent();
 
     let outer_config = crate::outer_loop::Convergence {
@@ -166,14 +162,16 @@ where
         maximum_outer_iterations: config.outer_loop.maximum_iterations,
         inner_tolerance: config.inner_loop.tolerance,
         maximum_inner_iterations: config.inner_loop.maximum_iterations,
-        calculation_type: Calculation::Coherent,
+        calculation_type: Calculation::Coherent {
+            voltage_target: 0_f64,
+        },
     };
     let mut outer_loop: crate::outer_loop::OuterLoop<
-        T,
+        f64,
         U1,
         Segment1dConnectivity,
         BandDim,
-        crate::spectral::SpectralSpace<T::RealField, WavevectorSpace<T, U1, Segment1dConnectivity>>,
+        crate::spectral::SpectralSpace<f64, WavevectorSpace<f64, U1, Segment1dConnectivity>>,
     > = crate::outer_loop::OuterLoopBuilder::new()
         .with_mesh(mesh)
         .with_hamiltonian(&mut hamiltonian)
@@ -188,27 +186,22 @@ where
     Ok(outer_loop.potential_owned())
 }
 
-pub(crate) fn incoherent_calculation_at_fixed_voltage<T, BandDim: SmallDim>(
-    voltage: T,
-    initial_potential: Potential<T>,
-    config: &Configuration<T>,
-    mesh: &Mesh<T, U1, Segment1dConnectivity>,
-    tracker: &Tracker<'_, T, U1, BandDim>,
+pub(crate) fn incoherent_calculation_at_fixed_voltage<BandDim: SmallDim>(
+    voltage: f64,
+    initial_potential: Potential<f64>,
+    config: &Configuration<f64>,
+    mesh: &Mesh<f64, U1, Segment1dConnectivity>,
+    tracker: &Tracker<'_, f64, U1, BandDim>,
     term: &console::Term,
-) -> Result<Potential<T>, OuterLoopError<T>>
+) -> Result<Potential<f64>, OuterLoopError<f64>>
 where
-    T: NEGFFloat,
-    Complex<T>: NEGFComplex,
-    DefaultAllocator: Allocator<T, U1>
-        + Allocator<T, BandDim>
-        + Allocator<[T; 3], BandDim>
-        + Allocator<
-            Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
-            BandDim,
-        >,
-    <DefaultAllocator as Allocator<T, U1>>::Buffer: Send + Sync,
-    <DefaultAllocator as Allocator<T, BandDim>>::Buffer: Send + Sync,
-    <DefaultAllocator as Allocator<[T; 3], BandDim>>::Buffer: Send + Sync,
+    DefaultAllocator: Allocator<f64, U1>
+        + Allocator<f64, BandDim>
+        + Allocator<[f64; 3], BandDim>
+        + Allocator<Array1<f64>, BandDim>,
+    <DefaultAllocator as Allocator<f64, U1>>::Buffer: Send + Sync,
+    <DefaultAllocator as Allocator<f64, BandDim>>::Buffer: Send + Sync,
+    <DefaultAllocator as Allocator<[f64; 3], BandDim>>::Buffer: Send + Sync,
 {
     // if all the masses are equal we do not need to discretise wavevectors for a coherent calculation
     let first = tracker.info_desk.effective_masses[0].clone();
@@ -245,12 +238,13 @@ where
     term.clear_to_end_of_screen()?;
     tracing::info!("Incoherent calculation");
     // Build calculation independent structures
-    let mut hamiltonian = crate::hamiltonian::HamiltonianBuilder::new()
+    let mut hamiltonian = crate::hamiltonian::HamiltonianBuilder::default()
         .with_mesh(mesh)
         .with_info_desk(tracker)
         .build()?;
 
-    let spectral_space_builder = crate::spectral::SpectralSpaceBuilder::new()
+    let spectral_space_builder = crate::spectral::SpectralSpaceBuilder::default()
+        .with_mesh(mesh)
         .with_number_of_energy_points(config.spectral.number_of_energy_points)
         .with_energy_range(std::ops::Range {
             start: config.spectral.minimum_energy,
@@ -259,25 +253,30 @@ where
         .with_energy_integration_method(config.spectral.energy_integration_rule)
         .with_maximum_wavevector(config.spectral.maximum_wavevector)
         .with_number_of_wavevector_points(config.spectral.number_of_wavevector_points)
-        .with_wavevector_integration_method(config.spectral.wavevector_integration_rule)
-        .with_mesh(mesh);
-    let spectral_space = spectral_space_builder.build_incoherent();
+        .with_wavevector_integration_method(config.spectral.wavevector_integration_rule);
+
+    let spectral_space: crate::spectral::SpectralSpace<
+        f64,
+        WavevectorSpace<f64, U1, Segment1dConnectivity>,
+    > = spectral_space_builder.build_incoherent();
 
     let outer_config = crate::outer_loop::Convergence {
-        outer_tolerance: config.outer_loop.tolerance / T::from_f64(100.).unwrap(), // Lowering because the shift may be small -> if the scattering is weak
+        outer_tolerance: config.outer_loop.tolerance / 100_f64, // Lowering because the shift may be small -> if the scattering is weak
         maximum_outer_iterations: config.outer_loop.maximum_iterations,
         inner_tolerance: config.inner_loop.tolerance,
         maximum_inner_iterations: config.inner_loop.maximum_iterations,
-        calculation_type: Calculation::Incoherent,
+        calculation_type: Calculation::Incoherent {
+            voltage_target: 0_f64,
+        },
     };
     let mut outer_loop: crate::outer_loop::OuterLoop<
-        T,
+        f64,
         U1,
         Segment1dConnectivity,
         BandDim,
         crate::spectral::SpectralSpace<
-            T::RealField,
-            crate::spectral::WavevectorSpace<T, U1, Segment1dConnectivity>,
+            f64,
+            crate::spectral::WavevectorSpace<f64, U1, Segment1dConnectivity>,
         >,
     > = crate::outer_loop::OuterLoopBuilder::new()
         .with_mesh(mesh)
@@ -288,7 +287,7 @@ where
         .with_info_desk(tracker.info_desk)
         .build(voltage)
         .unwrap();
-    while outer_loop.scattering_scaling() <= T::one() {
+    while outer_loop.scattering_scaling() <= 1_f64 {
         // let mut file = std::fs::File::create(format!(
         //     "../results/converged_potential_{}.txt",
         //     outer_loop.scattering_scaling()

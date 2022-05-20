@@ -5,10 +5,9 @@ use crate::{
     outer_loop::Potential,
     postprocessor::{Charge, Current},
 };
-use nalgebra::{
-    allocator::Allocator, Const, DVector, DefaultAllocator, Dynamic, Matrix, OPoint, OVector,
-    RealField, VecStorage,
-};
+use nalgebra::{allocator::Allocator, DefaultAllocator, OPoint, OVector, RealField};
+use ndarray::Array1;
+use num_traits::ToPrimitive;
 use std::marker::PhantomData;
 use transporter_mesher::{Connectivity, Mesh, SmallDim};
 
@@ -19,17 +18,14 @@ where
     DefaultAllocator: Allocator<T, BandDim>
         + Allocator<[T; 3], BandDim>
         // + Allocator<T, GeometryDim>
-        + Allocator<
-            Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
-            BandDim,
-        >,
+        + Allocator<Array1<T>, BandDim>,
 {
     // mesh: &'a Mesh<T, GeometryDim, C>,
     pub(crate) info_desk: &'a DeviceInfoDesk<T, GeometryDim, BandDim>,
     charge_densities: Charge<T, BandDim>,
     current_densities: Current<T, BandDim>,
     potential: Potential<T>,
-    calculation: Calculation,
+    calculation: Calculation<T>,
     __marker: PhantomData<GeometryDim>,
 }
 
@@ -39,10 +35,7 @@ where
     DefaultAllocator: Allocator<T, BandDim>
         + Allocator<[T; 3], BandDim>
         + Allocator<T, GeometryDim>
-        + Allocator<
-            Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
-            BandDim,
-        >,
+        + Allocator<Array1<T>, BandDim>,
 {
     pub(crate) fn potential(&self) -> &Potential<T> {
         &self.potential
@@ -55,7 +48,7 @@ where
         &self.current_densities
     }
 
-    pub(crate) fn calculation(&self) -> Calculation {
+    pub(crate) fn calculation(&self) -> Calculation<T> {
         self.calculation
     }
 
@@ -71,12 +64,8 @@ where
 impl<T: Copy + RealField, BandDim: SmallDim, GeometryDim: SmallDim> HamiltonianInfoDesk<T>
     for Tracker<'_, T, GeometryDim, BandDim>
 where
-    DefaultAllocator: Allocator<T, BandDim>
-        + Allocator<[T; 3], BandDim>
-        + Allocator<
-            Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
-            BandDim,
-        >,
+    DefaultAllocator:
+        Allocator<T, BandDim> + Allocator<[T; 3], BandDim> + Allocator<Array1<T>, BandDim>,
 {
     // type BandDim = BandDim;
     type GeometryDim = GeometryDim;
@@ -93,12 +82,8 @@ where
 impl<T: Copy + RealField, BandDim: SmallDim, GeometryDim: SmallDim>
     crate::hamiltonian::PotentialInfoDesk<T> for Tracker<'_, T, GeometryDim, BandDim>
 where
-    DefaultAllocator: Allocator<T, BandDim>
-        + Allocator<[T; 3], BandDim>
-        + Allocator<
-            Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
-            BandDim,
-        >,
+    DefaultAllocator:
+        Allocator<T, BandDim> + Allocator<[T; 3], BandDim> + Allocator<Array1<T>, BandDim>,
 {
     type BandDim = BandDim;
     fn potential(&self, vertex_index: usize) -> T {
@@ -106,14 +91,16 @@ where
     }
 }
 
-pub struct TrackerBuilder<RefInfoDesk, RefMesh> {
+/// A builder struct to aid the construction of the simulation `Tracker`
+pub struct TrackerBuilder<T: RealField, RefInfoDesk, RefMesh> {
     info_desk: RefInfoDesk,
     mesh: RefMesh,
-    calculation: Calculation,
+    calculation: Calculation<T>,
 }
 
-impl TrackerBuilder<(), ()> {
-    pub fn new(calculation: Calculation) -> Self {
+impl<T: RealField> TrackerBuilder<T, (), ()> {
+    /// Generate a new `Tracker` for a given `Calculation`
+    pub fn new(calculation: Calculation<T>) -> Self {
         Self {
             info_desk: (),
             mesh: (),
@@ -122,18 +109,21 @@ impl TrackerBuilder<(), ()> {
     }
 }
 
-impl<RefInfoDesk, RefMesh> TrackerBuilder<RefInfoDesk, RefMesh> {
+impl<T: RealField, RefInfoDesk, RefMesh> TrackerBuilder<T, RefInfoDesk, RefMesh> {
+    /// attach an impl of the info desk traits
     pub fn with_info_desk<InfoDesk>(
         self,
         info_desk: &InfoDesk,
-    ) -> TrackerBuilder<&InfoDesk, RefMesh> {
+    ) -> TrackerBuilder<T, &InfoDesk, RefMesh> {
         TrackerBuilder {
             info_desk,
             mesh: self.mesh,
             calculation: self.calculation,
         }
     }
-    pub fn with_mesh<Mesh>(self, mesh: &Mesh) -> TrackerBuilder<RefInfoDesk, &Mesh> {
+
+    /// Attach a reference to a `Mesh`
+    pub fn with_mesh<Mesh>(self, mesh: &Mesh) -> TrackerBuilder<T, RefInfoDesk, &Mesh> {
         TrackerBuilder {
             info_desk: self.info_desk,
             mesh,
@@ -142,29 +132,26 @@ impl<RefInfoDesk, RefMesh> TrackerBuilder<RefInfoDesk, RefMesh> {
     }
 }
 
-impl<'a, T: Copy + RealField, GeometryDim: SmallDim, BandDim: SmallDim, Conn>
-    TrackerBuilder<&'a DeviceInfoDesk<T, GeometryDim, BandDim>, &'a Mesh<T, GeometryDim, Conn>>
+impl<'a, T: Copy + RealField + ToPrimitive, GeometryDim: SmallDim, BandDim: SmallDim, Conn>
+    TrackerBuilder<T, &'a DeviceInfoDesk<T, GeometryDim, BandDim>, &'a Mesh<T, GeometryDim, Conn>>
 where
     Conn: Connectivity<T, GeometryDim>,
     DefaultAllocator: Allocator<T, BandDim>
         + Allocator<T, GeometryDim>
         + Allocator<[T; 3], BandDim>
-        + Allocator<
-            Matrix<T, Dynamic, Const<1_usize>, VecStorage<T, Dynamic, Const<1_usize>>>,
-            BandDim,
-        >,
+        + Allocator<Array1<T>, BandDim>,
 {
+    /// Build an instance of `Tracker`
     pub fn build(self) -> color_eyre::Result<Tracker<'a, T, GeometryDim, BandDim>> {
-        let potential = Potential::from_vector(DVector::zeros(self.mesh.vertices().len()));
-        let empty_vector: DVector<T> = DVector::zeros(self.mesh.vertices().len());
+        let potential = Potential::from_vector(Array1::zeros(self.mesh.vertices().len()));
+        let empty_vector: Array1<T> = Array1::zeros(self.mesh.vertices().len());
         let charge_densities: Charge<T, BandDim> = Charge::new(
-            OVector::<DVector<T>, BandDim>::from_element(empty_vector.clone()),
+            OVector::<Array1<T>, BandDim>::from_element(empty_vector.clone()),
         )?;
         let current_densities: Current<T, BandDim> =
-            Current::new(OVector::<DVector<T>, BandDim>::from_element(empty_vector))?;
+            Current::new(OVector::<Array1<T>, BandDim>::from_element(empty_vector))?;
         Ok(Tracker {
             info_desk: self.info_desk,
-            // mesh: self.mesh,
             potential,
             charge_densities,
             current_densities,

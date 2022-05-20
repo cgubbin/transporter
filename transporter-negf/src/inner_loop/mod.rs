@@ -1,7 +1,6 @@
 mod methods;
 
 use crate::{
-    app::NEGFFloat,
     greens_functions::{AggregateGreensFunctions, GreensFunctionMethods},
     hamiltonian::Hamiltonian,
     outer_loop::Convergence,
@@ -258,7 +257,7 @@ where
 
 pub(crate) struct InnerLoop<'a, T, GeometryDim, Conn, Matrix, SpectralSpace, BandDim>
 where
-    T: NEGFFloat,
+    T: RealField + Copy,
     GeometryDim: SmallDim,
     BandDim: SmallDim,
     Conn: Connectivity<T, GeometryDim>,
@@ -290,7 +289,7 @@ impl<'a, T, GeometryDim, Conn, Matrix, SpectralSpace, BandDim>
         &'a mut SelfEnergy<T, GeometryDim, Conn>,
     >
 where
-    T: NEGFFloat,
+    T: RealField + Copy,
     GeometryDim: SmallDim,
     BandDim: SmallDim,
     Conn: Connectivity<T, GeometryDim>,
