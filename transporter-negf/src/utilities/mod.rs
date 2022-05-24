@@ -12,3 +12,5 @@
 
 /// Assemblers for vertices in the mesh
 pub(crate) mod assemblers;
+
+pub(crate) mod matrices;

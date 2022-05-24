@@ -476,6 +476,9 @@ where
                     &[source, drain],
                 )
             })?;
+
+        // The lesser Green's function should always be anti-hermitian
+        if self.security_checks {}
         Ok(())
     }
 }
@@ -691,6 +694,17 @@ where
                 *element = Complex::new(T::zero(), fermi_functions[1]) * spectral_density;
             }
         }
+
+        // Security check -> It should be the case that \G^< = - [ \G^< ]^{\dag}
+        // as we only have the two colums we just check the diagonal elements are close to zero
+        // Doing a full security check would require computation of the top and bottom rows.
+        let diag_diff = self
+            .diag()
+            .iter()
+            .fold(T::zero(), |acc, (_, x)| acc + x.re + x.re);
+        // TODO Handle the error instead of a panic
+        approx::assert_relative_eq!(diag_diff, T::zero());
+
         Ok(())
     }
 }

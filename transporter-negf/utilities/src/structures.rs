@@ -63,7 +63,7 @@ where
         + num_traits::ToPrimitive
         + num_traits::NumCast,
 {
-    transporter_negf::self_energy::SelfEnergyBuilder::default()
+    transporter_negf::self_energy::SelfEnergyBuilder::new(false)
         .with_mesh(mesh)
         .with_spectral_discretisation(spectral_space)
         .build_coherent()

@@ -40,6 +40,7 @@ pub struct SpectralConfiguration<T> {
 #[derive(Debug, Deserialize)]
 pub struct GlobalConfiguration<T> {
     pub number_of_bands: usize,
+    pub security_checks: bool,
     pub voltage_step: T,
 }
 

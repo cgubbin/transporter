@@ -122,11 +122,12 @@ where
             .with_info_desk(self.info_desk)
             .with_mesh(self.mesh)
             .with_spectral_discretisation(self.spectral)
+            .with_security_checks(self.convergence_settings.security_checks())
             .build()?;
         self.term.move_cursor_to(0, 5)?;
         self.term.clear_to_end_of_screen()?;
         tracing::trace!("Initialising Self Energies");
-        let mut self_energies = SelfEnergyBuilder::default()
+        let mut self_energies = SelfEnergyBuilder::new(self.convergence_settings.security_checks())
             .with_mesh(self.mesh)
             .with_spectral_discretisation(self.spectral)
             .build_coherent()?;
@@ -247,14 +248,16 @@ where
                     .with_info_desk(self.info_desk)
                     .with_mesh(self.mesh)
                     .with_spectral_discretisation(self.spectral)
+                    .with_security_checks(self.convergence_settings.security_checks())
                     .build()?;
                 self.term.move_cursor_to(0, 5)?;
                 self.term.clear_to_end_of_screen()?;
                 tracing::trace!("Initialising Self Energies");
-                let mut self_energies = SelfEnergyBuilder::default()
-                    .with_mesh(self.mesh)
-                    .with_spectral_discretisation(self.spectral)
-                    .build_coherent()?;
+                let mut self_energies =
+                    SelfEnergyBuilder::new(self.convergence_settings.security_checks())
+                        .with_mesh(self.mesh)
+                        .with_spectral_discretisation(self.spectral)
+                        .build_coherent()?;
 
                 // Todo Get the new potential into the new hamiltonian...
                 self.hamiltonian
@@ -280,16 +283,18 @@ where
                     .incoherent_calculation(&Calculation::Incoherent {
                         voltage_target: 0_f64,
                     })
+                    .with_security_checks(self.convergence_settings.security_checks())
                     // .build()?;
                     .build_mixed()?;
                 self.term.move_cursor_to(0, 6)?;
                 self.term.clear_to_end_of_screen()?;
                 tracing::trace!("Initialising Self Energies");
-                let mut self_energies = SelfEnergyBuilder::default()
-                    .with_mesh(self.mesh)
-                    .with_spectral_discretisation(self.spectral)
-                    .build_incoherent(self.info_desk.lead_length)?; // We can only do an incoherent calculation with leads at the moment
-                                                                    // Todo Get the new potential into the new hamiltonian...
+                let mut self_energies =
+                    SelfEnergyBuilder::new(self.convergence_settings.security_checks())
+                        .with_mesh(self.mesh)
+                        .with_spectral_discretisation(self.spectral)
+                        .build_incoherent(self.info_desk.lead_length)?; // We can only do an incoherent calculation with leads at the moment
+
                 self.hamiltonian
                     .update_potential(&self.tracker, self.mesh)?;
 

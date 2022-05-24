@@ -435,6 +435,8 @@ where
             .for_each(|(index, lesser_self_energy_matrix)| {
                 let mut phonon_workspace: Array2<Complex<f64>> =
                     Array2::zeros((num_vertices_in_core, num_vertices_in_core));
+                // let phonon_workspace =
+                //     Array2::from_diag_elem(num_vertices_in_core, Complex::from(1_f64));
                 let energy_index = index % spectral_space.number_of_energy_points();
                 let wavevector_index_k = index / spectral_space.number_of_energy_points();
                 let wavevector_k = spectral_space.wavevector_at(wavevector_index_k);
@@ -475,19 +477,35 @@ where
                             .identify_bracketing_weights(energy_scattered_from)
                             .unwrap();
 
-                        *lesser_self_energy_matrix = (&phonon_workspace
-                            * Complex::from((1_f64 + n_0) * weight * width * wavevector_l)
-                            * prefactor)
-                            .dot(
-                                &(greens_functions.lesser[global_indices[0]]
-                                    .as_ref()
-                                    .core_as_ref()
-                                    * Complex::from(weights[0])
-                                    + greens_functions.lesser[global_indices[1]]
+                        // // TODO remove these checks when satisfied with security checks elsewhere
+                        // assert!(crate::utilities::matrices::is_anti_hermitian(
+                        //     greens_functions.lesser[global_indices[0]]
+                        //         .as_ref()
+                        //         .core_as_ref()
+                        //         .view()
+                        // ));
+                        // assert!(crate::utilities::matrices::is_anti_hermitian(
+                        //     greens_functions.lesser[global_indices[1]]
+                        //         .as_ref()
+                        //         .core_as_ref()
+                        //         .view()
+                        // ));
+
+                        *lesser_self_energy_matrix = lesser_self_energy_matrix.clone()
+                            + (&phonon_workspace
+                                * Complex::from((1_f64 + n_0) * weight * width * wavevector_l)
+                                * prefactor)
+                                .dot(
+                                    &(greens_functions.lesser[global_indices[0]]
                                         .as_ref()
                                         .core_as_ref()
-                                        * Complex::from(weights[1])),
-                            );
+                                        * Complex::from(weights[0])
+                                        + greens_functions.lesser[global_indices[1]]
+                                            .as_ref()
+                                            .core_as_ref()
+                                            * Complex::from(weights[1]))
+                                    .dot(&phonon_workspace.t()),
+                                );
                     }
 
                     if spectral_space.energy_at(energy_index) > e_0 {
@@ -508,6 +526,20 @@ where
                             .identify_bracketing_weights(energy_scattered_to)
                             .unwrap();
 
+                        // // TODO remove these checks when satisfied with security checks elsewhere
+                        // assert!(crate::utilities::matrices::is_anti_hermitian(
+                        //     greens_functions.lesser[global_indices[0]]
+                        //         .as_ref()
+                        //         .core_as_ref()
+                        //         .view()
+                        // ));
+                        // assert!(crate::utilities::matrices::is_anti_hermitian(
+                        //     greens_functions.lesser[global_indices[1]]
+                        //         .as_ref()
+                        //         .core_as_ref()
+                        //         .view()
+                        // ));
+
                         *lesser_self_energy_matrix = lesser_self_energy_matrix.clone()
                             + &(&phonon_workspace
                                 * Complex::from(n_0 * weight * width * wavevector_l)
@@ -520,11 +552,38 @@ where
                                         + greens_functions.lesser[global_indices[1]]
                                             .as_ref()
                                             .core_as_ref()
-                                            * Complex::from(weights[1])),
+                                            * Complex::from(weights[1]))
+                                    .dot(&phonon_workspace.t()),
                                 );
                     };
                 }
             });
+
+        // Security check for the Lesser Self Energy
+        //
+        // It should be the case that, as the lesser Green's function is anti-hermitian and we are left multiplying
+        // by M, and right multiplying by the adjoint M^\dag that the product M G^< M^{\dag} persists the anti
+        // hermiticity of the Green's function. This is necessary for conservation of particle number.
+        if self.security_checks {
+            self.incoherent_lesser
+                .as_deref()
+                .unwrap()
+                .par_iter()
+                .enumerate()
+                .try_for_each(|(index, lesser_self_energy_matrix)| {
+                    // Check the self energy is anti-hermitian
+                    if crate::utilities::matrices::is_anti_hermitian(
+                        lesser_self_energy_matrix.view(),
+                    ) {
+                        Ok(())
+                    } else {
+                        Err(crate::greens_functions::SecurityCheck {
+                            calculation: "lesser localised phonon self-energy".into(),
+                            index,
+                        })
+                    }
+                })?;
+        }
 
         Ok(())
     }
@@ -589,6 +648,9 @@ where
                 let mut phonon_workspace: Array2<Complex<f64>> =
                     Array2::zeros((num_vertices_in_core, num_vertices_in_core));
 
+                // let phonon_workspace =
+                //     Array2::from_diag_elem(num_vertices_in_core, Complex::from(1_f64));
+
                 // Reset the matrix
                 retarded_self_energy_matrix.fill(Complex::from(0_f64));
                 for (_wavevector_index_l, ((weight, width), wavevector_l)) in spectral_space
@@ -625,27 +687,29 @@ where
                             .unwrap();
                         // Form the best guess for the lesser GF at `energy_scattered_from` (Eq 6, no PV)
 
-                        *retarded_self_energy_matrix = (&phonon_workspace
-                            * Complex::from(weight * width * wavevector_l)
-                            * prefactor)
-                            .dot(
-                                &(greens_functions.retarded[global_indices[0]]
-                                    .as_ref()
-                                    .core_as_ref()
-                                    * Complex::from(weights[0] * (n_0))
-                                    + greens_functions.retarded[global_indices[1]]
+                        *retarded_self_energy_matrix = retarded_self_energy_matrix.clone()
+                            + (&phonon_workspace
+                                * Complex::from(weight * width * wavevector_l)
+                                * prefactor)
+                                .dot(
+                                    &(greens_functions.retarded[global_indices[0]]
                                         .as_ref()
                                         .core_as_ref()
-                                        * Complex::from(weights[1] * (n_0))
-                                    - greens_functions.lesser[global_indices[0]]
-                                        .as_ref()
-                                        .core_as_ref()
-                                        * Complex::from(weights[0] / (2_f64))
-                                    - greens_functions.lesser[global_indices[1]]
-                                        .as_ref()
-                                        .core_as_ref()
-                                        * Complex::from(weights[1] / (2_f64))),
-                            );
+                                        * Complex::from(weights[0] * (n_0))
+                                        + greens_functions.retarded[global_indices[1]]
+                                            .as_ref()
+                                            .core_as_ref()
+                                            * Complex::from(weights[1] * (n_0))
+                                        - greens_functions.lesser[global_indices[0]]
+                                            .as_ref()
+                                            .core_as_ref()
+                                            * Complex::from(weights[0] / (2_f64))
+                                        - greens_functions.lesser[global_indices[1]]
+                                            .as_ref()
+                                            .core_as_ref()
+                                            * Complex::from(weights[1] / (2_f64)))
+                                    .dot(&phonon_workspace.t()),
+                                );
                     }
 
                     if spectral_space.energy_at(energy_index) > e_0 {
@@ -686,7 +750,8 @@ where
                                         + greens_functions.lesser[global_indices[1]]
                                             .as_ref()
                                             .core_as_ref()
-                                            * Complex::from(weights[1] / (2_f64))),
+                                            * Complex::from(weights[1] / (2_f64)))
+                                    .dot(&phonon_workspace.t()),
                                 );
                     }
                 }
@@ -747,13 +812,13 @@ where
             let wavevector_k = spectral_space.wavevector_at(wavevector_index_k);
 
             // Sigma^> = \Sigma^R - \Sigma^A + \Sigma^<
-            let incoherent_advanced = self.incoherent_retarded.as_deref().unwrap()[index]
-                .clone()
-                .t()
-                .mapv(|x| x.conj());
-            let _incoherent_greater = &self.incoherent_retarded.as_deref().unwrap()[index]
-                - &incoherent_advanced
-                + &self.incoherent_lesser.as_deref().unwrap()[index];
+            // let incoherent_advanced = self.incoherent_retarded.as_deref().unwrap()[index]
+            //     .clone()
+            //     .t()
+            //     .mapv(|x| x.conj());
+            // let _incoherent_greater = &self.incoherent_retarded.as_deref().unwrap()[index]
+            //     - &incoherent_advanced
+            //     + &self.incoherent_lesser.as_deref().unwrap()[index];
 
             // G^> = G^R - G^A + G^<
             let g_advanced = greens_functions.retarded[index]
@@ -764,6 +829,18 @@ where
                 .mapv(|x| x.conj());
             let g_greater = &greens_functions.retarded[index].as_ref().core_matrix - &g_advanced
                 + &greens_functions.lesser[index].as_ref().core_matrix;
+
+            if self.security_checks {
+                // Check the greater self energy is anti-hermitian
+                if crate::utilities::matrices::is_anti_hermitian(g_greater.view()) {
+                    Ok(())
+                } else {
+                    Err(crate::greens_functions::SecurityCheck {
+                        calculation: "retarded localised phonon self-energy".into(),
+                        index,
+                    })
+                }?
+            }
 
             // R = \Sigma^< G^> - \Sigma^> G^<
             let integrand = (
@@ -936,7 +1013,8 @@ where
                                         + greens_functions.lesser[global_indices[1]]
                                             .as_ref()
                                             .core_as_ref()
-                                            * Complex::from(weights[1])),
+                                            * Complex::from(weights[1]))
+                                    .dot(&phonon_workspace.t()),
                                 ))
                             .dot(&g_greater)
                             .diag()
@@ -993,7 +1071,8 @@ where
                                         + greens_functions.lesser[global_indices[1]]
                                             .as_ref()
                                             .core_as_ref()
-                                            * Complex::from(weights[1])),
+                                            * Complex::from(weights[1]))
+                                    .dot(&phonon_workspace.t()),
                                 ))
                             .dot(&g_greater)
                             .sum()
@@ -1134,7 +1213,8 @@ where
                                         + greens_functions.lesser[global_indices[1]]
                                             .as_ref()
                                             .core_as_ref()
-                                            * Complex::from(weights[1])),
+                                            * Complex::from(weights[1]))
+                                    .dot(&phonon_workspace.t()),
                                 );
 
                             let retarded_se = (&phonon_workspace
@@ -1163,7 +1243,8 @@ where
                                         - greens_functions.lesser[global_indices[1]]
                                             .as_ref()
                                             .core_as_ref()
-                                            * Complex::from(weights[1] / (2_f64))),
+                                            * Complex::from(weights[1] / (2_f64)))
+                                    .dot(&phonon_workspace.t()),
                                 );
 
                             let advanced_se = retarded_se.clone().t().mapv(|x| x.conj());
@@ -1214,7 +1295,8 @@ where
                                         + greens_functions.lesser[global_indices[1]]
                                             .as_ref()
                                             .core_as_ref()
-                                            * Complex::from(weights[1])),
+                                            * Complex::from(weights[1]))
+                                    .dot(&phonon_workspace.t()),
                                 );
 
                             let retarded_se = (&phonon_workspace
@@ -1243,7 +1325,8 @@ where
                                         + greens_functions.lesser[global_indices[1]]
                                             .as_ref()
                                             .core_as_ref()
-                                            * Complex::from(weights[1] / (2_f64))),
+                                            * Complex::from(weights[1] / (2_f64)))
+                                    .dot(&phonon_workspace.t()),
                                 );
 
                             let advanced_se = retarded_se.clone().t().mapv(|x| x.conj());
@@ -1289,15 +1372,27 @@ where
         if *region_a != transporter_mesher::Assignment::Core(2) {
             return 0_f64;
         }
+
+        let region_b = &mesh.vertices()[vertex_b].1;
+        if *region_b != transporter_mesher::Assignment::Core(2) {
+            return 0_f64;
+        }
         let d = 5e-9;
         let center = 37.5e-9;
         let xi = std::f64::consts::PI / d;
         let z_a = &mesh.vertices()[vertex_a].0;
         let z_b = &mesh.vertices()[vertex_b].0;
-        let _abs_offset = (z_a - z_b).norm();
+        let abs_offset = (z_a - z_b).norm();
 
-        ((z_a[0] - center) * xi).cos() * ((z_b[0] - center) * xi).cos()
-            / (wavevector.powi(2) + xi.powi(2))
-            / d
+        // if vertex_a == vertex_b {
+        ((abs_offset - center) * xi).cos() / ((wavevector.powi(2) + xi.powi(2)) * d).sqrt()
+        // } else {
+        //     0_f64
+        // }
+        // if vertex_a == vertex_b {
+        //     1_f64 / (wavevector.powi(2) + xi.powi(2)) / d
+        // } else {
+        //     0_f64
+        // }
     }
 }

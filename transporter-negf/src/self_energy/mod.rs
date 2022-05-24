@@ -16,6 +16,7 @@ mod lo_phonon;
 
 use crate::{
     error::{BuildError, CsrError},
+    greens_functions::SecurityCheck,
     spectral::{SpectralDiscretisation, SpectralSpace, WavevectorSpace},
 };
 use nalgebra::{allocator::Allocator, ComplexField, DefaultAllocator, RealField};
@@ -34,6 +35,8 @@ use transporter_mesher::{Connectivity, ElementMethods, Mesh, SmallDim};
 pub(crate) enum SelfEnergyError {
     #[error(transparent)]
     Computation(#[from] anyhow::Error),
+    #[error(transparent)]
+    SecurityCheck(#[from] SecurityCheck),
 }
 
 #[derive(Clone)]
@@ -53,6 +56,7 @@ where
     pub(crate) ma: PhantomData<GeometryDim>,
     pub(crate) mc: PhantomData<Conn>,
     pub(crate) marker: PhantomData<T>,
+    pub(crate) security_checks: bool,
     /// The retarded self energy at the device contacts
     pub(crate) contact_retarded: Vec<CsMat<Complex<T>>>,
     /// The lesser self-energy at the device contacts
@@ -67,15 +71,17 @@ where
 pub struct SelfEnergyBuilder<T, RefSpectral, RefMesh> {
     pub(crate) spectral: RefSpectral,
     pub(crate) mesh: RefMesh,
+    pub(crate) security_checks: bool,
     marker: PhantomData<T>,
 }
 
-impl<T: ComplexField> Default for SelfEnergyBuilder<T, (), ()> {
+impl<T: ComplexField> SelfEnergyBuilder<T, (), ()> {
     /// Initialise an empty `SelfEnergyBuilder`
-    fn default() -> Self {
+    pub fn new(security_checks: bool) -> Self {
         Self {
             spectral: (),
             mesh: (),
+            security_checks,
             marker: PhantomData,
         }
     }
@@ -90,6 +96,7 @@ impl<T, RefSpectral, RefMesh> SelfEnergyBuilder<T, RefSpectral, RefMesh> {
         SelfEnergyBuilder {
             spectral,
             mesh: self.mesh,
+            security_checks: self.security_checks,
             marker: PhantomData,
         }
     }
@@ -99,6 +106,7 @@ impl<T, RefSpectral, RefMesh> SelfEnergyBuilder<T, RefSpectral, RefMesh> {
         SelfEnergyBuilder {
             spectral: self.spectral,
             mesh,
+            security_checks: self.security_checks,
             marker: PhantomData,
         }
     }
@@ -154,6 +162,7 @@ where
             ma: PhantomData,
             mc: PhantomData,
             marker: PhantomData,
+            security_checks: self.security_checks,
             contact_retarded: vec![matrix; self.spectral.number_of_energies()],
             contact_lesser: None,
             incoherent_retarded: None,
@@ -237,6 +246,7 @@ where
             ma: PhantomData,
             mc: PhantomData,
             marker: PhantomData,
+            security_checks: self.security_checks,
             contact_retarded: vec![csrmatrix.clone(); num_spectral_points],
             contact_lesser: Some(vec![csrmatrix; num_spectral_points]),
             incoherent_retarded: Some(vec![dmatrix.clone(); num_spectral_points]),
@@ -323,6 +333,7 @@ where
             ma: PhantomData,
             mc: PhantomData,
             marker: PhantomData,
+            security_checks: self.security_checks,
             contact_retarded: vec![
                 matrix;
                 self.spectral.number_of_wavevector_points()

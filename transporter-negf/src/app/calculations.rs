@@ -96,6 +96,7 @@ where
         maximum_outer_iterations: config.outer_loop.maximum_iterations,
         inner_tolerance: config.inner_loop.tolerance,
         maximum_inner_iterations: config.inner_loop.maximum_iterations,
+        security_checks: config.global.security_checks,
         calculation_type: Calculation::Coherent {
             voltage_target: 0_f64,
         },
@@ -162,6 +163,7 @@ where
         maximum_outer_iterations: config.outer_loop.maximum_iterations,
         inner_tolerance: config.inner_loop.tolerance,
         maximum_inner_iterations: config.inner_loop.maximum_iterations,
+        security_checks: config.global.security_checks,
         calculation_type: Calculation::Coherent {
             voltage_target: 0_f64,
         },
@@ -265,6 +267,7 @@ where
         maximum_outer_iterations: config.outer_loop.maximum_iterations,
         inner_tolerance: config.inner_loop.tolerance,
         maximum_inner_iterations: config.inner_loop.maximum_iterations,
+        security_checks: config.global.security_checks,
         calculation_type: Calculation::Incoherent {
             voltage_target: 0_f64,
         },

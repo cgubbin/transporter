@@ -35,6 +35,8 @@ pub struct GreensFunctionBuilder<T, RefInfoDesk, RefMesh, RefSpectral, RefCalcul
     pub(crate) spectral: RefSpectral,
     /// Placeholder for the flavour of calculation (coherent or incoherent)
     pub(crate) calculation: RefCalculationType,
+    /// Whether or not to do numerical security checks
+    pub(crate) security_checks: bool,
     /// Marker to set the numeric type `T` on instantiation
     pub(crate) marker: std::marker::PhantomData<T>,
 }
@@ -50,6 +52,7 @@ where
             mesh: (),
             spectral: (),
             calculation: (),
+            security_checks: false,
             marker: std::marker::PhantomData,
         }
     }
@@ -68,6 +71,7 @@ impl<T, RefInfoDesk, RefMesh, RefSpectral, RefCalculationType>
             mesh: self.mesh,
             spectral: self.spectral,
             calculation: self.calculation,
+            security_checks: self.security_checks,
             marker: std::marker::PhantomData,
         }
     }
@@ -82,6 +86,7 @@ impl<T, RefInfoDesk, RefMesh, RefSpectral, RefCalculationType>
             mesh,
             spectral: self.spectral,
             calculation: self.calculation,
+            security_checks: self.security_checks,
             marker: std::marker::PhantomData,
         }
     }
@@ -96,6 +101,7 @@ impl<T, RefInfoDesk, RefMesh, RefSpectral, RefCalculationType>
             mesh: self.mesh,
             spectral,
             calculation: self.calculation,
+            security_checks: self.security_checks,
             marker: std::marker::PhantomData,
         }
     }
@@ -110,6 +116,22 @@ impl<T, RefInfoDesk, RefMesh, RefSpectral, RefCalculationType>
             mesh: self.mesh,
             spectral: self.spectral,
             calculation,
+            security_checks: self.security_checks,
+            marker: std::marker::PhantomData,
+        }
+    }
+
+    /// Change the default security setting
+    pub(crate) fn with_security_checks(
+        self,
+        security_checks: bool,
+    ) -> GreensFunctionBuilder<T, RefInfoDesk, RefMesh, RefSpectral, RefCalculationType> {
+        GreensFunctionBuilder {
+            info_desk: self.info_desk,
+            mesh: self.mesh,
+            spectral: self.spectral,
+            calculation: self.calculation,
+            security_checks,
             marker: std::marker::PhantomData,
         }
     }
@@ -208,6 +230,7 @@ where
         Ok(AggregateGreensFunctions {
             //    spectral: self.spectral,
             info_desk: self.info_desk,
+            security_checks: self.security_checks,
             retarded: spectrum_of_csr,
             advanced: Vec::new(),
             lesser: spectrum_of_diagonal_csr,
@@ -293,8 +316,8 @@ where
         // In the coherent calculation we do not use the advanced or greater Greens function. We therefore do not fill these elements
         // in the resulting `AggregateGreensFunctions` struct
         Ok(AggregateGreensFunctions {
-            //    spectral: self.spectral,
             info_desk: self.info_desk,
+            security_checks: self.security_checks,
             retarded: spectrum_of_csr,
             advanced: Vec::new(),
             lesser: spectrum_of_diagonal_csr,
@@ -335,8 +358,8 @@ where
 
         let num_spectral_points = self.spectral.total_number_of_points();
         Ok(AggregateGreensFunctions {
-            //    spectral: self.spectral,
             info_desk: self.info_desk,
+            security_checks: self.security_checks,
             retarded: vec![matrix.clone(); num_spectral_points],
             advanced: Vec::new(),
             lesser: vec![matrix; num_spectral_points],
@@ -370,8 +393,8 @@ where
 
         let num_spectral_points = self.spectral.total_number_of_points();
         Ok(AggregateGreensFunctions {
-            //    spectral: self.spectral,
             info_desk: self.info_desk,
+            security_checks: self.security_checks,
             retarded: vec![matrix.clone(); num_spectral_points],
             advanced: Vec::new(),
             lesser: vec![matrix; num_spectral_points],
@@ -393,6 +416,8 @@ where
 {
     /// A reference to the problem info desk, allowing material parameters to be evaluated in called methods
     pub(crate) info_desk: &'a DeviceInfoDesk<T, GeometryDim, BandDim>,
+    /// The security check setting
+    pub(crate) security_checks: bool,
     /// The retarded Greens function. The length of the Vec is n_energy * n_wavevector. All wavevectors are stored sequentially before the energy is incremented
     pub(crate) retarded: Vec<GreensFunction<Matrix, T>>,
     pub(crate) advanced: Vec<GreensFunction<Matrix, T>>,

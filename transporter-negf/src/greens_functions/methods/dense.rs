@@ -102,6 +102,16 @@ impl GreensFunctionMethods<f64> for Array2<Complex<f64>> {
             .for_each(|(element, &value)| {
                 *element = value;
             });
+
+        // Security check, it should be the case that G^< = - [G^<]^{\dag}
+        let norm = self
+            .iter()
+            .zip(self.t().iter())
+            .fold(Complex::from(0_f64), |acc, (x, y)| acc + x + y.conj());
+        // Handle the error
+        approx::assert_relative_eq!(norm.re, 0_f64);
+        approx::assert_relative_eq!(norm.im, 0_f64);
+
         Ok(())
     }
 }

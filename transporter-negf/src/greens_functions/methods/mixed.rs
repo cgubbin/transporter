@@ -80,6 +80,10 @@ where
             self_energy,
             spectral_space,
         )?;
+
+        if self.security_checks {
+            self.check_carrier_conservation(voltage, hamiltonian, self_energy, spectral_space)?;
+        }
         Ok(())
     }
 
@@ -194,6 +198,13 @@ where
                 contact_lesser.data_mut()[0] *= Complex::new(0_f64, source);
                 contact_lesser.data_mut()[1] *= Complex::new(0_f64, drain);
 
+                // Security check (anti-hermitian self energy)
+                for contact_lesser_se in contact_lesser.data().iter() {
+                    let sum = contact_lesser_se + contact_lesser_se.conj();
+                    approx::assert_relative_eq!(sum.re, 0_f64, epsilon = std::f64::EPSILON);
+                    approx::assert_relative_eq!(sum.im, 0_f64, epsilon = std::f64::EPSILON);
+                }
+
                 let internal_lesser = compute_internal_lesser_self_energies(
                     energy,
                     wavevector,
@@ -205,6 +216,13 @@ where
                     self.retarded[0].matrix.drain_diagonal.len(),
                     [source, drain],
                 )?;
+
+                // Security check (anti-hermitian self energy)
+                for internal_lesser_se in internal_lesser.iter() {
+                    let sum = internal_lesser_se + internal_lesser_se.conj();
+                    approx::assert_relative_eq!(sum.re, 0_f64, epsilon = std::f64::EPSILON);
+                    approx::assert_relative_eq!(sum.im, 0_f64, epsilon = std::f64::EPSILON);
+                }
 
                 let nrows = self_energy.incoherent_lesser.as_deref().unwrap()[index].nrows();
                 let mut se_lesser_core =
@@ -220,11 +238,167 @@ where
                     &MMatrix {
                         source_diagonal: vec![contact_lesser.data()[0]],
                         drain_diagonal: vec![contact_lesser.data()[1]],
-                        core_matrix: se_lesser_core,
+                        core_matrix: se_lesser_core.clone(),
                     },
                     &[source, drain],
                 )
             })?;
+
+        Ok(())
+    }
+
+    pub(crate) fn check_carrier_conservation<Conn, Spectral>(
+        &self,
+        voltage: f64,
+        hamiltonian: &Hamiltonian<f64>,
+        self_energy: &SelfEnergy<f64, GeometryDim, Conn>,
+        spectral_space: &Spectral,
+    ) -> Result<(), GreensFunctionError>
+    where
+        Conn: Connectivity<f64, GeometryDim> + Send + Sync,
+        Spectral: SpectralDiscretisation<f64>,
+        DefaultAllocator: Allocator<f64, GeometryDim>,
+        <DefaultAllocator as Allocator<f64, GeometryDim>>::Buffer: Send + Sync,
+        <DefaultAllocator as Allocator<f64, BandDim>>::Buffer: Send + Sync,
+        <DefaultAllocator as Allocator<[f64; 3], BandDim>>::Buffer: Send + Sync,
+    {
+        let term = console::Term::stdout();
+        term.move_cursor_to(0, 7).unwrap();
+        term.clear_to_end_of_screen().unwrap();
+        tracing::info!("Calculating lesser Green's functions");
+
+        // Display
+        let spinner_style = ProgressStyle::default_spinner()
+            .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ ")
+            .template(
+                "{prefix:.bold.dim} {spinner} {msg} [{wide_bar:.cyan/blue}] {percent}% ({eta})",
+            );
+        let pb = ProgressBar::with_draw_target(
+            (spectral_space.number_of_energy_points()
+                * spectral_space.number_of_wavevector_points()) as u64,
+            ProgressDrawTarget::term(term, 60),
+        );
+        pb.set_style(spinner_style);
+
+        let n_energies = spectral_space.number_of_energy_points();
+
+        let nrows = self.lesser[0].as_ref().core_as_ref().nrows();
+        let acc: Array1<Complex<f64>> = Array1::zeros(nrows);
+
+        let energy_weights = spectral_space.iter_energy_weights().collect::<Vec<_>>();
+        let wavevector_weights = spectral_space.iter_wavevector_weights().collect::<Vec<_>>();
+        let mut energy_widths = spectral_space.iter_energy_widths().collect::<Vec<_>>();
+        energy_widths.push(energy_widths[energy_widths.len() - 1]);
+        let mut wavevector_widths = spectral_space.iter_wavevector_widths().collect::<Vec<_>>();
+        wavevector_widths.push(wavevector_widths[wavevector_widths.len() - 1]);
+
+        let res = self
+            .lesser
+            .par_iter()
+            .enumerate()
+            .try_fold(
+                || acc.clone(),
+                |acc, (index, gf)| {
+                    let e_idx = index % n_energies;
+                    let k_idx = index / n_energies;
+                    let energy = spectral_space.energy_at(e_idx);
+                    let wavevector = spectral_space.wavevector_at(k_idx);
+
+                    let energy_weight = energy_weights[e_idx];
+                    let wavevector_weight = wavevector_weights[k_idx];
+                    let energy_width = energy_widths[e_idx];
+                    let wavevector_width = wavevector_widths[k_idx];
+
+                    let (source, drain) = (
+                        self.info_desk.get_fermi_function_at_source(energy),
+                        self.info_desk.get_fermi_function_at_drain(energy, voltage),
+                    );
+                    let lesser = gf.as_ref().core_as_ref().clone();
+                    let retarded = self.retarded[index].as_ref().core_as_ref();
+                    // Find the greater Greens function
+                    let advanced = retarded.t().mapv(|x| x.conj());
+                    let greater = retarded - advanced + &lesser;
+
+                    // Find the lesser self energy
+                    let internal_lesser = compute_internal_lesser_self_energies(
+                        energy,
+                        wavevector,
+                        hamiltonian,
+                        [
+                            self_energy.contact_retarded[index].data()[0],
+                            self_energy.contact_retarded[index].data()[1],
+                        ],
+                        self.retarded[0].matrix.drain_diagonal.len(),
+                        [source, drain],
+                    )?;
+
+                    let nrows = self_energy.incoherent_lesser.as_deref().unwrap()[index].nrows();
+                    let mut se_lesser_core =
+                        self_energy.incoherent_lesser.as_deref().unwrap()[index].clone();
+                    se_lesser_core[(0, 0)] += internal_lesser[0];
+                    se_lesser_core[(nrows - 1, nrows - 1)] += internal_lesser[1];
+
+                    // Find the greater self energy
+                    let contact_retarded = self_energy.contact_retarded[index].clone();
+                    let internal_retarded = compute_internal_retarded_self_energies(
+                        energy,
+                        wavevector,
+                        hamiltonian,
+                        [
+                            self_energy.contact_retarded[index].data()[0],
+                            self_energy.contact_retarded[index].data()[1],
+                        ],
+                        self.retarded[0].matrix.drain_diagonal.len(),
+                    )?;
+                    let mut se_retarded_core =
+                        self_energy.incoherent_retarded.as_deref().unwrap()[index].clone();
+                    se_retarded_core[(0, 0)] += internal_retarded[0];
+                    se_retarded_core[(nrows - 1, nrows - 1)] += internal_retarded[1];
+
+                    let se_advanced_core = se_retarded_core.t().mapv(|x| x.conj());
+                    let se_greater_core = se_retarded_core - se_advanced_core + &se_lesser_core;
+
+                    // Sigma^< G^> * dE * k * dk
+                    let outflow = se_lesser_core.dot(&greater).diag().to_owned()
+                        * energy_width
+                        * energy_weight
+                        * wavevector_width
+                        * wavevector_weight
+                        * wavevector;
+                    // Sigma^> G^< * dE * k * dk
+                    let inflow = se_greater_core.dot(&lesser).diag().to_owned()
+                        * energy_width
+                        * energy_weight
+                        * wavevector_width
+                        * wavevector_weight
+                        * wavevector;
+
+                    let res = acc + (outflow - inflow);
+
+                    if true {
+                        Ok(res)
+                    } else {
+                        Err(anyhow::anyhow!("unreachable!()"))
+                    }
+                },
+            )
+            .try_reduce(|| acc.clone(), |acc, x| Ok(acc + x))?;
+
+        let norm = res
+            .iter()
+            .fold(0_f64, |acc, x| acc + x.norm().powi(2))
+            .sqrt();
+        let sum_norm = res.sum().norm();
+
+        if sum_norm / norm < 1e-3 {
+            Ok(())
+        } else {
+            Err(crate::greens_functions::SecurityCheck {
+                calculation: "greens function update, conservation violated".into(),
+                index: 0,
+            })
+        }?;
+
         Ok(())
     }
 }
@@ -316,7 +490,8 @@ impl GreensFunctionMethods<f64> for MMatrix<Complex<f64>> {
         ]);
 
         let matrix = Array2::from_diag_elem(number_of_vertices_in_core, Complex::from(energy))
-            - dense_hamiltonian;
+            - dense_hamiltonian
+            - &self_energy.core_matrix;
 
         let matrix = ndarray_linalg::solve::Inverse::inv(&matrix);
         if let Ok(matrix) = matrix {
@@ -437,7 +612,11 @@ impl GreensFunctionMethods<f64> for MMatrix<Complex<f64>> {
         fermi_functions: &[f64],
     ) -> Result<(), GreensFunctionError> {
         // Expensive matrix inversion
-        let advanced = retarded_greens_function.core_matrix.t().mapv(|x| x.conj());
+        let advanced = retarded_greens_function
+            .core_matrix
+            .view()
+            .t()
+            .mapv(|x| x.conj());
         self.core_matrix
             .iter_mut()
             .zip(
@@ -465,6 +644,19 @@ impl GreensFunctionMethods<f64> for MMatrix<Complex<f64>> {
                 let spectral_density = Complex::new(0_f64, 1_f64) * (g_r - g_r.conj());
                 *element = Complex::new(0_f64, fermi_functions[1]) * spectral_density;
             });
+
+        // Security check, it should be the case that G^< = - [G^<]^{\dag}
+        let norm = self
+            .source_diagonal
+            .iter()
+            .chain(self.drain_diagonal.iter())
+            .fold(Complex::from(0_f64), |acc, x| acc + (x + x.conj()).abs());
+
+        approx::assert_relative_eq!(norm.re, 0_f64, epsilon = std::f64::EPSILON * 100_f64);
+        approx::assert_relative_eq!(norm.im, 0_f64, epsilon = std::f64::EPSILON * 100_f64);
+        assert!(crate::utilities::matrices::is_anti_hermitian(
+            self.core_as_ref().view()
+        ));
 
         Ok(())
     }

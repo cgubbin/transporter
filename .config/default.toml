@@ -1,5 +1,6 @@
 [global]
 number_of_bands = 1
+security_checks = true
 voltage_step = 0.01
 
 [inner_loop]

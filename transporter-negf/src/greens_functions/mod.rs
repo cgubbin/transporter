@@ -29,11 +29,22 @@ pub enum GreensFunctionError {
     /// Failures in the recursive Green's function algorithms
     #[error(transparent)]
     Recursion(#[from] RecursionError),
+    /// A failed security check -> a Hermitian matrix is not computed as hermitian
+    #[error(transparent)]
+    SecurityCheck(#[from] SecurityCheck),
 }
 
 /// Error for the recursive Green's function methods. Currently unimplemented
 #[derive(thiserror::Error, Debug, miette::Diagnostic)]
 pub enum RecursionError {}
+
+/// Error for failed security checks
+#[derive(thiserror::Error, Debug, miette::Diagnostic)]
+#[error("Security error in {calculation:?} at global index {index:?}")]
+pub struct SecurityCheck {
+    pub(crate) calculation: String,
+    pub(crate) index: usize,
+}
 
 #[derive(Clone, Debug)]
 pub(crate) struct GreensFunction<Matrix, T>
@@ -233,8 +244,8 @@ mod test {
 
             // In the coherent calculation we do not use the advanced or greater Greens function, other than transiently
             Ok(AggregateGreensFunctions {
-                //    spectral: self.spectral,
                 info_desk: self.info_desk,
+                security_checks: self.security_checks,
                 retarded: spectrum_of_dmatrix.clone(),
                 advanced: spectrum_of_dmatrix.clone(),
                 lesser: spectrum_of_dmatrix.clone(),
@@ -302,6 +313,7 @@ mod test {
                 ma: std::marker::PhantomData,
                 mc: std::marker::PhantomData,
                 marker: std::marker::PhantomData,
+                security_checks: false,
                 contact_retarded: vec![csrmatrix.clone(); num_spectral_points],
                 contact_lesser: Some(vec![csrmatrix; num_spectral_points]),
                 incoherent_retarded: Some(vec![dmatrix.clone(); num_spectral_points]),
@@ -356,7 +368,7 @@ mod test {
             .build()
             .unwrap();
 
-        let mut self_energy = crate::self_energy::SelfEnergyBuilder::default()
+        let mut self_energy = crate::self_energy::SelfEnergyBuilder::new(false)
             .with_mesh(&mesh)
             .with_spectral_discretisation(&spectral_space)
             .build_coherent()
@@ -374,7 +386,7 @@ mod test {
             .with_spectral_discretisation(&spectral_space)
             .build_dense()
             .unwrap();
-        let mut self_energy = crate::self_energy::SelfEnergyBuilder::default()
+        let mut self_energy = crate::self_energy::SelfEnergyBuilder::new(false)
             .with_mesh(&mesh)
             .with_spectral_discretisation(&spectral_space)
             .build_incoherent_b()
@@ -454,7 +466,7 @@ mod test {
             .build()
             .unwrap();
 
-        let mut self_energy = crate::self_energy::SelfEnergyBuilder::default()
+        let mut self_energy = crate::self_energy::SelfEnergyBuilder::new(false)
             .with_mesh(&mesh)
             .with_spectral_discretisation(&spectral_space)
             .build_coherent()
@@ -472,7 +484,7 @@ mod test {
             .with_spectral_discretisation(&spectral_space)
             .build_dense()
             .unwrap();
-        let mut self_energy = crate::self_energy::SelfEnergyBuilder::default()
+        let mut self_energy = crate::self_energy::SelfEnergyBuilder::new(false)
             .with_mesh(&mesh)
             .with_spectral_discretisation(&spectral_space)
             .build_incoherent_b()
@@ -553,7 +565,7 @@ mod test {
             .build()
             .unwrap();
 
-        let mut self_energy = crate::self_energy::SelfEnergyBuilder::default()
+        let mut self_energy = crate::self_energy::SelfEnergyBuilder::new(false)
             .with_mesh(&mesh)
             .with_spectral_discretisation(&spectral_space)
             .build_coherent()
@@ -565,7 +577,7 @@ mod test {
         gf.update_aggregate_retarded_greens_function(&hamiltonian, &self_energy, &spectral_space)
             .unwrap();
 
-        let mut self_energy = crate::self_energy::SelfEnergyBuilder::default()
+        let mut self_energy = crate::self_energy::SelfEnergyBuilder::new(false)
             .with_mesh(&mesh)
             .with_spectral_discretisation(&spectral_space)
             .build_incoherent_b()
@@ -655,7 +667,7 @@ mod test {
             .build()
             .unwrap();
 
-        let mut self_energy = crate::self_energy::SelfEnergyBuilder::default()
+        let mut self_energy = crate::self_energy::SelfEnergyBuilder::new(false)
             .with_mesh(&mesh)
             .with_spectral_discretisation(&spectral_space)
             .build_coherent()
@@ -667,7 +679,7 @@ mod test {
         gf.update_aggregate_retarded_greens_function(&hamiltonian, &self_energy, &spectral_space)
             .unwrap();
 
-        let mut self_energy = crate::self_energy::SelfEnergyBuilder::default()
+        let mut self_energy = crate::self_energy::SelfEnergyBuilder::new(false)
             .with_mesh(&mesh)
             .with_spectral_discretisation(&spectral_space)
             .build_incoherent_b()
@@ -764,7 +776,7 @@ mod test {
             .build()
             .unwrap();
 
-        let mut self_energy = crate::self_energy::SelfEnergyBuilder::default()
+        let mut self_energy = crate::self_energy::SelfEnergyBuilder::new(false)
             .with_mesh(&mesh)
             .with_spectral_discretisation(&spectral_space)
             .build_coherent()
@@ -776,7 +788,7 @@ mod test {
         gf.update_aggregate_retarded_greens_function(&hamiltonian, &self_energy, &spectral_space)
             .unwrap();
 
-        let mut self_energy = crate::self_energy::SelfEnergyBuilder::default()
+        let mut self_energy = crate::self_energy::SelfEnergyBuilder::new(false)
             .with_mesh(&mesh)
             .with_spectral_discretisation(&spectral_space)
             .build_incoherent_b()
@@ -867,7 +879,7 @@ mod test {
             .build()
             .unwrap();
 
-        let mut self_energy = crate::self_energy::SelfEnergyBuilder::default()
+        let mut self_energy = crate::self_energy::SelfEnergyBuilder::new(false)
             .with_mesh(&mesh)
             .with_spectral_discretisation(&spectral_space)
             .build_coherent()
@@ -879,7 +891,7 @@ mod test {
         gf.update_aggregate_retarded_greens_function(&hamiltonian, &self_energy, &spectral_space)
             .unwrap();
 
-        let mut self_energy = crate::self_energy::SelfEnergyBuilder::default()
+        let mut self_energy = crate::self_energy::SelfEnergyBuilder::new(false)
             .with_mesh(&mesh)
             .with_spectral_discretisation(&spectral_space)
             .build_incoherent_b()
@@ -979,7 +991,7 @@ mod test {
             .build()
             .unwrap();
 
-        let mut self_energy = crate::self_energy::SelfEnergyBuilder::default()
+        let mut self_energy = crate::self_energy::SelfEnergyBuilder::new(false)
             .with_mesh(&mesh)
             .with_spectral_discretisation(&spectral_space)
             .build_coherent()
@@ -994,7 +1006,7 @@ mod test {
         gf.update_aggregate_lesser_greens_function(0., &hamiltonian, &self_energy, &spectral_space)
             .unwrap();
 
-        let mut self_energy = crate::self_energy::SelfEnergyBuilder::default()
+        let mut self_energy = crate::self_energy::SelfEnergyBuilder::new(false)
             .with_mesh(&mesh)
             .with_spectral_discretisation(&spectral_space)
             .build_incoherent_b()
@@ -1100,7 +1112,7 @@ mod test {
             .build()
             .unwrap();
 
-        let mut self_energy = crate::self_energy::SelfEnergyBuilder::default()
+        let mut self_energy = crate::self_energy::SelfEnergyBuilder::new(false)
             .with_mesh(&mesh)
             .with_spectral_discretisation(&spectral_space)
             .build_coherent()
@@ -1115,7 +1127,7 @@ mod test {
         gf.update_aggregate_lesser_greens_function(0., &hamiltonian, &self_energy, &spectral_space)
             .unwrap();
 
-        let mut self_energy = crate::self_energy::SelfEnergyBuilder::default()
+        let mut self_energy = crate::self_energy::SelfEnergyBuilder::new(false)
             .with_mesh(&mesh)
             .with_spectral_discretisation(&spectral_space)
             .build_incoherent_b()
@@ -1219,7 +1231,7 @@ mod test {
             .build()
             .unwrap();
 
-        let mut self_energy = crate::self_energy::SelfEnergyBuilder::default()
+        let mut self_energy = crate::self_energy::SelfEnergyBuilder::new(false)
             .with_mesh(&mesh)
             .with_spectral_discretisation(&spectral_space)
             .build_coherent()
