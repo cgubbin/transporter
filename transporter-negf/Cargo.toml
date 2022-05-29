@@ -43,17 +43,25 @@ sprs = {version = "0.11.0"}
 ndarray-linalg = { git = "https://github.com/cgubbin/ndarray-linalg", features = ["intel-mkl-system"]}
 ndarray-stats = "0.5.0"
 approx = "0.5.1"
+tui = { version = "0.17.0", features = ["crossterm"], optional=true}
+crossterm = {version = "0.23.2", optional=true}
+tokio = { version = "1.18.2", features = ["rt", "sync", "macros", "rt-multi-thread"], optional=true}
+tui-logger = {version = "0.7", optional=true}
+glob = {version = "0.3", optional=true}
 
 [dependencies.conflux]
 git = "https://github.com/cgubbin/conflux"
 branch = "nalgebra"
+
+[features]
+cli = []
+tui = ["dep:tui", "dep:tokio", "dep:tui-logger", "dep:glob", "dep:crossterm"]
 
 [dev-dependencies]
 criterion = "0.3.5"
 matrixcompare = { version = "0.3.0", features = ["proptest-support"] }
 proptest = "1.0.0"
 rand = "0.8.5"
-# simba = { version = "0.7.1", features = ["packed_simd"] }
 utilities = { path = "utilities" }
 
 [profile.release]

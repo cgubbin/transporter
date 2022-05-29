@@ -390,6 +390,9 @@ where
             .sqrt();
         let sum_norm = res.sum().norm();
 
+        dbg!(res, sum_norm, norm);
+        std::thread::sleep(std::time::Duration::from_secs(20));
+
         if sum_norm / norm < 1e-3 {
             Ok(())
         } else {

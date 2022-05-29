@@ -20,3 +20,11 @@ pub enum CsrError {
     #[error(transparent)]
     Construction(#[from] nalgebra_sparse::SparseFormatError),
 }
+
+#[cfg(feature = "tui")]
+#[derive(thiserror::Error, Debug, Diagnostic)]
+/// Error for IO events
+pub enum IOError {
+    #[error("IO Failue: {0}")]
+    IO(#[from] std::io::Error),
+}

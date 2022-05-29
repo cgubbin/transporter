@@ -14,6 +14,9 @@
 
 #![warn(missing_docs)]
 
+#[cfg(feature = "tui")]
+pub mod tui;
+
 mod calculations;
 mod configuration;
 mod error;
@@ -131,6 +134,19 @@ pub enum Calculation<T: RealField> {
     },
 }
 
+impl std::fmt::Display for Calculation<f64> {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            Calculation::Coherent { voltage_target: x } => {
+                write!(f, "coherent calculation to max {:.2}V", x)
+            }
+            Calculation::Incoherent { voltage_target: x } => {
+                write!(f, "incoherent calculation to max {:.2}V", x)
+            }
+        }
+    }
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, ArgEnum)]
 enum Dimension {
     D1,
@@ -141,6 +157,7 @@ enum Dimension {
 ///
 /// This parses the configuration, and the device, identifies the calculation type and
 /// attempts to run it to completion.
+#[cfg(feature = "cli")]
 pub fn run() -> miette::Result<()>
 where
 {

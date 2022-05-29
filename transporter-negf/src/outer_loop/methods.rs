@@ -284,7 +284,6 @@ where
                         voltage_target: 0_f64,
                     })
                     .with_security_checks(self.convergence_settings.security_checks())
-                    // .build()?;
                     .build_mixed()?;
                 self.term.move_cursor_to(0, 6)?;
                 self.term.clear_to_end_of_screen()?;
