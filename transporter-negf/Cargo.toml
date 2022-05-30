@@ -26,7 +26,7 @@ transporter-mesher = { path = "../transporter-mesher" }
 supports-color = "1.3.0"
 owo-colors = { version = "3.3.0", features = ["supports-color", "supports-colors"] }
 console = "0.15.0"
-tracing = "0.1.33"
+tracing = {version = "0.1.33", features = ["log"]}
 tracing-log = { version = "0.1.2", features = ["env_logger"] }
 log = "0.4.16"
 tracing-subscriber = { version = "0.3.11", features = ["env-filter", "fmt","json", "registry"] }
@@ -43,19 +43,15 @@ sprs = {version = "0.11.0"}
 ndarray-linalg = { git = "https://github.com/cgubbin/ndarray-linalg", features = ["intel-mkl-system"]}
 ndarray-stats = "0.5.0"
 approx = "0.5.1"
-tui = { version = "0.17.0", features = ["crossterm"], optional=true}
-crossterm = {version = "0.23.2", optional=true}
-tokio = { version = "1.18.2", features = ["rt", "sync", "macros", "rt-multi-thread"], optional=true}
-tui-logger = {version = "0.7", optional=true}
-glob = {version = "0.3", optional=true}
+tui = { version = "0.17.0", features = ["crossterm"]}
+crossterm = {version = "0.23.2"}
+tokio = { version = "1.18.2", features = ["rt", "sync", "macros", "rt-multi-thread"]}
+tui-logger = {version = "0.7"}
+glob = {version = "0.3"}
 
 [dependencies.conflux]
 git = "https://github.com/cgubbin/conflux"
 branch = "nalgebra"
-
-[features]
-cli = []
-tui = ["dep:tui", "dep:tokio", "dep:tui-logger", "dep:glob", "dep:crossterm"]
 
 [dev-dependencies]
 criterion = "0.3.5"

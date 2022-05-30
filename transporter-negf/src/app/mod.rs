@@ -15,6 +15,7 @@
 #![warn(missing_docs)]
 
 #[cfg(feature = "tui")]
+/// The terminal user interface, which allows for interactive sessions
 pub mod tui;
 
 mod calculations;
@@ -275,7 +276,6 @@ fn build_and_run<BandDim: SmallDim>(
     term: console::Term,
 ) -> Result<(), TransporterError<f64>>
 where
-    //Tracker: crate::HamiltonianInfoDesk<T::RealField>,
     DefaultAllocator: Allocator<f64, U1>
         + Allocator<f64, BandDim>
         + Allocator<[f64; 3], BandDim>
@@ -331,8 +331,11 @@ where
             let mut voltage_step = config.global.voltage_step;
             while current_voltage <= voltage_target {
                 // Do a single calculation
-                term.move_cursor_to(0, 0)?;
-                term.clear_to_end_of_screen()?;
+                #[cfg(feature = "cli")]
+                {
+                    term.move_cursor_to(0, 0)?;
+                    term.clear_to_end_of_screen()?;
+                }
                 tracing::info!("Solving for current voltage {current_voltage}V");
                 match incoherent_calculation_at_fixed_voltage(
                     current_voltage,

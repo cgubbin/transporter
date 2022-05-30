@@ -1,5 +1,5 @@
 use self::actions::{Action, Actions};
-use self::state::AppState;
+use self::state::{AppState, Progress};
 use super::{inputs::keys::Key, io::IoEvent};
 use crate::app::Calculation;
 use glob::glob;
@@ -173,7 +173,7 @@ impl<'a> App {
                                 // TODO Mutate the `app` into the `Running` state
                                 // arrange the tracker and set the calculation to running
                                 let file_to_run = self.file_in_directory(file_to_run).clone();
-                                let tracker = std::sync::Arc::new(state::Tracker::new(file_to_run));
+                                let tracker = std::sync::Arc::new(Progress::new());
                                 self.running(tracker);
                                 sender.send(AppReturn::Run).await.unwrap();
                                 // let file_to_run = self.files_in_directory[selected].clone();
@@ -240,7 +240,11 @@ impl<'a> App {
         self.is_loading = false;
     }
 
-    pub(crate) fn running(&mut self, tracker: std::sync::Arc<state::Tracker>) {
+    pub(crate) fn calculation_type(&self) -> &Calculation<f64> {
+        &self.calculation_type
+    }
+
+    pub(crate) fn running(&mut self, tracker: std::sync::Arc<Progress>) {
         // Update the contextual variables for the running state
         self.actions = vec![Action::Quit].into();
         self.state = AppState::running(tracker);
@@ -257,16 +261,155 @@ impl<'a> App {
     }
 }
 
+use crate::app::build_mesh_with_config;
+use crate::app::configuration::Configuration;
+use crate::app::tracker::TrackerBuilder;
+use crate::device::{info_desk::BuildInfoDesk, Device};
+use nalgebra::U1;
+use transporter_mesher::Mesh1d;
+
 pub(crate) async fn run_simulation(
     app: std::sync::Arc<tokio::sync::Mutex<App>>,
-    sender: tokio::sync::mpsc::Sender<state::Tracker>,
-) {
-    std::thread::sleep(std::time::Duration::from_secs(5));
-    let new_state = state::Tracker::new_random();
-    sender.send(new_state).await.unwrap();
-    log::info!("Sent the state");
-    std::thread::sleep(std::time::Duration::from_secs(5));
+    file_to_run: PathBuf,
+    calculation: Calculation<f64>,
+    sender: tokio::sync::mpsc::Sender<Progress>,
+) -> miette::Result<()> {
+    let config: Configuration<f64> = Configuration::build()?;
+    let device: Device<f64, U1> = Device::build(file_to_run)?;
+    let progress = Progress::new();
+    let info_desk = device.build_device_info_desk()?;
+    let mesh: Mesh1d<f64> =
+        build_mesh_with_config(&config, device).map_err(|e| miette::miette!("{:?}", e))?;
+
+    let tracker = TrackerBuilder::new(calculation)
+        .with_mesh(&mesh)
+        .with_info_desk(&info_desk)
+        .build()
+        .map_err(|e| miette::miette!("{:?}", e))?;
+
+    let term = console::Term::stdout();
+    build_and_run(config, &mesh, &tracker, calculation, progress, &sender)
+        .await
+        .unwrap();
+
+    // // will be available for Subscribers as a tracing Event
+    std::thread::sleep(std::time::Duration::from_secs(1));
     let mut app = app.lock().await;
     log::info!("The simulation finished in the background");
     app.initialized();
+
+    Ok(())
+}
+
+use crate::app::tracker::Tracker;
+use crate::app::TransporterError;
+use crate::outer_loop::{OuterLoopError, Potential};
+use nalgebra::{allocator::Allocator, DefaultAllocator};
+use ndarray::Array1;
+use transporter_mesher::{Mesh, Segment1dConnectivity, SmallDim};
+
+async fn build_and_run<BandDim: SmallDim>(
+    config: Configuration<f64>,
+    mesh: &Mesh<f64, U1, Segment1dConnectivity>,
+    tracker: &Tracker<'_, f64, U1, BandDim>,
+    calculation_type: Calculation<f64>,
+    progress: Progress,
+    sender: &tokio::sync::mpsc::Sender<Progress>,
+) -> Result<(), TransporterError<f64>>
+where
+    DefaultAllocator: Allocator<f64, U1>
+        + Allocator<f64, BandDim>
+        + Allocator<[f64; 3], BandDim>
+        + Allocator<Array1<f64>, BandDim>,
+    <DefaultAllocator as Allocator<f64, U1>>::Buffer: Send + Sync,
+    <DefaultAllocator as Allocator<f64, BandDim>>::Buffer: Send + Sync,
+    <DefaultAllocator as Allocator<[f64; 3], BandDim>>::Buffer: Send + Sync,
+{
+    // Set the initial progress state
+    progress.set_calculation(calculation_type);
+
+    // Todo allow an initial potential to be read from a file
+    let mut initial_potential: Potential<f64> =
+        Potential::from_vector(ndarray::Array1::from(vec![0_f64; mesh.num_nodes()]));
+    match calculation_type {
+        Calculation::Coherent { voltage_target } => {
+            let mut current_voltage = 0_f64;
+            let mut voltage_step = config.global.voltage_step;
+            while current_voltage <= voltage_target {
+                // Set the current voltage and communicate to the master thread
+                progress.set_voltage(current_voltage);
+                sender.send(progress.clone()).await;
+                // Do a single calculation
+                tracing::info!("Solving for current voltage {current_voltage}V");
+                match coherent_calculation_at_fixed_voltage(
+                    current_voltage,
+                    initial_potential.clone(),
+                    &config,
+                    mesh,
+                    tracker,
+                    &sender,
+                ) {
+                    // If it converged proceed
+                    Ok(converged_potential) => {
+                        let _ = std::mem::replace(&mut initial_potential, converged_potential);
+                    }
+                    // If there is an error, either return if unrecoverable or reduce the voltage step
+                    Err(OuterLoopError::FixedPoint(fixed_point_error)) => match fixed_point_error {
+                        conflux::core::FixedPointError::TooManyIterations(_cost) => {
+                            current_voltage -= voltage_step;
+                            voltage_step /= 2_f64;
+                        }
+                        _ => {
+                            return Err(OuterLoopError::FixedPoint(fixed_point_error).into());
+                        }
+                    },
+                    Err(e) => {
+                        return Err(e.into());
+                    }
+                }
+                // increment
+                current_voltage += voltage_step;
+            }
+        }
+        Calculation::Incoherent { voltage_target } => {
+            let mut current_voltage = 0_f64;
+            let mut voltage_step = config.global.voltage_step;
+            while current_voltage <= voltage_target {
+                // Set the current voltage and communicate to the master thread
+                progress.set_voltage(current_voltage);
+                sender.send(progress.clone()).await;
+                tracing::info!("Solving for current voltage {current_voltage}V");
+                match incoherent_calculation_at_fixed_voltage(
+                    current_voltage,
+                    initial_potential.clone(),
+                    &config,
+                    mesh,
+                    tracker,
+                    &sender,
+                ) {
+                    // If it converged proceed
+                    Ok(converged_potential) => {
+                        let _ = std::mem::replace(&mut initial_potential, converged_potential);
+                    }
+                    // If there is an error, either return if unrecoverable or reduce the voltage step
+                    Err(OuterLoopError::FixedPoint(fixed_point_error)) => match fixed_point_error {
+                        conflux::core::FixedPointError::TooManyIterations(_cost) => {
+                            current_voltage -= voltage_step;
+                            voltage_step /= 2_f64;
+                        }
+                        _ => {
+                            return Err(OuterLoopError::FixedPoint(fixed_point_error).into());
+                        }
+                    },
+                    Err(e) => {
+                        return Err(e.into());
+                    }
+                }
+                // increment
+                current_voltage += voltage_step;
+            }
+        }
+    }
+
+    Ok(())
 }

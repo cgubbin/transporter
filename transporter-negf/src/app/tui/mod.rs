@@ -12,7 +12,7 @@ use crate::error::IOError;
 use app::ui;
 use app::{
     run_simulation,
-    state::{AppState, Tracker},
+    state::{AppState, Progress},
     AppReturn,
 };
 use inputs::events::Events;
@@ -71,7 +71,7 @@ pub async fn start_ui<'a>(app: &Arc<Mutex<App>>) -> Result<(), IOError> {
     // A multiple producer, single consumer channel to handle keyboard input
     let (action_sender, mut action_receiver) = tokio::sync::mpsc::channel::<AppReturn>(20);
     // A multiple producer, single consumer channel to monitor the status of the running calculation
-    let (tracker_sender, mut tracker_receiver) = tokio::sync::mpsc::channel::<Tracker>(20);
+    let (progress_sender, mut progress_receiver) = tokio::sync::mpsc::channel::<Progress>(20);
 
     loop {
         let mut local_app = app.lock().await;
@@ -97,14 +97,21 @@ pub async fn start_ui<'a>(app: &Arc<Mutex<App>>) -> Result<(), IOError> {
             }
             // If the `AppReturn` is `Run` begin the simulation from the selected file
             if result == AppReturn::Run {
-                let _result = tokio::spawn(run_simulation(app.clone(), tracker_sender.clone()));
+                if let Some(selected) = files_list_state.selected() {
+                    let _result = tokio::spawn(run_simulation(
+                        app.clone(),
+                        local_app.file_in_directory(selected).clone(),
+                        local_app.calculation_type().clone(),
+                        progress_sender.clone(),
+                    ));
+                }
             }
         }
 
         // Update the `AppState` if the simulation is running
         if let AppState::Running(tracker) = local_app.state_mut() {
             // If there is an updated value in the `tracker_receiver` channel then update `AppState`
-            if let Ok(result) = tracker_receiver.try_recv() {
+            if let Ok(result) = progress_receiver.try_recv() {
                 *tracker = Arc::new(result);
             }
         }

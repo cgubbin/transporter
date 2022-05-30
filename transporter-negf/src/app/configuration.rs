@@ -72,9 +72,9 @@ impl<T: DeserializeOwned> Configuration<T> {
 
         let s = Config::builder()
             // The default settings for the simulation which we use in the general case
-            .add_source(File::with_name("../.config/default"))
+            .add_source(File::with_name(".config/default"))
             // The override settings which may be set by the user, optional
-            .add_source(File::with_name(&format!("../.config/{}", run_mode)).required(false))
+            .add_source(File::with_name(&format!(".config/{}", run_mode)).required(false))
             .build()
             .into_diagnostic()?;
 

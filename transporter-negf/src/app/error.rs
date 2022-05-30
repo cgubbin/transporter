@@ -12,7 +12,7 @@ use miette::Diagnostic;
 use nalgebra::RealField;
 
 #[derive(thiserror::Error, Debug, Diagnostic)]
-pub(crate) enum TransporterError<T: RealField> {
+pub(crate) enum TransporterError<T: RealField + Send + Sync> {
     #[error(transparent)]
     #[diagnostic(code(my_lib::io_error))]
     IoError(#[from] std::io::Error),

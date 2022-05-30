@@ -61,7 +61,6 @@ where
                         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
                         .split(running_chunks[0]);
                     let tracker_info = render_coherent_tracker(
-                        &tracker.file_name,
                         tracker.current_voltage,
                         tracker.outer_iteration,
                         tracker.current_outer_residual,
@@ -82,7 +81,6 @@ where
                         .split(running_chunks[0]);
 
                     let tracker_info = render_incoherent_tracker(
-                        &tracker.file_name,
                         tracker.current_voltage,
                         tracker.outer_iteration,
                         tracker.inner_iteration.unwrap_or(0_u32),
@@ -298,13 +296,12 @@ fn render_files<'a>(
 use std::path::PathBuf;
 
 fn render_coherent_tracker<'a>(
-    file: &PathBuf,
     voltage: f64,
     outer_iteration: u32,
     current_residual: f64,
     target_residual: f64,
 ) -> (Paragraph<'a>, Paragraph<'a>) {
-    let upper_title = format!("Running file {:?}", file);
+    let upper_title = format!("Running file");
     let time_in_seconds = 10.5;
     let upper_box = Paragraph::new(vec![
         Spans::from(Span::raw(format!("Solving for voltage {}V", voltage))),
@@ -344,14 +341,13 @@ fn render_coherent_tracker<'a>(
 }
 
 fn render_incoherent_tracker<'a>(
-    file: &PathBuf,
     voltage: f64,
     outer_iteration: u32,
     inner_iteration: u32,
     current_residual: f64,
     target_residual: f64,
 ) -> (Paragraph<'a>, Paragraph<'a>, Paragraph<'a>) {
-    let upper_title = format!("Running file {:?}", file);
+    let upper_title = format!("Running file");
     let time_in_seconds = 10.5;
     let upper_box = Paragraph::new(vec![
         Spans::from(Span::raw(format!("Solving for voltage {}V", voltage))),

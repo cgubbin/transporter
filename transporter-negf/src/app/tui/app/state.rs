@@ -2,8 +2,7 @@ use crate::app::Calculation;
 use std::path::PathBuf;
 
 #[derive(Clone, Debug)]
-pub struct Tracker {
-    pub file_name: PathBuf,
+pub struct Progress {
     pub current_voltage: f64,
     pub calculation_type: Calculation<f64>,
     pub outer_iteration: u32,
@@ -14,10 +13,9 @@ pub struct Tracker {
     pub target_inner_residual: Option<f64>,
 }
 
-impl Tracker {
-    pub fn new(file_name: PathBuf) -> Self {
+impl Progress {
+    pub fn new() -> Self {
         Self {
-            file_name,
             current_voltage: 0_f64,
             calculation_type: Calculation::Coherent {
                 voltage_target: 0_f64,
@@ -31,20 +29,12 @@ impl Tracker {
         }
     }
 
-    pub fn new_random() -> Self {
-        Self {
-            file_name: PathBuf::new(),
-            current_voltage: 3_f64,
-            calculation_type: Calculation::Coherent {
-                voltage_target: 2_f64,
-            },
-            outer_iteration: 0,
-            inner_iteration: None,
-            current_outer_residual: 1_f64,
-            target_outer_residual: 2_f64,
-            current_inner_residual: None,
-            target_inner_residual: None,
-        }
+    pub(crate) fn set_calculation(&mut self, calculation: Calculation<f64>) {
+        self.calculation_type = calculation;
+    }
+
+    pub(crate) fn set_voltage(&mut self, voltage: f64) {
+        self.current_voltage = voltage;
     }
 }
 
@@ -52,7 +42,7 @@ impl Tracker {
 pub enum AppState {
     Init,
     Initialized,
-    Running(std::sync::Arc<Tracker>),
+    Running(std::sync::Arc<Progress>),
 }
 
 impl Default for AppState {
@@ -66,7 +56,7 @@ impl AppState {
         Self::Initialized
     }
 
-    pub(crate) fn running(tracker: std::sync::Arc<Tracker>) -> Self {
+    pub(crate) fn running(tracker: std::sync::Arc<Progress>) -> Self {
         Self::Running(tracker)
     }
 
