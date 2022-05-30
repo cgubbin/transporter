@@ -21,7 +21,6 @@ pub enum CsrError {
     Construction(#[from] nalgebra_sparse::SparseFormatError),
 }
 
-#[cfg(feature = "tui")]
 #[derive(thiserror::Error, Debug, Diagnostic)]
 /// Error for IO events
 pub enum IOError {

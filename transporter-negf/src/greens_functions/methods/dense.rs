@@ -15,8 +15,6 @@ use crate::{
     self_energy::SelfEnergy,
     spectral::SpectralDiscretisation,
 };
-use console::Term;
-use indicatif::{ParallelProgressIterator, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use nalgebra::{allocator::Allocator, DefaultAllocator, OVector};
 use ndarray::Array1;
 use rayon::prelude::*;
@@ -361,26 +359,26 @@ where
     {
         tracing::info!("retarded ");
 
-        let term = Term::stdout();
+        // let term = Term::stdout();
 
-        // Display
-        let spinner_style = ProgressStyle::default_spinner()
-            .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ ")
-            .template(
-                "{prefix:.bold.dim} {spinner} {msg} [{wide_bar:.cyan/blue}] {percent}% ({eta})",
-            );
-        let pb = ProgressBar::with_draw_target(
-            (spectral_space.number_of_energy_points()
-                * spectral_space.number_of_wavevector_points()) as u64,
-            ProgressDrawTarget::term(term, 60),
-        );
-        pb.set_style(spinner_style);
+        // // Display
+        // let spinner_style = ProgressStyle::default_spinner()
+        //     .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ ")
+        //     .template(
+        //         "{prefix:.bold.dim} {spinner} {msg} [{wide_bar:.cyan/blue}] {percent}% ({eta})",
+        //     );
+        // let pb = ProgressBar::with_draw_target(
+        //     (spectral_space.number_of_energy_points()
+        //         * spectral_space.number_of_wavevector_points()) as u64,
+        //     ProgressDrawTarget::term(term, 60),
+        // );
+        // pb.set_style(spinner_style);
 
         let n_energies = spectral_space.number_of_energy_points();
         self.retarded
             .par_iter_mut()
             .enumerate()
-            .progress_with(pb)
+            // .progress_with(pb)
             // .try_for_each(|(index, (wavevector, energy))| {
             .try_for_each(|(index, gf)| {
                 let energy = spectral_space.energy_at(index % n_energies);
@@ -413,20 +411,20 @@ where
     {
         tracing::info!("lesser");
 
-        let term = Term::stdout();
+        // let term = Term::stdout();
 
-        // Display
-        let spinner_style = ProgressStyle::default_spinner()
-            .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ ")
-            .template(
-                "{prefix:.bold.dim} {spinner} {msg} [{wide_bar:.cyan/blue}] {percent}% ({eta})",
-            );
-        let pb = ProgressBar::with_draw_target(
-            (spectral_space.number_of_energy_points()
-                * spectral_space.number_of_wavevector_points()) as u64,
-            ProgressDrawTarget::term(term, 60),
-        );
-        pb.set_style(spinner_style);
+        // // Display
+        // let spinner_style = ProgressStyle::default_spinner()
+        //     .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ ")
+        //     .template(
+        //         "{prefix:.bold.dim} {spinner} {msg} [{wide_bar:.cyan/blue}] {percent}% ({eta})",
+        //     );
+        // let pb = ProgressBar::with_draw_target(
+        //     (spectral_space.number_of_energy_points()
+        //         * spectral_space.number_of_wavevector_points()) as u64,
+        //     ProgressDrawTarget::term(term, 60),
+        // );
+        // pb.set_style(spinner_style);
 
         let n_energies = spectral_space.number_of_energy_points();
         let n_ele = self.lesser[0].as_ref().shape()[0];
@@ -434,7 +432,7 @@ where
         self.lesser
             .par_iter_mut()
             .enumerate()
-            .progress_with(pb)
+            // .progress_with(pb)
             // .try_for_each(|(index, (wavevector, energy))| {
             .try_for_each(|(index, gf)| {
                 let energy = spectral_space.energy_at(index % n_energies);

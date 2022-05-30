@@ -1,3 +1,4 @@
+use std::time::Duration;
 use tui::{
     backend::Backend,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -65,6 +66,8 @@ where
                         tracker.outer_iteration,
                         tracker.current_outer_residual,
                         tracker.target_outer_residual,
+                        tracker.time_for_voltage_point,
+                        tracker.time_for_outer_iteration,
                     );
                     rect.render_widget(tracker_info.0, tracker_chunks[0]);
                     rect.render_widget(tracker_info.1, tracker_chunks[1]);
@@ -83,7 +86,7 @@ where
                     let tracker_info = render_incoherent_tracker(
                         tracker.current_voltage,
                         tracker.outer_iteration,
-                        tracker.inner_iteration.unwrap_or(0_u32),
+                        tracker.inner_iteration.unwrap_or(0_usize),
                         tracker.current_outer_residual,
                         tracker.target_outer_residual,
                     );
@@ -293,21 +296,22 @@ fn render_files<'a>(
 
     Ok((list, table))
 }
-use std::path::PathBuf;
 
 fn render_coherent_tracker<'a>(
     voltage: f64,
-    outer_iteration: u32,
+    outer_iteration: usize,
     current_residual: f64,
     target_residual: f64,
+    time_for_voltage_point: Duration,
+    time_for_outer_iteration: Duration,
 ) -> (Paragraph<'a>, Paragraph<'a>) {
-    let upper_title = format!("Running file");
-    let time_in_seconds = 10.5;
+    let upper_title = "Running file";
+    let time_for_voltage_point = time_for_voltage_point.as_secs_f32();
     let upper_box = Paragraph::new(vec![
         Spans::from(Span::raw(format!("Solving for voltage {}V", voltage))),
         Spans::from(Span::raw(format!(
-            "Current simulation time {} seconds",
-            time_in_seconds
+            "Current simulation time per voltage {} seconds",
+            time_for_voltage_point
         ))),
     ])
     .style(Style::default().fg(Color::LightCyan))
@@ -321,11 +325,16 @@ fn render_coherent_tracker<'a>(
     );
 
     let outer_loop_title = "Outer Loop";
+    let time_for_outer_iteration = time_for_outer_iteration.as_secs_f32();
     let outer_box = Paragraph::new(vec![
         Spans::from(Span::raw(format!("Outer iteration {}", outer_iteration))),
         Spans::from(Span::raw(format!(
-            "Current time to run one outer loop {}",
-            time_in_seconds
+            "Current residual {} (target {})",
+            current_residual, target_residual
+        ))),
+        Spans::from(Span::raw(format!(
+            "Current time to run one outer loop {:.2} seconds",
+            time_for_outer_iteration
         ))),
     ])
     .style(Style::default().fg(Color::LightCyan))
@@ -342,12 +351,12 @@ fn render_coherent_tracker<'a>(
 
 fn render_incoherent_tracker<'a>(
     voltage: f64,
-    outer_iteration: u32,
-    inner_iteration: u32,
-    current_residual: f64,
-    target_residual: f64,
+    outer_iteration: usize,
+    inner_iteration: usize,
+    _current_residual: f64,
+    _target_residual: f64,
 ) -> (Paragraph<'a>, Paragraph<'a>, Paragraph<'a>) {
-    let upper_title = format!("Running file");
+    let upper_title = "Running file";
     let time_in_seconds = 10.5;
     let upper_box = Paragraph::new(vec![
         Spans::from(Span::raw(format!("Solving for voltage {}V", voltage))),

@@ -14,7 +14,6 @@
 
 #![warn(missing_docs)]
 
-#[cfg(feature = "tui")]
 /// The terminal user interface, which allows for interactive sessions
 pub mod tui;
 
@@ -28,6 +27,7 @@ pub use configuration::Configuration;
 pub(crate) use error::TransporterError;
 pub use tracker::{Tracker, TrackerBuilder};
 
+use self::tui::Progress;
 use crate::{
     device::{info_desk::BuildInfoDesk, reader::Device},
     outer_loop::OuterLoopError,
@@ -36,58 +36,14 @@ use crate::{
 use calculations::{
     coherent_calculation_at_fixed_voltage, incoherent_calculation_at_fixed_voltage,
 };
-use clap::{ArgEnum, Args, Parser};
-use miette::IntoDiagnostic;
+use clap::ArgEnum;
 use nalgebra::{allocator::Allocator, DefaultAllocator, RealField, U1};
 use ndarray::Array1;
 use serde::Deserialize;
 use std::path::PathBuf;
-use telemetry::{get_subscriber, init_subscriber};
+use std::time::Instant;
+use tokio::sync::mpsc::Sender;
 use transporter_mesher::{Mesh, Mesh1d, Segment1dConnectivity, SmallDim};
-
-#[derive(Parser)]
-#[clap(author, version, about, long_about = None)]
-struct App {
-    #[clap(flatten)]
-    global_opts: GlobalOpts,
-}
-
-#[derive(Debug, Args)]
-struct GlobalOpts {
-    /// The path to the input structure
-    input: Option<PathBuf>,
-    /// The output directory
-    output: Option<PathBuf>,
-    /// The level of logging to display
-    #[clap(arg_enum, short, long)]
-    log_level: LogLevel,
-    /// The calculation type
-    #[clap(arg_enum, short, long)]
-    calculation: CalculationDeserialize,
-    /// The dimension of the calculation
-    #[clap(arg_enum, short, long)]
-    dimension: Dimension,
-    /// Whether to display in color
-    #[clap(long, arg_enum, global = true, default_value_t = Color::Auto)]
-    color: Color,
-}
-
-#[derive(Clone, Debug, ArgEnum)]
-enum Color {
-    Always,
-    Auto,
-    Never,
-}
-
-impl Color {
-    fn supports_color_on(self, stream: owo_colors::Stream) -> bool {
-        match self {
-            Color::Always => true,
-            Color::Auto => supports_color::on_cached(stream).is_some(),
-            Color::Never => false,
-        }
-    }
-}
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, ArgEnum)]
 pub(crate) enum LogLevel {
@@ -106,13 +62,6 @@ impl std::string::ToString for LogLevel {
             LogLevel::Error => "ERROR".into(),
         }
     }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, ArgEnum)]
-/// The flavour of calculation to run, local variant with no voltage attached for deserialization
-enum CalculationDeserialize {
-    Coherent,
-    Incoherent,
 }
 
 // #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, ArgEnum)]
@@ -158,85 +107,45 @@ enum Dimension {
 ///
 /// This parses the configuration, and the device, identifies the calculation type and
 /// attempts to run it to completion.
-#[cfg(feature = "cli")]
-pub fn run() -> miette::Result<()>
-where
-{
-    // Prepare terminal environment
-    let term = console::Term::stdout();
-    term.set_title("Transporter NEGF Solver");
-    term.hide_cursor().into_diagnostic()?;
-    // .map_err(|e| TransporterError::IoError(e))?;
-
-    // Parse the global app options
-    let cli = App::parse();
-
+pub fn run_simulation(
+    file_path: PathBuf,
+    calculation: Calculation<f64>,
+    progress_sender: Sender<Progress>,
+) -> miette::Result<()> {
     // Initiate the tracing subscriber
-    let (subscriber, _guard) = get_subscriber(cli.global_opts.log_level);
-    init_subscriber(subscriber);
 
-    let __marker: std::marker::PhantomData<f64> = std::marker::PhantomData;
+    // let (subscriber, _guard) = get_subscriber(LogLevel::Info);
+    // init_subscriber(subscriber);
 
     let config: Configuration<f64> = Configuration::build()?;
 
-    let path = cli
-        .global_opts
-        .input
-        .ok_or_else(|| miette::miette!("a valid input path is necessary"))?;
+    tracing::trace!("Initialising device");
+    let device: Device<f64, U1> = Device::build(file_path)?;
+    let info_desk = device.build_device_info_desk()?;
+    tracing::trace!("Initialising mesh");
+    let mesh: Mesh1d<f64> = build_mesh_with_config(&config, device)
+        .map_err(|e| miette::miette!("{:?}", e))
+        .unwrap();
+    tracing::info!("Mesh initialised with {} elements", mesh.elements().len());
 
-    match cli.global_opts.dimension {
-        Dimension::D1 => {
-            // Initialise and pretty print device
-            term.move_cursor_to(0, 0).into_diagnostic()?;
-            tracing::trace!("Initialising device");
-            let device: Device<f64, U1> = Device::build(path)?;
-            let mut device_display = device.display();
-            if cli
-                .global_opts
-                .color
-                .supports_color_on(owo_colors::Stream::Stdout)
-            {
-                device_display.colorize();
-            }
-            term.move_cursor_to(0, 0).into_diagnostic()?;
-            term.write_line(&format!("{device_display}"))
-                .into_diagnostic()?;
+    let tracker = tracker::TrackerBuilder::new(calculation)
+        .with_mesh(&mesh)
+        .with_info_desk(&info_desk)
+        .build()
+        .map_err(|e| miette::miette!("{:?}", e))?;
 
-            // TODO Info_desk is currently always U1 because it is informed by the device dimension right now, this is no good. We need n_bands to be in-play here.
-            let info_desk = device.build_device_info_desk()?;
+    let mut progress = Progress::default();
+    progress.set_calculation(calculation);
 
-            term.move_cursor_to(0, 0).into_diagnostic()?;
-            term.clear_screen().into_diagnostic()?;
-            tracing::trace!("Initialising mesh");
-
-            let voltage_target = device.voltage_offsets[1];
-            let mesh: Mesh1d<f64> =
-                build_mesh_with_config(&config, device).map_err(|e| miette::miette!("{:?}", e))?;
-
-            term.move_cursor_to(0, 0).into_diagnostic()?;
-            term.clear_to_end_of_screen().into_diagnostic()?;
-
-            tracing::info!("Mesh initialised with {} elements", mesh.elements().len());
-
-            let calculation = match cli.global_opts.calculation {
-                CalculationDeserialize::Coherent => Calculation::Coherent { voltage_target },
-                CalculationDeserialize::Incoherent => Calculation::Incoherent { voltage_target },
-            };
-
-            let tracker = tracker::TrackerBuilder::new(calculation)
-                .with_mesh(&mesh)
-                .with_info_desk(&info_desk)
-                .build()
-                .map_err(|e| miette::miette!("{:?}", e))?;
-
-            build_and_run(config, &mesh, &tracker, calculation, term)
-                .map_err(|e| miette::miette!("{:?}", e))?;
-        }
-        Dimension::D2 => {
-            unimplemented!()
-        }
-    }
-
+    build_and_run(
+        config,
+        &mesh,
+        &tracker,
+        calculation,
+        progress,
+        progress_sender,
+    )
+    .map_err(|e| miette::miette!("{:?}", e))?;
     Ok(())
 }
 
@@ -273,7 +182,8 @@ fn build_and_run<BandDim: SmallDim>(
     mesh: &Mesh<f64, U1, Segment1dConnectivity>,
     tracker: &Tracker<'_, f64, U1, BandDim>,
     calculation_type: Calculation<f64>,
-    term: console::Term,
+    mut progress: Progress,
+    progress_sender: Sender<Progress>,
 ) -> Result<(), TransporterError<f64>>
 where
     DefaultAllocator: Allocator<f64, U1>
@@ -292,17 +202,23 @@ where
             let mut current_voltage = 0_f64;
             let mut voltage_step = config.global.voltage_step;
             while current_voltage <= voltage_target {
+                progress.set_voltage(current_voltage);
+                if let Err(e) = progress_sender.blocking_send(progress.clone()) {
+                    tracing::warn!("Failed to send the progress report {:?}", e);
+                }
+                std::thread::sleep(std::time::Duration::from_secs(2));
                 // Do a single calculation
-                term.move_cursor_to(0, 0)?;
-                term.clear_to_end_of_screen()?;
                 tracing::info!("Solving for current voltage {current_voltage}V");
+
+                let start = Instant::now();
                 match coherent_calculation_at_fixed_voltage(
                     current_voltage,
                     initial_potential.clone(),
                     &config,
                     mesh,
                     tracker,
-                    &term,
+                    progress.clone(),
+                    progress_sender.clone(),
                 ) {
                     // If it converged proceed
                     Ok(converged_potential) => {
@@ -311,6 +227,7 @@ where
                     // If there is an error, either return if unrecoverable or reduce the voltage step
                     Err(OuterLoopError::FixedPoint(fixed_point_error)) => match fixed_point_error {
                         conflux::core::FixedPointError::TooManyIterations(_cost) => {
+                            tracing::info!("Too many outer iterations: decreasing voltage step");
                             current_voltage -= voltage_step;
                             voltage_step /= 2_f64;
                         }
@@ -322,6 +239,8 @@ where
                         return Err(e.into());
                     }
                 }
+                let elapsed = start.elapsed();
+                progress.set_time_for_voltage_point(elapsed);
                 // increment
                 current_voltage += voltage_step;
             }
@@ -330,11 +249,9 @@ where
             let mut current_voltage = 0_f64;
             let mut voltage_step = config.global.voltage_step;
             while current_voltage <= voltage_target {
-                // Do a single calculation
-                #[cfg(feature = "cli")]
-                {
-                    term.move_cursor_to(0, 0)?;
-                    term.clear_to_end_of_screen()?;
+                progress.set_voltage(current_voltage);
+                if let Err(e) = progress_sender.blocking_send(progress.clone()) {
+                    tracing::warn!("Failed to send the progress report {:?}", e);
                 }
                 tracing::info!("Solving for current voltage {current_voltage}V");
                 match incoherent_calculation_at_fixed_voltage(
@@ -343,7 +260,8 @@ where
                     &config,
                     mesh,
                     tracker,
-                    &term,
+                    progress.clone(),
+                    progress_sender.clone(),
                 ) {
                     // If it converged proceed
                     Ok(converged_potential) => {
@@ -352,6 +270,7 @@ where
                     // If there is an error, either return if unrecoverable or reduce the voltage step
                     Err(OuterLoopError::FixedPoint(fixed_point_error)) => match fixed_point_error {
                         conflux::core::FixedPointError::TooManyIterations(_cost) => {
+                            tracing::info!("Too many outer iterations: decreasing voltage step");
                             current_voltage -= voltage_step;
                             voltage_step /= 2_f64;
                         }

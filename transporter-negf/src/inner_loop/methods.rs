@@ -95,8 +95,8 @@ where
         previous_charge_and_current: &mut ChargeAndCurrent<f64, BandDim>,
     ) -> Result<(), InnerLoopError> {
         // In a coherent calculation there is no inner loop
-        self.term.move_cursor_to(0, 5)?;
-        self.term.clear_to_end_of_screen()?;
+        // self.term.move_cursor_to(0, 5)?;
+        // self.term.clear_to_end_of_screen()?;
         tracing::info!("Recalculating electron density");
         self.single_iteration()?;
         // Run the convergence check, this is solely to update the charge and current in the tracker
@@ -183,8 +183,8 @@ where
         //        ));
         //    }
         //}
-        self.term.move_cursor_to(0, 5)?;
-        self.term.clear_to_end_of_screen()?;
+        // self.term.move_cursor_to(0, 5)?;
+        // self.term.clear_to_end_of_screen()?;
         tracing::info!("Recalculating electron density");
         self.single_iteration()?;
         // Run the convergence check, this is solely to update the charge and current in the tracker
@@ -522,8 +522,8 @@ where
         &mut self,
         previous_charge_and_current: &mut ChargeAndCurrent<f64, BandDim>,
     ) -> Result<(), InnerLoopError> {
-        self.term.move_cursor_to(0, 6)?;
-        self.term.clear_to_end_of_screen()?;
+        // self.term.move_cursor_to(0, 6)?;
+        // self.term.clear_to_end_of_screen()?;
         tracing::info!("Inner loop at iteration 1");
         self.single_iteration()?;
 
@@ -531,8 +531,8 @@ where
         // Run to iteration == 2 because on the first iteration incoherent
         // self energies will be trivially zero as the Greens functions are uninitialised
         while !self.is_loop_converged(previous_charge_and_current)? | (iteration < 2) {
-            self.term.move_cursor_to(0, 6)?;
-            self.term.clear_to_end_of_screen()?;
+            // self.term.move_cursor_to(0, 6)?;
+            // self.term.clear_to_end_of_screen()?;
             tracing::info!("Inner loop at iteration {}", iteration + 2);
             self.single_iteration()?;
             iteration += 1;

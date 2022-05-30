@@ -1,26 +1,26 @@
 mod app;
 mod inputs;
 mod io;
+mod rayon_async;
 
 pub(crate) use app::App;
+use rayon_async::async_threadpool::AsyncThreadPool;
 
 use std::{sync::Arc, time::Duration};
 use tokio::sync::Mutex;
 use tui::{backend::CrosstermBackend, widgets::ListState, Terminal};
 
-use crate::error::IOError;
+use crate::{app::run_simulation, error::IOError};
+pub(crate) use app::state::Progress;
 use app::ui;
-use app::{
-    run_simulation,
-    state::{AppState, Progress},
-    AppReturn,
-};
+use app::{state::AppState, AppReturn};
 use inputs::events::Events;
 use inputs::Event;
 use io::{handler::IoAsyncHandler, IoEvent};
 use tokio::sync::mpsc::channel;
 
 #[tokio::main]
+/// Run the TUI app and start the GUI
 pub async fn run() -> Result<(), IOError> {
     let (sync_io_tx, mut sync_io_rx) = channel::<IoEvent>(100);
 
@@ -28,8 +28,8 @@ pub async fn run() -> Result<(), IOError> {
     let app_ui = Arc::clone(&app);
 
     // Configure logger
-    tui_logger::init_logger(log::LevelFilter::Debug).unwrap();
-    tui_logger::set_default_level(log::LevelFilter::Debug);
+    tui_logger::init_logger(log::LevelFilter::Trace).unwrap();
+    tui_logger::set_default_level(log::LevelFilter::Trace);
 
     // Handle IO in a specific thread
     tokio::spawn(async move {
@@ -44,7 +44,8 @@ pub async fn run() -> Result<(), IOError> {
     Ok(())
 }
 
-pub async fn start_ui<'a>(app: &Arc<Mutex<App>>) -> Result<(), IOError> {
+/// Start the gui and run the internal feedback loop
+pub async fn start_ui(app: &Arc<Mutex<App>>) -> Result<(), IOError> {
     // Configure Crossterm for tui
     let stdout = std::io::stdout();
     crossterm::terminal::enable_raw_mode()?;
@@ -73,6 +74,15 @@ pub async fn start_ui<'a>(app: &Arc<Mutex<App>>) -> Result<(), IOError> {
     // A multiple producer, single consumer channel to monitor the status of the running calculation
     let (progress_sender, mut progress_receiver) = tokio::sync::mpsc::channel::<Progress>(20);
 
+    // A one-shot channel to track progress from the rayon pool
+    let (rayon_sender, mut rayon_receiver) = tokio::sync::mpsc::channel::<miette::Result<()>>(1);
+
+    // A threadpool for CPU-intensive simulations
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(8)
+        .build()
+        .unwrap();
+
     loop {
         let mut local_app = app.lock().await;
         // Render the app at the current state
@@ -98,12 +108,21 @@ pub async fn start_ui<'a>(app: &Arc<Mutex<App>>) -> Result<(), IOError> {
             // If the `AppReturn` is `Run` begin the simulation from the selected file
             if result == AppReturn::Run {
                 if let Some(selected) = files_list_state.selected() {
-                    let _result = tokio::spawn(run_simulation(
-                        app.clone(),
-                        local_app.file_in_directory(selected).clone(),
-                        local_app.calculation_type().clone(),
-                        progress_sender.clone(),
-                    ));
+                    let ui_progress_sender = progress_sender.clone();
+                    let file_in_directory = local_app.file_in_directory(selected).clone();
+                    let calculation_to_run = *local_app.calculation_type();
+                    let rayon_tx = rayon_sender.clone();
+
+                    pool.spawn_async(move || {
+                        let res = rayon_tx.blocking_send(run_simulation(
+                            file_in_directory,
+                            calculation_to_run,
+                            ui_progress_sender,
+                        ));
+                        if let Err(e) = res {
+                            log::warn!("Failed to send...: {:?}", e);
+                        }
+                    });
                 }
             }
         }
@@ -114,6 +133,11 @@ pub async fn start_ui<'a>(app: &Arc<Mutex<App>>) -> Result<(), IOError> {
             if let Ok(result) = progress_receiver.try_recv() {
                 *tracker = Arc::new(result);
             }
+        }
+
+        if rayon_receiver.try_recv().is_ok() {
+            tracing::info!("Finished");
+            local_app.initialized();
         }
     }
 

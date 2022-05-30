@@ -3,8 +3,6 @@ use crate::{
     hamiltonian::{AccessMethods, Hamiltonian},
     spectral::SpectralDiscretisation,
 };
-use console::Term;
-use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use nalgebra::{allocator::Allocator, ComplexField, DefaultAllocator, RealField};
 use num_complex::Complex;
 use transporter_mesher::{Connectivity, Mesh, SmallDim};
@@ -26,44 +24,44 @@ where
     where
         Spectral: SpectralDiscretisation<T>,
     {
-        let term = console::Term::stdout();
-        if self.incoherent_lesser.is_none() {
-            term.move_cursor_to(0, 5).unwrap();
-        } else {
-            term.move_cursor_to(0, 7).unwrap();
-        }
-        term.clear_to_end_of_screen().unwrap();
+        // let term = console::Term::stdout();
+        // if self.incoherent_lesser.is_none() {
+        //     term.move_cursor_to(0, 5).unwrap();
+        // } else {
+        //     term.move_cursor_to(0, 7).unwrap();
+        // }
+        // term.clear_to_end_of_screen().unwrap();
         tracing::info!("Updating self-energies");
         match GeometryDim::dim() {
             1 => {
-                let term = Term::stdout();
+                // let term = Term::stdout();
                 let n_vertices = mesh.vertices().len();
 
                 let imaginary_unit = Complex::new(T::zero(), T::one());
 
-                // Display
-                let spinner_style = ProgressStyle::default_spinner()
-                    .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ ")
-                    .template(
-                    "{prefix:.bold.dim} {spinner} {msg} [{wide_bar:.cyan/blue}] {percent}% ({eta})",
-                );
-                let pb = ProgressBar::with_draw_target(
-                    (spectral_space.number_of_energy_points()
-                        * spectral_space.number_of_wavevector_points()) as u64,
-                    ProgressDrawTarget::term(term, 60),
-                );
-                pb.set_style(spinner_style);
+                // // Display
+                // let spinner_style = ProgressStyle::default_spinner()
+                //     .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ ")
+                //     .template(
+                //     "{prefix:.bold.dim} {spinner} {msg} [{wide_bar:.cyan/blue}] {percent}% ({eta})",
+                // );
+                // let pb = ProgressBar::with_draw_target(
+                //     (spectral_space.number_of_energy_points()
+                //         * spectral_space.number_of_wavevector_points()) as u64,
+                //     ProgressDrawTarget::term(term, 60),
+                // );
+                // pb.set_style(spinner_style);
 
                 for (idx, wavevector) in spectral_space.iter_wavevectors().enumerate() {
                     let hamiltonian_matrix = hamiltonian.calculate_total(wavevector);
                     for (jdx, energy) in spectral_space.iter_energies().enumerate() {
-                        pb.set_message(format!(
-                            "Wavevector: {:.1}, Energy {:.5}eV",
-                            wavevector, energy
-                        ));
-                        pb.set_position(
-                            (idx * spectral_space.number_of_energy_points() + jdx) as u64,
-                        );
+                        // pb.set_message(format!(
+                        //     "Wavevector: {:.1}, Energy {:.5}eV",
+                        //     wavevector, energy
+                        // ));
+                        // pb.set_position(
+                        //     (idx * spectral_space.number_of_energy_points() + jdx) as u64,
+                        // );
                         for ([boundary_element, diagonal_element], ind) in [
                             (hamiltonian_matrix.get_elements_at_source(), 0),
                             (hamiltonian_matrix.get_elements_at_drain(), n_vertices - 1),

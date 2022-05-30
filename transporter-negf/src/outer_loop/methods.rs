@@ -14,6 +14,7 @@ use num_complex::Complex;
 use num_traits::ToPrimitive;
 use std::fs::OpenOptions;
 use std::io::Write;
+use std::time::Instant;
 use transporter_mesher::{Connectivity, SmallDim};
 
 /// A wrapper for the calculated electrostatic potential
@@ -115,8 +116,6 @@ where
             .update_potential(Potential::from_vector(previous_potential.clone()));
 
         // TODO Building the gfs and SE here is a bad idea, we should do this else where so it is not redone on every iteration
-        self.term.move_cursor_to(0, 5)?;
-        self.term.clear_to_end_of_screen()?;
         tracing::trace!("Initialising Greens Functions");
         let mut greens_functions = GreensFunctionBuilder::default()
             .with_info_desk(self.info_desk)
@@ -124,8 +123,6 @@ where
             .with_spectral_discretisation(self.spectral)
             .with_security_checks(self.convergence_settings.security_checks())
             .build()?;
-        self.term.move_cursor_to(0, 5)?;
-        self.term.clear_to_end_of_screen()?;
         tracing::trace!("Initialising Self Energies");
         let mut self_energies = SelfEnergyBuilder::new(self.convergence_settings.security_checks())
             .with_mesh(self.mesh)
@@ -174,8 +171,6 @@ where
         // let mut solver = FixedPointSolver::new(mixer, potential.as_ref().clone());
         let mut solver = FixedPointSolver::new(mixer, initial_parameter);
 
-        self.term.move_cursor_to(0, 2)?;
-        self.term.clear_to_end_of_screen()?;
         tracing::info!("Outer self-consistent loop with Anderson mixing");
         let solution = solver.run(self)?;
 
@@ -241,8 +236,6 @@ where
         match self.tracker.calculation {
             Calculation::Coherent { voltage_target: _ } => {
                 dbg!("Coherent Path");
-                self.term.move_cursor_to(0, 5)?;
-                self.term.clear_to_end_of_screen()?;
                 tracing::trace!("Initialising Greens Functions");
                 let mut greens_functions = GreensFunctionBuilder::default()
                     .with_info_desk(self.info_desk)
@@ -250,8 +243,6 @@ where
                     .with_spectral_discretisation(self.spectral)
                     .with_security_checks(self.convergence_settings.security_checks())
                     .build()?;
-                self.term.move_cursor_to(0, 5)?;
-                self.term.clear_to_end_of_screen()?;
                 tracing::trace!("Initialising Self Energies");
                 let mut self_energies =
                     SelfEnergyBuilder::new(self.convergence_settings.security_checks())
@@ -273,8 +264,6 @@ where
                     std::mem::replace(self.tracker.charge_and_currents_mut(), charge_and_currents);
             }
             Calculation::Incoherent { voltage_target: _ } => {
-                self.term.move_cursor_to(0, 6)?;
-                self.term.clear_to_end_of_screen()?;
                 tracing::trace!("Initialising Greens Functions");
                 let mut greens_functions = GreensFunctionBuilder::default()
                     .with_info_desk(self.info_desk)
@@ -285,8 +274,6 @@ where
                     })
                     .with_security_checks(self.convergence_settings.security_checks())
                     .build_mixed()?;
-                self.term.move_cursor_to(0, 6)?;
-                self.term.clear_to_end_of_screen()?;
                 tracing::trace!("Initialising Self Energies");
                 let mut self_energies =
                     SelfEnergyBuilder::new(self.convergence_settings.security_checks())
@@ -351,14 +338,8 @@ where
 
         // We print 1 line further down in an incoherent loop
         match self.tracker.calculation {
-            Calculation::Coherent { voltage_target: _ } => {
-                self.term.move_cursor_to(0, 2)?;
-                self.term.clear_to_end_of_screen()?;
-            }
-            Calculation::Incoherent { voltage_target: _ } => {
-                self.term.move_cursor_to(0, 3)?;
-                self.term.clear_to_end_of_screen()?;
-            }
+            Calculation::Coherent { voltage_target: _ } => {}
+            Calculation::Incoherent { voltage_target: _ } => {}
         }
         tracing::info!("Beginning outer self-consistent loop with Anderson Mixing");
         let solution = solver.run(self)?;
@@ -414,8 +395,6 @@ where
             * self.info_desk.donor_densities[0]
             * crate::constants::ELECTRON_CHARGE;
 
-        self.term.move_cursor_to(0, 5)?;
-        self.term.clear_to_end_of_screen()?;
         tracing::info!("Solving Poisson Equation",);
 
         if residual < target {
@@ -434,8 +413,6 @@ where
             //.add_observer(SlogLogger::term(), ObserverMode::Never)
             .run()?;
 
-        self.term.move_cursor_to(0, 5)?;
-        self.term.clear_to_end_of_screen()?;
         tracing::info!(
             "Poisson calculation converged in {} iterations",
             res.state.iter
@@ -949,18 +926,22 @@ where
         &mut self,
         potential: &Self::Param,
     ) -> Result<Self::Param, conflux::core::FixedPointError<f64>> {
+        let start = Instant::now();
+        self.progress
+            .set_outer_iteration(self.tracker.iteration + 1);
         let target = self.convergence_settings.outer_tolerance()
             * self.info_desk.donor_densities[0]
             * crate::constants::ELECTRON_CHARGE;
+        self.progress.set_target_outer_residual(target);
 
-        self.term.move_cursor_to(0, 3).unwrap();
-        self.term.clear_to_end_of_screen().unwrap();
         if self.tracker.iteration > 0 {
             tracing::info!(
                 "Current residual: {}, target residual: {}",
                 self.tracker.current_residual,
                 target
             );
+            self.progress
+                .set_outer_residual(self.tracker.current_residual);
         } else {
             tracing::info!("First iteration with target residual: {}", target);
         }
@@ -969,13 +950,16 @@ where
         let new_potential = self.single_iteration(&potential).expect("It should work");
         let change = new_potential.l2_dist(&potential).unwrap() / potential.len() as f64;
 
-        self.term.move_cursor_to(0, 5).unwrap();
-        self.term.clear_to_end_of_screen().unwrap();
         tracing::info!("Change in potential per element: {change}");
         self.tracker.iteration += 1;
 
-        // let vec_para = new_potential.iter().copied().collect::<Vec<_>>();
-        // let new_potential = ndarray::Array1::from(vec_para);
+        let duration = start.elapsed();
+
+        self.progress.set_time_for_outer_iteration(duration);
+
+        if let Err(e) = self.mpsc_sender.blocking_send(self.progress.clone()) {
+            tracing::warn!("Failed to send update to master {:?}", e);
+        }
         Ok(new_potential)
     }
 }
@@ -1012,41 +996,45 @@ where
         &mut self,
         potential: &Self::Param,
     ) -> Result<Self::Param, conflux::core::FixedPointError<f64>> {
+        let start = Instant::now();
+        self.progress
+            .set_outer_iteration(self.tracker.iteration + 1);
+
         let target = self.convergence_settings.outer_tolerance()
             * self.info_desk.donor_densities[0]
             * crate::constants::ELECTRON_CHARGE;
 
-        match self.tracker.calculation {
-            Calculation::Coherent { voltage_target: _ } => self.term.move_cursor_to(0, 3).unwrap(),
-            Calculation::Incoherent { voltage_target: _ } => {
-                self.term.move_cursor_to(0, 4).unwrap()
-            }
-        };
-        self.term.clear_to_end_of_screen().unwrap();
+        self.progress.set_target_outer_residual(target);
+
         if self.tracker.iteration > 0 {
             tracing::info!(
                 "Current residual: {}, target residual: {}",
                 self.tracker.current_residual,
                 target
             );
+            self.progress
+                .set_outer_residual(self.tracker.current_residual);
         } else {
             tracing::info!("First iteration with target residual: {}", target);
+        }
+        if let Err(e) = self.mpsc_sender.blocking_send(self.progress.clone()) {
+            tracing::warn!("Failed to send update to master {:?}", e);
         }
         let potential = Array1::from(potential.into_iter().copied().collect::<Vec<_>>());
         let new_potential = self.single_iteration(&potential).expect("It should work");
         let change = new_potential.l2_dist(&potential).unwrap() / potential.len() as f64;
 
-        match self.tracker.calculation {
-            Calculation::Coherent { voltage_target: _ } => self.term.move_cursor_to(0, 5).unwrap(),
-            Calculation::Incoherent { voltage_target: _ } => {
-                self.term.move_cursor_to(0, 6).unwrap()
-            }
-        };
-        self.term.clear_to_end_of_screen().unwrap();
         tracing::info!("Change in potential per element: {change}");
         self.tracker.iteration += 1;
-        // let vec_para = new_potential.iter().copied().collect::<Vec<_>>();
-        // let new_potential = ndarray::Array1::from(vec_para);
+
+        let duration = start.elapsed();
+
+        self.progress.set_time_for_outer_iteration(duration);
+
+        if let Err(e) = self.mpsc_sender.blocking_send(self.progress.clone()) {
+            tracing::warn!("Failed to send update to master {:?}", e);
+        }
+
         Ok(new_potential)
     }
 }

@@ -173,7 +173,7 @@ where
         C: Connectivity<T, InfoDesk::GeometryDim>,
         DefaultAllocator: Allocator<T, InfoDesk::GeometryDim> + Allocator<T, InfoDesk::BandDim>,
     {
-        let term = console::Term::stdout();
+        // let term = console::Term::stdout();
         // Build out the constructors
         let vertex_assembler = VertexAssemblerBuilder::new()
             .with_info_desk(info_desk)
@@ -183,18 +183,18 @@ where
             CsrAssembler::from_vertex_assembler(&vertex_assembler)?;
 
         // Build the fixed component: the differential operator and band offsets
-        term.move_cursor_to(0, 2).unwrap();
-        term.clear_to_end_of_screen().unwrap();
+        // term.move_cursor_to(0, 2).unwrap();
+        // term.clear_to_end_of_screen().unwrap();
         tracing::trace!("Assembling hamiltonian differential operator");
         let fixed = hamiltonian_constructor.assemble_fixed(&vertex_assembler)?;
         // Assemble the potential into a diagonal CsrMatrix
-        term.move_cursor_to(0, 2).unwrap();
-        term.clear_to_end_of_screen().unwrap();
+        // term.move_cursor_to(0, 2).unwrap();
+        // term.clear_to_end_of_screen().unwrap();
         tracing::trace!("Initialising the potential diagonal");
         let potential = hamiltonian_constructor.assemble_potential(&vertex_assembler)?;
         // Assemble the dispersive component
-        term.move_cursor_to(0, 2).unwrap();
-        term.clear_to_end_of_screen().unwrap();
+        // term.move_cursor_to(0, 2).unwrap();
+        // term.clear_to_end_of_screen().unwrap();
         tracing::trace!("Assembling the dispersive diagonal");
         let wavevector = hamiltonian_constructor.assemble_wavevector(&vertex_assembler)?;
 

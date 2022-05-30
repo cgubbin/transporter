@@ -20,7 +20,7 @@ pub(crate) use convergence::Convergence;
 pub(crate) use methods::{Outer, Potential};
 
 use crate::{
-    app::{Calculation, Tracker},
+    app::{tui::Progress, Calculation, Tracker},
     device::info_desk::DeviceInfoDesk,
     error::{BuildError, CsrError},
     hamiltonian::{Hamiltonian, PotentialInfoDesk},
@@ -32,6 +32,7 @@ use ndarray::Array1;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::marker::PhantomData;
+use tokio::sync::mpsc::Sender;
 use transporter_mesher::{Connectivity, Mesh, SmallDim};
 
 ///Error for the outer loop
@@ -66,6 +67,8 @@ pub(crate) struct OuterLoopBuilder<
     RefHamiltonian,
     RefTracker,
     RefInfoDesk,
+    Progress,
+    ProgressSender,
 > {
     mesh: RefMesh,
     spectral: RefSpectral,
@@ -73,10 +76,12 @@ pub(crate) struct OuterLoopBuilder<
     convergence_settings: RefConvergenceSettings,
     tracker: RefTracker,
     info_desk: RefInfoDesk,
+    progress: Progress,
+    mpsc_sender: ProgressSender,
     marker: PhantomData<T>,
 }
 
-impl<T> OuterLoopBuilder<T, (), (), (), (), (), ()> {
+impl<T> OuterLoopBuilder<T, (), (), (), (), (), (), (), ()> {
     /// Initialise an empty OuterLoopBuilder
     pub(crate) fn new() -> Self {
         Self {
@@ -86,6 +91,8 @@ impl<T> OuterLoopBuilder<T, (), (), (), (), (), ()> {
             convergence_settings: (),
             tracker: (),
             info_desk: (),
+            progress: (),
+            mpsc_sender: (),
             marker: PhantomData,
         }
     }
@@ -99,6 +106,8 @@ impl<
         RefHamiltonian,
         RefTracker,
         RefInfoDesk,
+        Progress,
+        ProgressSender,
     >
     OuterLoopBuilder<
         T,
@@ -108,6 +117,8 @@ impl<
         RefHamiltonian,
         RefTracker,
         RefInfoDesk,
+        Progress,
+        ProgressSender,
     >
 {
     /// Attach the problem's `Mesh`
@@ -122,6 +133,8 @@ impl<
         RefHamiltonian,
         RefTracker,
         RefInfoDesk,
+        Progress,
+        ProgressSender,
     > {
         OuterLoopBuilder {
             mesh,
@@ -130,6 +143,8 @@ impl<
             convergence_settings: self.convergence_settings,
             tracker: self.tracker,
             info_desk: self.info_desk,
+            progress: self.progress,
+            mpsc_sender: self.mpsc_sender,
             marker: PhantomData,
         }
     }
@@ -146,6 +161,8 @@ impl<
         RefHamiltonian,
         RefTracker,
         RefInfoDesk,
+        Progress,
+        ProgressSender,
     > {
         OuterLoopBuilder {
             mesh: self.mesh,
@@ -154,6 +171,8 @@ impl<
             convergence_settings: self.convergence_settings,
             tracker: self.tracker,
             info_desk: self.info_desk,
+            progress: self.progress,
+            mpsc_sender: self.mpsc_sender,
             marker: PhantomData,
         }
     }
@@ -170,6 +189,8 @@ impl<
         &mut Hamiltonian,
         RefTracker,
         RefInfoDesk,
+        Progress,
+        ProgressSender,
     > {
         OuterLoopBuilder {
             mesh: self.mesh,
@@ -178,6 +199,8 @@ impl<
             convergence_settings: self.convergence_settings,
             tracker: self.tracker,
             info_desk: self.info_desk,
+            progress: self.progress,
+            mpsc_sender: self.mpsc_sender,
             marker: PhantomData,
         }
     }
@@ -194,6 +217,8 @@ impl<
         RefHamiltonian,
         RefTracker,
         RefInfoDesk,
+        Progress,
+        ProgressSender,
     > {
         OuterLoopBuilder {
             mesh: self.mesh,
@@ -202,6 +227,8 @@ impl<
             convergence_settings,
             tracker: self.tracker,
             info_desk: self.info_desk,
+            progress: self.progress,
+            mpsc_sender: self.mpsc_sender,
             marker: PhantomData,
         }
     }
@@ -218,6 +245,8 @@ impl<
         RefHamiltonian,
         &Tracker,
         RefInfoDesk,
+        Progress,
+        ProgressSender,
     > {
         OuterLoopBuilder {
             mesh: self.mesh,
@@ -226,6 +255,8 @@ impl<
             convergence_settings: self.convergence_settings,
             tracker,
             info_desk: self.info_desk,
+            progress: self.progress,
+            mpsc_sender: self.mpsc_sender,
             marker: PhantomData,
         }
     }
@@ -242,6 +273,8 @@ impl<
         RefHamiltonian,
         RefTracker,
         &InfoDesk,
+        Progress,
+        ProgressSender,
     > {
         OuterLoopBuilder {
             mesh: self.mesh,
@@ -250,6 +283,64 @@ impl<
             convergence_settings: self.convergence_settings,
             tracker: self.tracker,
             info_desk,
+            progress: self.progress,
+            mpsc_sender: self.mpsc_sender,
+            marker: PhantomData,
+        }
+    }
+
+    /// Attach the progress report
+    pub(crate) fn with_progress<P>(
+        self,
+        progress: P,
+    ) -> OuterLoopBuilder<
+        T,
+        RefConvergenceSettings,
+        RefMesh,
+        RefSpectral,
+        RefHamiltonian,
+        RefTracker,
+        RefInfoDesk,
+        P,
+        ProgressSender,
+    > {
+        OuterLoopBuilder {
+            mesh: self.mesh,
+            spectral: self.spectral,
+            hamiltonian: self.hamiltonian,
+            convergence_settings: self.convergence_settings,
+            tracker: self.tracker,
+            info_desk: self.info_desk,
+            progress,
+            mpsc_sender: self.mpsc_sender,
+            marker: PhantomData,
+        }
+    }
+
+    /// Attach the sender
+    pub(crate) fn with_sender<Sender>(
+        self,
+        mpsc_sender: Sender,
+    ) -> OuterLoopBuilder<
+        T,
+        RefConvergenceSettings,
+        RefMesh,
+        RefSpectral,
+        RefHamiltonian,
+        RefTracker,
+        RefInfoDesk,
+        Progress,
+        Sender,
+    > {
+        OuterLoopBuilder {
+            mesh: self.mesh,
+            spectral: self.spectral,
+            hamiltonian: self.hamiltonian,
+            convergence_settings: self.convergence_settings,
+            tracker: self.tracker,
+            info_desk: self.info_desk,
+            progress: self.progress,
+            mpsc_sender,
             marker: PhantomData,
         }
     }
@@ -278,7 +369,8 @@ where
     // TODO A solution tracker, think about this IMPL. We already have a top-level tracker
     tracker: LoopTracker<T, BandDim>,
     info_desk: &'a DeviceInfoDesk<T, GeometryDim, BandDim>,
-    term: console::Term,
+    progress: Progress,
+    mpsc_sender: Sender<Progress>,
 }
 
 impl<'a, T, GeometryDim, Conn, BandDim, SpectralSpace>
@@ -290,6 +382,8 @@ impl<'a, T, GeometryDim, Conn, BandDim, SpectralSpace>
         &'a mut Hamiltonian<T>,
         &'a Tracker<'a, T, GeometryDim, BandDim>,
         &'a DeviceInfoDesk<T, GeometryDim, BandDim>,
+        Progress,
+        Sender<Progress>,
     >
 where
     T: RealField + Copy,
@@ -314,7 +408,8 @@ where
             spectral: self.spectral,
             tracker,
             info_desk: self.info_desk,
-            term: console::Term::stdout(),
+            progress: self.progress,
+            mpsc_sender: self.mpsc_sender,
         })
     }
 
@@ -333,7 +428,8 @@ where
             spectral: self.spectral,
             tracker,
             info_desk: self.info_desk,
-            term: console::Term::stdout(),
+            progress: self.progress,
+            mpsc_sender: self.mpsc_sender.clone(),
         })
     }
 }

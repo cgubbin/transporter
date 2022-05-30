@@ -3,6 +3,7 @@
 //! Delegated functions from `App` to run coherent and incoherent calculations with fixed applied voltage
 //!
 
+use super::Progress;
 use super::{Calculation, Configuration, Tracker};
 use crate::{
     outer_loop::{Outer, OuterLoopError, Potential},
@@ -10,6 +11,7 @@ use crate::{
 };
 use nalgebra::{allocator::Allocator, DefaultAllocator, U1};
 use ndarray::Array1;
+use tokio::sync::mpsc::Sender;
 use transporter_mesher::{Mesh, Segment1dConnectivity, SmallDim};
 
 pub(crate) fn coherent_calculation_at_fixed_voltage<BandDim: SmallDim>(
@@ -18,7 +20,8 @@ pub(crate) fn coherent_calculation_at_fixed_voltage<BandDim: SmallDim>(
     config: &Configuration<f64>,
     mesh: &Mesh<f64, U1, Segment1dConnectivity>,
     tracker: &Tracker<'_, f64, U1, BandDim>,
-    term: &console::Term,
+    progress: Progress,
+    progress_sender: Sender<Progress>,
 ) -> Result<Potential<f64>, OuterLoopError<f64>>
 where
     DefaultAllocator: Allocator<f64, U1>
@@ -30,8 +33,6 @@ where
     <DefaultAllocator as Allocator<[f64; 3], BandDim>>::Buffer: Send + Sync,
 {
     // if all the masses are equal we do not need to discretise wavevectors for a coherent calculation
-    term.move_cursor_to(0, 1)?;
-    term.clear_to_end_of_screen()?;
     tracing::info!("Coherent calculation");
     let first = tracker.info_desk.effective_masses[0].clone();
     match tracker
@@ -46,7 +47,8 @@ where
             config,
             mesh,
             tracker,
-            term,
+            progress,
+            progress_sender,
         ),
         false => coherent_calculation_at_fixed_voltage_with_changing_mass(
             voltage,
@@ -54,7 +56,8 @@ where
             config,
             mesh,
             tracker,
-            term,
+            progress,
+            progress_sender,
         ),
     }
 }
@@ -65,7 +68,8 @@ fn coherent_calculation_at_fixed_voltage_with_constant_mass<BandDim: SmallDim>(
     config: &Configuration<f64>,
     mesh: &Mesh<f64, U1, Segment1dConnectivity>,
     tracker: &Tracker<'_, f64, U1, BandDim>,
-    _term: &console::Term,
+    progress: Progress,
+    progress_sender: Sender<Progress>,
 ) -> Result<Potential<f64>, OuterLoopError<f64>>
 where
     DefaultAllocator: Allocator<f64, U1>
@@ -114,6 +118,8 @@ where
         .with_convergence_settings(&outer_config)
         .with_tracker(tracker)
         .with_info_desk(tracker.info_desk)
+        .with_progress(progress)
+        .with_sender(progress_sender)
         .build(voltage)
         .unwrap();
 
@@ -127,7 +133,8 @@ fn coherent_calculation_at_fixed_voltage_with_changing_mass<BandDim: SmallDim>(
     config: &Configuration<f64>,
     mesh: &Mesh<f64, U1, Segment1dConnectivity>,
     tracker: &Tracker<'_, f64, U1, BandDim>,
-    _term: &console::Term,
+    progress: Progress,
+    progress_sender: Sender<Progress>,
 ) -> Result<Potential<f64>, OuterLoopError<f64>>
 where
     DefaultAllocator: Allocator<f64, U1>
@@ -181,6 +188,8 @@ where
         .with_convergence_settings(&outer_config)
         .with_tracker(tracker)
         .with_info_desk(tracker.info_desk)
+        .with_progress(progress)
+        .with_sender(progress_sender)
         .build(voltage)
         .unwrap();
 
@@ -194,7 +203,8 @@ pub(crate) fn incoherent_calculation_at_fixed_voltage<BandDim: SmallDim>(
     config: &Configuration<f64>,
     mesh: &Mesh<f64, U1, Segment1dConnectivity>,
     tracker: &Tracker<'_, f64, U1, BandDim>,
-    term: &console::Term,
+    mut progress: Progress,
+    progress_sender: Sender<Progress>,
 ) -> Result<Potential<f64>, OuterLoopError<f64>>
 where
     DefaultAllocator: Allocator<f64, U1>
@@ -208,8 +218,6 @@ where
     // if all the masses are equal we do not need to discretise wavevectors for a coherent calculation
     let first = tracker.info_desk.effective_masses[0].clone();
     // do an initial coherent calculation
-    term.move_cursor_to(0, 1)?;
-    term.clear_to_end_of_screen()?;
     tracing::info!("Initial coherent calculation");
     let mut potential = match tracker
         .info_desk
@@ -223,7 +231,8 @@ where
             config,
             mesh,
             tracker,
-            term,
+            progress.clone(),
+            progress_sender.clone(),
         ),
         false => coherent_calculation_at_fixed_voltage_with_changing_mass(
             voltage,
@@ -231,13 +240,12 @@ where
             config,
             mesh,
             tracker,
-            term,
+            progress.clone(),
+            progress_sender.clone(),
         ),
     }?;
     // do an incoherent calculation ramping the scattering from 0 to 1
 
-    term.move_cursor_to(0, 1)?;
-    term.clear_to_end_of_screen()?;
     tracing::info!("Incoherent calculation");
     // Build calculation independent structures
     let mut hamiltonian = crate::hamiltonian::HamiltonianBuilder::default()
@@ -288,6 +296,8 @@ where
         .with_convergence_settings(&outer_config)
         .with_tracker(tracker)
         .with_info_desk(tracker.info_desk)
+        .with_progress(progress.clone())
+        .with_sender(progress_sender.clone())
         .build(voltage)
         .unwrap();
     while outer_loop.scattering_scaling() <= 1_f64 {
@@ -300,8 +310,10 @@ where
         //     let value = value[0].to_f64().unwrap().to_string();
         //     writeln!(file, "{}", value)?;
         // }
-        term.move_cursor_to(0, 2)?;
-        term.clear_to_end_of_screen()?;
+        progress.set_scattering_scale_factor(outer_loop.scattering_scaling());
+        if let Err(err) = progress_sender.blocking_send(progress.clone()) {
+            tracing::warn!("Failed to update the progress status: {:?}", err);
+        }
         tracing::info!("Scattering scaled at {}", outer_loop.scattering_scaling());
         outer_loop.run_loop(potential.clone())?;
         potential = outer_loop.potential_owned();
