@@ -24,7 +24,7 @@ use crate::{
     device::info_desk::DeviceInfoDesk,
     error::{BuildError, CsrError},
     hamiltonian::{Hamiltonian, PotentialInfoDesk},
-    postprocessor::{Charge, ChargeAndCurrent},
+    postprocessor::{Charge, ChargeAndCurrent, Current},
 };
 use miette::Diagnostic;
 use nalgebra::{allocator::Allocator, DefaultAllocator, RealField};
@@ -67,8 +67,8 @@ pub(crate) struct OuterLoopBuilder<
     RefHamiltonian,
     RefTracker,
     RefInfoDesk,
-    Progress,
-    ProgressSender,
+    RefProgress,
+    RefProgressSender,
 > {
     mesh: RefMesh,
     spectral: RefSpectral,
@@ -76,8 +76,8 @@ pub(crate) struct OuterLoopBuilder<
     convergence_settings: RefConvergenceSettings,
     tracker: RefTracker,
     info_desk: RefInfoDesk,
-    progress: Progress,
-    mpsc_sender: ProgressSender,
+    progress: RefProgress,
+    mpsc_sender: RefProgressSender,
     marker: PhantomData<T>,
 }
 
@@ -106,8 +106,8 @@ impl<
         RefHamiltonian,
         RefTracker,
         RefInfoDesk,
-        Progress,
-        ProgressSender,
+        RefProgress,
+        RefProgressSender,
     >
     OuterLoopBuilder<
         T,
@@ -117,8 +117,8 @@ impl<
         RefHamiltonian,
         RefTracker,
         RefInfoDesk,
-        Progress,
-        ProgressSender,
+        RefProgress,
+        RefProgressSender,
     >
 {
     /// Attach the problem's `Mesh`
@@ -133,8 +133,8 @@ impl<
         RefHamiltonian,
         RefTracker,
         RefInfoDesk,
-        Progress,
-        ProgressSender,
+        RefProgress,
+        RefProgressSender,
     > {
         OuterLoopBuilder {
             mesh,
@@ -161,8 +161,8 @@ impl<
         RefHamiltonian,
         RefTracker,
         RefInfoDesk,
-        Progress,
-        ProgressSender,
+        RefProgress,
+        RefProgressSender,
     > {
         OuterLoopBuilder {
             mesh: self.mesh,
@@ -189,8 +189,8 @@ impl<
         &mut Hamiltonian,
         RefTracker,
         RefInfoDesk,
-        Progress,
-        ProgressSender,
+        RefProgress,
+        RefProgressSender,
     > {
         OuterLoopBuilder {
             mesh: self.mesh,
@@ -217,8 +217,8 @@ impl<
         RefHamiltonian,
         RefTracker,
         RefInfoDesk,
-        Progress,
-        ProgressSender,
+        RefProgress,
+        RefProgressSender,
     > {
         OuterLoopBuilder {
             mesh: self.mesh,
@@ -245,8 +245,8 @@ impl<
         RefHamiltonian,
         &Tracker,
         RefInfoDesk,
-        Progress,
-        ProgressSender,
+        RefProgress,
+        RefProgressSender,
     > {
         OuterLoopBuilder {
             mesh: self.mesh,
@@ -273,8 +273,8 @@ impl<
         RefHamiltonian,
         RefTracker,
         &InfoDesk,
-        Progress,
-        ProgressSender,
+        RefProgress,
+        RefProgressSender,
     > {
         OuterLoopBuilder {
             mesh: self.mesh,
@@ -290,9 +290,9 @@ impl<
     }
 
     /// Attach the progress report
-    pub(crate) fn with_progress<P>(
+    pub(crate) fn with_progress<Progress>(
         self,
-        progress: P,
+        progress: &Progress,
     ) -> OuterLoopBuilder<
         T,
         RefConvergenceSettings,
@@ -301,8 +301,8 @@ impl<
         RefHamiltonian,
         RefTracker,
         RefInfoDesk,
-        P,
-        ProgressSender,
+        &Progress,
+        RefProgressSender,
     > {
         OuterLoopBuilder {
             mesh: self.mesh,
@@ -320,7 +320,7 @@ impl<
     /// Attach the sender
     pub(crate) fn with_sender<Sender>(
         self,
-        mpsc_sender: Sender,
+        mpsc_sender: &Sender,
     ) -> OuterLoopBuilder<
         T,
         RefConvergenceSettings,
@@ -329,8 +329,8 @@ impl<
         RefHamiltonian,
         RefTracker,
         RefInfoDesk,
-        Progress,
-        Sender,
+        RefProgress,
+        &Sender,
     > {
         OuterLoopBuilder {
             mesh: self.mesh,
@@ -367,10 +367,10 @@ where
     /// The Hamiltonian associated with the problem
     hamiltonian: &'a mut Hamiltonian<T>,
     // TODO A solution tracker, think about this IMPL. We already have a top-level tracker
-    tracker: LoopTracker<T, BandDim>,
+    pub(crate) tracker: LoopTracker<T, BandDim>,
     info_desk: &'a DeviceInfoDesk<T, GeometryDim, BandDim>,
-    progress: Progress,
-    mpsc_sender: Sender<Progress>,
+    progress: Progress<T>,
+    mpsc_sender: Sender<Progress<T>>,
 }
 
 impl<'a, T, GeometryDim, Conn, BandDim, SpectralSpace>
@@ -382,8 +382,8 @@ impl<'a, T, GeometryDim, Conn, BandDim, SpectralSpace>
         &'a mut Hamiltonian<T>,
         &'a Tracker<'a, T, GeometryDim, BandDim>,
         &'a DeviceInfoDesk<T, GeometryDim, BandDim>,
-        Progress,
-        Sender<Progress>,
+        &'a Progress<T>,
+        &'a Sender<Progress<T>>,
     >
 where
     T: RealField + Copy,
@@ -408,8 +408,8 @@ where
             spectral: self.spectral,
             tracker,
             info_desk: self.info_desk,
-            progress: self.progress,
-            mpsc_sender: self.mpsc_sender,
+            progress: self.progress.clone(),
+            mpsc_sender: self.mpsc_sender.clone(),
         })
     }
 
@@ -428,7 +428,7 @@ where
             spectral: self.spectral,
             tracker,
             info_desk: self.info_desk,
-            progress: self.progress,
+            progress: self.progress.clone(),
             mpsc_sender: self.mpsc_sender.clone(),
         })
     }
@@ -489,6 +489,10 @@ where
         self.charge_and_currents.charge_as_ref()
     }
 
+    pub(crate) fn current_as_ref(&self) -> &Current<T, BandDim> {
+        self.charge_and_currents.current_as_ref()
+    }
+
     pub(crate) fn potential_mut(&mut self) -> &mut Potential<T> {
         &mut self.potential
     }
@@ -507,6 +511,10 @@ where
 
     pub(crate) fn scattering_scaling(&self) -> T {
         self.scattering_scaling
+    }
+
+    pub(crate) fn potential_as_ref(&self) -> &Array1<T> {
+        self.potential.as_ref()
     }
 
     pub(crate) fn write_to_file(&self, calculation: &str) -> Result<(), std::io::Error>

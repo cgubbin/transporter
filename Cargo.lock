@@ -753,19 +753,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "indicatif"
-version = "0.16.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d207dc617c7a380ab07ff572a6e52fa202a2a8f355860ac9c38e23f8196be1b"
-dependencies = [
- "console",
- "lazy_static",
- "number_prefix",
- "rayon",
- "regex",
-]
-
-[[package]]
 name = "instant"
 version = "0.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1321,12 +1308,6 @@ checksum = "2819ce041d2ee131036f4fc9d6ae7ae125a3a40e97ba64d04fe799ad9dabbb44"
 dependencies = [
  "libc",
 ]
-
-[[package]]
-name = "number_prefix"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "830b246a0e5f20af87141b25c173cd1b609bd7779a4617d6ec582abaf90870f3"
 
 [[package]]
 name = "numeric_literals"
@@ -2248,17 +2229,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tracing-slog"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "943e2eb329c27f5731cc63f62a4ff4526439b2fdbe61c8c9816a82ba80139d5f"
-dependencies = [
- "lazy_static",
- "slog",
- "tracing-core",
-]
-
-[[package]]
 name = "tracing-subscriber"
 version = "0.3.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2304,7 +2274,6 @@ dependencies = [
  "criterion",
  "crossterm 0.23.2",
  "glob",
- "indicatif",
  "itertools",
  "log",
  "matrixcompare",
@@ -2331,7 +2300,6 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-log",
- "tracing-slog",
  "tracing-subscriber",
  "transporter-mesher",
  "tui",

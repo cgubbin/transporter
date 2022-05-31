@@ -10,8 +10,6 @@ use crate::{
     greens_functions::{methods::mixed::MMatrix, AggregateGreensFunctions},
     spectral::SpectralDiscretisation,
 };
-use console::Term;
-use indicatif::{ParallelProgressIterator, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use nalgebra::{allocator::Allocator, DefaultAllocator};
 use ndarray::{Array1, Array2};
 use num_complex::Complex;
@@ -56,28 +54,12 @@ where
 
         assert!(self.incoherent_lesser.is_some());
 
-        let term = Term::stdout();
-
-        // Display
-        let spinner_style = ProgressStyle::default_spinner()
-            .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ ")
-            .template(
-                "{prefix:.bold.dim} {spinner} {msg} [{wide_bar:.cyan/blue}] {percent}% ({eta})",
-            );
-        let pb = ProgressBar::with_draw_target(
-            (spectral_space.number_of_energy_points()
-                * spectral_space.number_of_wavevector_points()) as u64,
-            ProgressDrawTarget::term(term, 60),
-        );
-        pb.set_style(spinner_style);
-
         // For each LO phonon wavevector integrate over all the connected electronic wavevectors
         self.incoherent_lesser
             .as_deref_mut()
             .unwrap()
             .par_iter_mut()
             .enumerate()
-            .progress_with(pb)
             .for_each(|(index, lesser_self_energy_matrix)| {
                 let energy_index = index % spectral_space.number_of_energy_points();
                 let wavevector_index_k = index / spectral_space.number_of_energy_points();
@@ -207,26 +189,11 @@ where
 
         assert!(self.incoherent_retarded.is_some());
 
-        // Display
-        let term = Term::stdout();
-        let spinner_style = ProgressStyle::default_spinner()
-            .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ ")
-            .template(
-                "{prefix:.bold.dim} {spinner} {msg} [{wide_bar:.cyan/blue}] {percent}% ({eta})",
-            );
-        let pb = ProgressBar::with_draw_target(
-            (spectral_space.number_of_energy_points()
-                * spectral_space.number_of_wavevector_points()) as u64,
-            ProgressDrawTarget::term(term, 60),
-        );
-        pb.set_style(spinner_style);
-
         self.incoherent_retarded
             .as_deref_mut()
             .unwrap()
             .par_iter_mut()
             .enumerate()
-            .progress_with(pb)
             .for_each(|(index, retarded_self_energy_matrix)| {
                 let energy_index = index % spectral_space.number_of_energy_points();
                 let wavevector_index_k = index / spectral_space.number_of_energy_points();
@@ -396,9 +363,6 @@ where
         <DefaultAllocator as Allocator<f64, BandDim>>::Buffer: Send + Sync,
         <DefaultAllocator as Allocator<[f64; 3], BandDim>>::Buffer: Send + Sync,
     {
-        let term = console::Term::stdout();
-        term.move_cursor_to(0, 7).unwrap();
-        term.clear_to_end_of_screen().unwrap();
         tracing::info!("Calculating LO Lesser self energy");
         let n_0 = 0.3481475088177923; // The LO phonon population, to be updated as we pass through the loop
         let e_0 = 0.035; // The phonon energy in electron volts
@@ -412,26 +376,12 @@ where
 
         assert!(self.incoherent_lesser.is_some());
 
-        // Display
-        let spinner_style = ProgressStyle::default_spinner()
-            .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ ")
-            .template(
-                "{prefix:.bold.dim} {spinner} {msg} [{wide_bar:.cyan/blue}] {percent}% ({eta})",
-            );
-        let pb = ProgressBar::with_draw_target(
-            (spectral_space.number_of_energy_points()
-                * spectral_space.number_of_wavevector_points()) as u64,
-            ProgressDrawTarget::term(term, 60),
-        );
-        pb.set_style(spinner_style);
-
         // For each LO phonon wavevector integrate over all the connected electronic wavevectors
         self.incoherent_lesser
             .as_deref_mut()
             .unwrap()
             .par_iter_mut()
             .enumerate()
-            .progress_with(pb)
             .for_each(|(index, lesser_self_energy_matrix)| {
                 let mut phonon_workspace: Array2<Complex<f64>> =
                     Array2::zeros((num_vertices_in_core, num_vertices_in_core));
@@ -607,9 +557,6 @@ where
         <DefaultAllocator as Allocator<f64, BandDim>>::Buffer: Send + Sync,
         <DefaultAllocator as Allocator<[f64; 3], BandDim>>::Buffer: Send + Sync,
     {
-        let term = console::Term::stdout();
-        term.move_cursor_to(0, 7).unwrap();
-        term.clear_to_end_of_screen().unwrap();
         tracing::info!("Calculating LO retarded self energy");
         let n_0 = 0.3481475088177923; // The LO phonon population, to be updated as we pass through the loop
         let e_0 = 0.035; // The phonon energy in electron volts
@@ -622,25 +569,11 @@ where
 
         assert!(self.incoherent_retarded.is_some());
 
-        // Display
-        let spinner_style = ProgressStyle::default_spinner()
-            .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ ")
-            .template(
-                "{prefix:.bold.dim} {spinner} {msg} [{wide_bar:.cyan/blue}] {percent}% ({eta})",
-            );
-        let pb = ProgressBar::with_draw_target(
-            (spectral_space.number_of_energy_points()
-                * spectral_space.number_of_wavevector_points()) as u64,
-            ProgressDrawTarget::term(term, 60),
-        );
-        pb.set_style(spinner_style);
-
         self.incoherent_retarded
             .as_deref_mut()
             .unwrap()
             .par_iter_mut()
             .enumerate()
-            .progress_with(pb)
             .for_each(|(index, retarded_self_energy_matrix)| {
                 let energy_index = index % spectral_space.number_of_energy_points();
                 let wavevector_index_k = index / spectral_space.number_of_energy_points();
@@ -785,9 +718,6 @@ where
         <DefaultAllocator as Allocator<f64, BandDim>>::Buffer: Send + Sync,
         <DefaultAllocator as Allocator<[f64; 3], BandDim>>::Buffer: Send + Sync,
     {
-        let term = console::Term::stdout();
-        term.move_cursor_to(0, 7).unwrap();
-        term.clear_to_end_of_screen().unwrap();
         tracing::info!("Calculating LO scattering rate");
 
         assert!(self.incoherent_retarded.is_some());
@@ -893,9 +823,6 @@ where
         <DefaultAllocator as Allocator<f64, BandDim>>::Buffer: Send + Sync,
         <DefaultAllocator as Allocator<[f64; 3], BandDim>>::Buffer: Send + Sync,
     {
-        let term = console::Term::stdout();
-        term.move_cursor_to(0, 7).unwrap();
-        term.clear_to_end_of_screen().unwrap();
         tracing::info!("Calculating LO generation rate");
 
         let mut result = Array1::zeros(spectral_space.number_of_wavevector_points());
@@ -916,25 +843,11 @@ where
 
         assert!(self.incoherent_lesser.is_some());
 
-        // Display
-        let spinner_style = ProgressStyle::default_spinner()
-            .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ ")
-            .template(
-                "{prefix:.bold.dim} {spinner} {msg} [{wide_bar:.cyan/blue}] {percent}% ({eta})",
-            );
-        let pb = ProgressBar::with_draw_target(
-            spectral_space.number_of_wavevector_points() as u64,
-            ProgressDrawTarget::term(term, 60),
-        );
-        pb.set_style(spinner_style);
-
-        // For each LO phonon wavevector integrate over all the connected electronic wavevectors
         result
             .as_slice_mut()
             .unwrap()
             .par_iter_mut()
             .enumerate()
-            .progress_with(pb)
             .for_each(|(wavevector_index_l, element)| {
                 let mut phonon_workspace: Array2<Complex<f64>> =
                     Array2::zeros((num_vertices_in_core, num_vertices_in_core));
@@ -1104,9 +1017,6 @@ where
         <DefaultAllocator as Allocator<f64, BandDim>>::Buffer: Send + Sync,
         <DefaultAllocator as Allocator<[f64; 3], BandDim>>::Buffer: Send + Sync,
     {
-        let term = console::Term::stdout();
-        term.move_cursor_to(0, 7).unwrap();
-        term.clear_to_end_of_screen().unwrap();
         tracing::info!("Calculating LO generation rate");
 
         let mut result = Array1::zeros(spectral_space.number_of_wavevector_points());
@@ -1127,25 +1037,11 @@ where
 
         assert!(self.incoherent_lesser.is_some());
 
-        // Display
-        let spinner_style = ProgressStyle::default_spinner()
-            .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ ")
-            .template(
-                "{prefix:.bold.dim} {spinner} {msg} [{wide_bar:.cyan/blue}] {percent}% ({eta})",
-            );
-        let pb = ProgressBar::with_draw_target(
-            spectral_space.number_of_wavevector_points() as u64,
-            ProgressDrawTarget::term(term, 60),
-        );
-        pb.set_style(spinner_style);
-
-        // For each LO phonon wavevector integrate over all the connected electronic wavevectors
         result
             .as_slice_mut()
             .unwrap()
             .par_iter_mut()
             .enumerate()
-            .progress_with(pb)
             .for_each(|(wavevector_index_l, element)| {
                 let mut phonon_workspace: Array2<Complex<f64>> =
                     Array2::zeros((num_vertices_in_core, num_vertices_in_core));

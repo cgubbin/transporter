@@ -6,6 +6,7 @@
 use super::Progress;
 use super::{Calculation, Configuration, Tracker};
 use crate::{
+    app::tui::NEGFResult,
     outer_loop::{Outer, OuterLoopError, Potential},
     spectral::WavevectorSpace,
 };
@@ -20,8 +21,9 @@ pub(crate) fn coherent_calculation_at_fixed_voltage<BandDim: SmallDim>(
     config: &Configuration<f64>,
     mesh: &Mesh<f64, U1, Segment1dConnectivity>,
     tracker: &Tracker<'_, f64, U1, BandDim>,
-    progress: Progress,
-    progress_sender: Sender<Progress>,
+    progress: Progress<f64>,
+    progress_sender: Sender<Progress<f64>>,
+    result_sender: Sender<NEGFResult<f64>>,
 ) -> Result<Potential<f64>, OuterLoopError<f64>>
 where
     DefaultAllocator: Allocator<f64, U1>
@@ -49,6 +51,7 @@ where
             tracker,
             progress,
             progress_sender,
+            result_sender,
         ),
         false => coherent_calculation_at_fixed_voltage_with_changing_mass(
             voltage,
@@ -58,6 +61,7 @@ where
             tracker,
             progress,
             progress_sender,
+            result_sender,
         ),
     }
 }
@@ -68,8 +72,9 @@ fn coherent_calculation_at_fixed_voltage_with_constant_mass<BandDim: SmallDim>(
     config: &Configuration<f64>,
     mesh: &Mesh<f64, U1, Segment1dConnectivity>,
     tracker: &Tracker<'_, f64, U1, BandDim>,
-    progress: Progress,
-    progress_sender: Sender<Progress>,
+    progress: Progress<f64>,
+    progress_sender: Sender<Progress<f64>>,
+    result_sender: Sender<NEGFResult<f64>>,
 ) -> Result<Potential<f64>, OuterLoopError<f64>>
 where
     DefaultAllocator: Allocator<f64, U1>
@@ -118,12 +123,25 @@ where
         .with_convergence_settings(&outer_config)
         .with_tracker(tracker)
         .with_info_desk(tracker.info_desk)
-        .with_progress(progress)
-        .with_sender(progress_sender)
+        .with_progress(&progress)
+        .with_sender(&progress_sender)
         .build(voltage)
         .unwrap();
 
     outer_loop.run_loop(initial_potential)?;
+
+    let result = crate::app::tui::NEGFResult {
+        calculation: Calculation::Coherent {
+            voltage_target: voltage,
+        },
+        current: outer_loop.tracker.current_as_ref().net_current()[0],
+        potential: outer_loop.tracker.potential_as_ref().clone(),
+        electron_density: outer_loop.tracker.charge_as_ref().clone().net_charge(),
+        scattering_rates: None,
+    };
+    if let Err(err) = result_sender.blocking_send(result) {
+        tracing::warn!("Failed to communicate result at {voltage}V: {:?}", err);
+    }
     Ok(outer_loop.potential_owned())
 }
 
@@ -133,8 +151,9 @@ fn coherent_calculation_at_fixed_voltage_with_changing_mass<BandDim: SmallDim>(
     config: &Configuration<f64>,
     mesh: &Mesh<f64, U1, Segment1dConnectivity>,
     tracker: &Tracker<'_, f64, U1, BandDim>,
-    progress: Progress,
-    progress_sender: Sender<Progress>,
+    progress: Progress<f64>,
+    progress_sender: Sender<Progress<f64>>,
+    result_sender: Sender<NEGFResult<f64>>,
 ) -> Result<Potential<f64>, OuterLoopError<f64>>
 where
     DefaultAllocator: Allocator<f64, U1>
@@ -188,12 +207,25 @@ where
         .with_convergence_settings(&outer_config)
         .with_tracker(tracker)
         .with_info_desk(tracker.info_desk)
-        .with_progress(progress)
-        .with_sender(progress_sender)
+        .with_progress(&progress)
+        .with_sender(&progress_sender)
         .build(voltage)
         .unwrap();
 
     outer_loop.run_loop(initial_potential)?;
+
+    let result = crate::app::tui::NEGFResult {
+        calculation: Calculation::Coherent {
+            voltage_target: voltage,
+        },
+        current: outer_loop.tracker.current_as_ref().net_current()[0],
+        potential: outer_loop.tracker.potential_as_ref().clone(),
+        electron_density: outer_loop.tracker.charge_as_ref().clone().net_charge(),
+        scattering_rates: None,
+    };
+    if let Err(err) = result_sender.blocking_send(result) {
+        tracing::warn!("Failed to communicate result at {voltage}V: {:?}", err);
+    }
     Ok(outer_loop.potential_owned())
 }
 
@@ -203,8 +235,9 @@ pub(crate) fn incoherent_calculation_at_fixed_voltage<BandDim: SmallDim>(
     config: &Configuration<f64>,
     mesh: &Mesh<f64, U1, Segment1dConnectivity>,
     tracker: &Tracker<'_, f64, U1, BandDim>,
-    mut progress: Progress,
-    progress_sender: Sender<Progress>,
+    mut progress: Progress<f64>,
+    progress_sender: Sender<Progress<f64>>,
+    result_sender: Sender<NEGFResult<f64>>,
 ) -> Result<Potential<f64>, OuterLoopError<f64>>
 where
     DefaultAllocator: Allocator<f64, U1>
@@ -233,6 +266,7 @@ where
             tracker,
             progress.clone(),
             progress_sender.clone(),
+            result_sender.clone(),
         ),
         false => coherent_calculation_at_fixed_voltage_with_changing_mass(
             voltage,
@@ -242,6 +276,7 @@ where
             tracker,
             progress.clone(),
             progress_sender.clone(),
+            result_sender.clone(),
         ),
     }?;
     // do an incoherent calculation ramping the scattering from 0 to 1
@@ -280,6 +315,8 @@ where
             voltage_target: 0_f64,
         },
     };
+    // Clone to avoid lifetime issues
+    let outer_progress = progress.clone();
     let mut outer_loop: crate::outer_loop::OuterLoop<
         f64,
         U1,
@@ -296,8 +333,8 @@ where
         .with_convergence_settings(&outer_config)
         .with_tracker(tracker)
         .with_info_desk(tracker.info_desk)
-        .with_progress(progress.clone())
-        .with_sender(progress_sender.clone())
+        .with_progress(&outer_progress)
+        .with_sender(&progress_sender)
         .build(voltage)
         .unwrap();
     while outer_loop.scattering_scaling() <= 1_f64 {
@@ -319,5 +356,20 @@ where
         potential = outer_loop.potential_owned();
         outer_loop.increment_scattering_scaling();
     }
+
+    // Arrange the results of the calculation and communicate them to the master process
+    let result = crate::app::tui::NEGFResult {
+        calculation: Calculation::Incoherent {
+            voltage_target: voltage,
+        },
+        current: outer_loop.tracker.current_as_ref().net_current()[0],
+        potential: outer_loop.tracker.potential_as_ref().clone(),
+        electron_density: outer_loop.tracker.charge_as_ref().clone().net_charge(),
+        scattering_rates: None,
+    };
+    if let Err(err) = result_sender.blocking_send(result) {
+        tracing::warn!("Failed to communicate result at {voltage}V: {:?}", err);
+    }
+
     Ok(outer_loop.potential_owned())
 }

@@ -1,6 +1,7 @@
 mod methods;
 
 use crate::{
+    app::tui::Progress,
     greens_functions::{AggregateGreensFunctions, GreensFunctionMethods},
     hamiltonian::Hamiltonian,
     outer_loop::Convergence,
@@ -10,6 +11,7 @@ pub(crate) use methods::Inner;
 use miette::Diagnostic;
 use nalgebra::{allocator::Allocator, DefaultAllocator, RealField};
 use std::marker::PhantomData;
+use tokio::sync::mpsc::Sender;
 use transporter_mesher::{Connectivity, Mesh, SmallDim};
 
 #[derive(thiserror::Error, Debug, Diagnostic)]
@@ -34,6 +36,8 @@ pub(crate) struct InnerLoopBuilder<
     RefHamiltonian,
     RefGreensFunctions,
     RefSelfEnergies,
+    RefProgress,
+    RefProgressSender,
 > where
     T: RealField,
 {
@@ -44,10 +48,12 @@ pub(crate) struct InnerLoopBuilder<
     greens_functions: RefGreensFunctions,
     self_energies: RefSelfEnergies,
     scattering_scaling: T,
+    progress: RefProgress,
+    mpsc_sender: RefProgressSender,
     marker: PhantomData<T>,
 }
 
-impl<T> InnerLoopBuilder<T, (), (), (), (), (), ()>
+impl<T> InnerLoopBuilder<T, (), (), (), (), (), (), (), ()>
 where
     T: RealField,
 {
@@ -60,6 +66,8 @@ where
             greens_functions: (),
             self_energies: (),
             scattering_scaling: T::one(),
+            progress: (),
+            mpsc_sender: (),
             marker: PhantomData,
         }
     }
@@ -73,6 +81,8 @@ impl<
         RefHamiltonian,
         RefGreensFunctions,
         RefSelfEnergies,
+        RefProgress,
+        RefProgressSender,
     >
     InnerLoopBuilder<
         T,
@@ -82,6 +92,8 @@ impl<
         RefHamiltonian,
         RefGreensFunctions,
         RefSelfEnergies,
+        RefProgress,
+        RefProgressSender,
     >
 where
     T: RealField,
@@ -97,6 +109,8 @@ where
         RefHamiltonian,
         RefGreensFunctions,
         RefSelfEnergies,
+        RefProgress,
+        RefProgressSender,
     > {
         InnerLoopBuilder {
             convergence_settings,
@@ -106,6 +120,8 @@ where
             greens_functions: self.greens_functions,
             self_energies: self.self_energies,
             scattering_scaling: self.scattering_scaling,
+            progress: self.progress,
+            mpsc_sender: self.mpsc_sender,
             marker: PhantomData,
         }
     }
@@ -121,6 +137,8 @@ where
         RefHamiltonian,
         RefGreensFunctions,
         RefSelfEnergies,
+        RefProgress,
+        RefProgressSender,
     > {
         InnerLoopBuilder {
             convergence_settings: self.convergence_settings,
@@ -130,6 +148,8 @@ where
             greens_functions: self.greens_functions,
             self_energies: self.self_energies,
             scattering_scaling: self.scattering_scaling,
+            progress: self.progress,
+            mpsc_sender: self.mpsc_sender,
             marker: PhantomData,
         }
     }
@@ -145,6 +165,8 @@ where
         RefHamiltonian,
         RefGreensFunctions,
         RefSelfEnergies,
+        RefProgress,
+        RefProgressSender,
     > {
         InnerLoopBuilder {
             convergence_settings: self.convergence_settings,
@@ -154,6 +176,8 @@ where
             greens_functions: self.greens_functions,
             self_energies: self.self_energies,
             scattering_scaling: self.scattering_scaling,
+            progress: self.progress,
+            mpsc_sender: self.mpsc_sender,
             marker: PhantomData,
         }
     }
@@ -169,6 +193,8 @@ where
         &Hamiltonian,
         RefGreensFunctions,
         RefSelfEnergies,
+        RefProgress,
+        RefProgressSender,
     > {
         InnerLoopBuilder {
             convergence_settings: self.convergence_settings,
@@ -178,6 +204,8 @@ where
             greens_functions: self.greens_functions,
             self_energies: self.self_energies,
             scattering_scaling: self.scattering_scaling,
+            progress: self.progress,
+            mpsc_sender: self.mpsc_sender,
             marker: PhantomData,
         }
     }
@@ -193,6 +221,8 @@ where
         RefHamiltonian,
         &mut GreensFunctions,
         RefSelfEnergies,
+        RefProgress,
+        RefProgressSender,
     > {
         InnerLoopBuilder {
             convergence_settings: self.convergence_settings,
@@ -202,6 +232,8 @@ where
             greens_functions,
             self_energies: self.self_energies,
             scattering_scaling: self.scattering_scaling,
+            progress: self.progress,
+            mpsc_sender: self.mpsc_sender,
             marker: PhantomData,
         }
     }
@@ -217,6 +249,8 @@ where
         RefHamiltonian,
         RefGreensFunctions,
         &mut SelfEnergies,
+        RefProgress,
+        RefProgressSender,
     > {
         InnerLoopBuilder {
             convergence_settings: self.convergence_settings,
@@ -226,6 +260,8 @@ where
             greens_functions: self.greens_functions,
             self_energies,
             scattering_scaling: self.scattering_scaling,
+            progress: self.progress,
+            mpsc_sender: self.mpsc_sender,
             marker: PhantomData,
         }
     }
@@ -241,6 +277,8 @@ where
         RefHamiltonian,
         RefGreensFunctions,
         RefSelfEnergies,
+        RefProgress,
+        RefProgressSender,
     > {
         InnerLoopBuilder {
             convergence_settings: self.convergence_settings,
@@ -250,6 +288,64 @@ where
             greens_functions: self.greens_functions,
             self_energies: self.self_energies,
             scattering_scaling,
+            progress: self.progress,
+            mpsc_sender: self.mpsc_sender,
+            marker: PhantomData,
+        }
+    }
+
+    pub(crate) fn with_progress<Progress>(
+        self,
+        progress: &Progress,
+    ) -> InnerLoopBuilder<
+        T,
+        RefConvergenceSettings,
+        RefMesh,
+        RefSpectral,
+        RefHamiltonian,
+        RefGreensFunctions,
+        RefSelfEnergies,
+        &Progress,
+        RefProgressSender,
+    > {
+        InnerLoopBuilder {
+            convergence_settings: self.convergence_settings,
+            mesh: self.mesh,
+            spectral: self.spectral,
+            hamiltonian: self.hamiltonian,
+            greens_functions: self.greens_functions,
+            self_energies: self.self_energies,
+            scattering_scaling: self.scattering_scaling,
+            progress,
+            mpsc_sender: self.mpsc_sender,
+            marker: PhantomData,
+        }
+    }
+
+    pub(crate) fn with_sender<ProgressSender>(
+        self,
+        mpsc_sender: &ProgressSender,
+    ) -> InnerLoopBuilder<
+        T,
+        RefConvergenceSettings,
+        RefMesh,
+        RefSpectral,
+        RefHamiltonian,
+        RefGreensFunctions,
+        RefSelfEnergies,
+        RefProgress,
+        &ProgressSender,
+    > {
+        InnerLoopBuilder {
+            convergence_settings: self.convergence_settings,
+            mesh: self.mesh,
+            spectral: self.spectral,
+            hamiltonian: self.hamiltonian,
+            greens_functions: self.greens_functions,
+            self_energies: self.self_energies,
+            scattering_scaling: self.scattering_scaling,
+            progress: self.progress,
+            mpsc_sender,
             marker: PhantomData,
         }
     }
@@ -275,7 +371,8 @@ where
     scattering_scaling: T,
     voltage: T,
     pub(crate) rate: Option<num_complex::Complex<T>>,
-    term: console::Term,
+    progress: Progress<T>,
+    mpsc_sender: Sender<Progress<T>>,
 }
 
 impl<'a, T, GeometryDim, Conn, Matrix, SpectralSpace, BandDim>
@@ -287,6 +384,8 @@ impl<'a, T, GeometryDim, Conn, Matrix, SpectralSpace, BandDim>
         &'a Hamiltonian<T>,
         &'a mut AggregateGreensFunctions<'a, T, Matrix, GeometryDim, BandDim>,
         &'a mut SelfEnergy<T, GeometryDim, Conn>,
+        &'a Progress<T>,
+        &'a Sender<Progress<T>>,
     >
 where
     T: RealField + Copy,
@@ -312,7 +411,8 @@ where
             scattering_scaling: self.scattering_scaling,
             voltage,
             rate: None,
-            term: console::Term::stdout(),
+            progress: self.progress.clone(),
+            mpsc_sender: self.mpsc_sender.clone(),
         }
     }
 }

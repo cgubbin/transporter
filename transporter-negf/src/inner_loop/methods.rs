@@ -10,6 +10,7 @@ use num_complex::Complex;
 use num_traits::ToPrimitive;
 use sprs::CsMat;
 use std::io::Write;
+use std::time::Instant;
 
 use transporter_mesher::{Connectivity, SmallDim};
 
@@ -173,18 +174,6 @@ where
         &mut self,
         previous_charge_and_current: &mut ChargeAndCurrent<f64, BandDim>,
     ) -> Result<(), InnerLoopError> {
-        //let mut iteration = 0;
-        //while !self.is_loop_converged(previous_charge_and_current)? {
-        //    self.single_iteration()?;
-        //    iteration += 1;
-        //    if iteration >= self.convergence_settings.maximum_inner_iterations() {
-        //        return Err(color_eyre::eyre::eyre!(
-        //            "Reached maximum iteration count in the inner loop"
-        //        ));
-        //    }
-        //}
-        // self.term.move_cursor_to(0, 5)?;
-        // self.term.clear_to_end_of_screen()?;
         tracing::info!("Recalculating electron density");
         self.single_iteration()?;
         // Run the convergence check, this is solely to update the charge and current in the tracker
@@ -210,7 +199,6 @@ where
     BandDim: SmallDim,
     Conn: Connectivity<f64, GeometryDim> + Send + Sync,
     <Conn as Connectivity<f64, GeometryDim>>::Element: Send + Sync,
-    // MatrixType: GreensFunctionMethods<T>,
     DefaultAllocator: Allocator<f64, GeometryDim>
         + Allocator<Array1<f64>, BandDim>
         + Allocator<f64, BandDim>
@@ -335,7 +323,6 @@ where
     BandDim: SmallDim,
     Conn: Connectivity<f64, GeometryDim> + Send + Sync,
     <Conn as Connectivity<f64, GeometryDim>>::Element: Send + Sync,
-    // MatrixType: GreensFunctionMethods<T>,
     DefaultAllocator: Allocator<f64, GeometryDim>
         + Allocator<Array1<f64>, BandDim>
         + Allocator<f64, BandDim>
@@ -447,7 +434,6 @@ where
     BandDim: SmallDim,
     Conn: Connectivity<f64, GeometryDim> + Send + Sync,
     <Conn as Connectivity<f64, GeometryDim>>::Element: Send + Sync,
-    // MatrixType: GreensFunctionMethods<T>,
     DefaultAllocator: Allocator<f64, GeometryDim>
         + Allocator<Array1<f64>, BandDim>
         + Allocator<f64, BandDim>
@@ -525,16 +511,37 @@ where
         // self.term.move_cursor_to(0, 6)?;
         // self.term.clear_to_end_of_screen()?;
         tracing::info!("Inner loop at iteration 1");
+        let now = Instant::now();
         self.single_iteration()?;
 
+        self.progress.set_inner_iteration(1);
+        self.progress
+            .set_target_inner_residual(self.convergence_settings.inner_tolerance());
+        self.progress.set_inner_residual(1_f64); // Todo -> Currently we are not computing and storing the inner residual
+        self.progress.set_time_for_inner_iteration(now.elapsed());
+        if let Err(e) = self.mpsc_sender.blocking_send(self.progress.clone()) {
+            tracing::warn!("Failed to emit progress from the Inner Loop: {:?}", e);
+        }
         let mut iteration = 0;
         // Run to iteration == 2 because on the first iteration incoherent
         // self energies will be trivially zero as the Greens functions are uninitialised
         while !self.is_loop_converged(previous_charge_and_current)? | (iteration < 2) {
-            // self.term.move_cursor_to(0, 6)?;
-            // self.term.clear_to_end_of_screen()?;
             tracing::info!("Inner loop at iteration {}", iteration + 2);
+
+            let now = Instant::now();
+
+            // Do the numerical calculations
             self.single_iteration()?;
+
+            // Communicate the progress of the simulation to the `Master` thread
+            self.progress.set_inner_iteration(iteration + 2);
+            self.progress
+                .set_target_inner_residual(self.convergence_settings.inner_tolerance());
+            self.progress.set_inner_residual(1_f64); // Todo -> Currently we are not computing and storing the inner residual
+            self.progress.set_time_for_inner_iteration(now.elapsed());
+            if let Err(e) = self.mpsc_sender.blocking_send(self.progress.clone()) {
+                tracing::warn!("Failed to emit progress from the Inner Loop: {:?}", e);
+            }
             iteration += 1;
             if iteration >= self.convergence_settings.maximum_inner_iterations() {
                 return Err(InnerLoopError::OutOfIterations);

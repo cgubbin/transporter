@@ -263,12 +263,11 @@ where
                     let fermi_source = self.info_desk.get_fermi_integral_at_source(energy);
                     let fermi_drain = self.info_desk.get_fermi_integral_at_drain(energy, voltage);
 
-                    // TODO Handle finite internal leads. This assumes the device continues to the contacts
                     let row = gf_r
                         .matrix
                         .outer_view(number_of_vertices_in_internal_lead)
                         .unwrap();
-                    let gf_r_1n = row.data()[1];
+                    let gf_r_1n = row.data()[1]; // The first sparse row has non-zero elements in left and right columns only
 
                     let abs_gf_r_1n_with_factor = (gf_r_1n * gf_r_1n.conj()).re
                         * width

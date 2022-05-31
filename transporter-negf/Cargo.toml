@@ -30,8 +30,6 @@ tracing = {version = "0.1.33", features = ["log"]}
 tracing-log = { version = "0.1.2", features = ["env_logger"] }
 log = "0.4.16"
 tracing-subscriber = { version = "0.3.11", features = ["env-filter", "fmt","json", "registry"] }
-indicatif = { version = "0.16.2", features = ["rayon"] }
-tracing-slog = "0.1.0"
 slog = "2.7.0"
 itertools = "0.10.3"
 rayon = "1.5.2"

@@ -1,4 +1,5 @@
-use std::time::Duration;
+use nalgebra::RealField;
+use ndarray_stats::QuantileExt;
 use tui::{
     backend::Backend,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -10,15 +11,20 @@ use tui::{
 };
 use tui_logger::TuiLoggerWidget;
 
-use super::{actions::Actions, state::AppState, App};
+use super::{
+    actions::Actions,
+    state::{AppState, Progress},
+    App,
+};
 use crate::app::Calculation;
 
-pub(crate) fn draw<B>(
+pub(crate) fn draw<B, T>(
     rect: &mut Frame<B>,
-    app: &App,
+    app: &App<T>,
     files_list_state: &mut ListState,
 ) -> miette::Result<()>
 where
+    T: RealField + Copy + num_traits::ToPrimitive,
     B: Backend,
 {
     let size = rect.size();
@@ -61,14 +67,7 @@ where
                         .direction(Direction::Vertical)
                         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
                         .split(running_chunks[0]);
-                    let tracker_info = render_coherent_tracker(
-                        tracker.current_voltage,
-                        tracker.outer_iteration,
-                        tracker.current_outer_residual,
-                        tracker.target_outer_residual,
-                        tracker.time_for_voltage_point,
-                        tracker.time_for_outer_iteration,
-                    );
+                    let tracker_info = render_coherent_tracker(tracker);
                     rect.render_widget(tracker_info.0, tracker_chunks[0]);
                     rect.render_widget(tracker_info.1, tracker_chunks[1]);
                 }
@@ -83,21 +82,26 @@ where
                         ])
                         .split(running_chunks[0]);
 
-                    let tracker_info = render_incoherent_tracker(
-                        tracker.current_voltage,
-                        tracker.outer_iteration,
-                        tracker.inner_iteration.unwrap_or(0_usize),
-                        tracker.current_outer_residual,
-                        tracker.target_outer_residual,
-                    );
+                    let tracker_info = render_incoherent_tracker(tracker);
                     rect.render_widget(tracker_info.0, tracker_chunks[0]);
                     rect.render_widget(tracker_info.1, tracker_chunks[1]);
                     rect.render_widget(tracker_info.2, tracker_chunks[2]);
                 }
             }
 
-            let graph = render_electron_density();
-            rect.render_widget(graph, running_chunks[1]);
+            if app.potential.is_some() {
+                let data = app
+                    .potential
+                    .as_ref()
+                    .unwrap()
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, phi)| (idx as f64, phi.to_f64().unwrap()))
+                    .collect::<Vec<_>>();
+
+                let graph = render_potential(&data);
+                rect.render_widget(graph, running_chunks[1]);
+            }
             // let left = render_simulation_tracker()
             // let (left, right) = render_simulation_tracker();
         }
@@ -297,18 +301,16 @@ fn render_files<'a>(
     Ok((list, table))
 }
 
-fn render_coherent_tracker<'a>(
-    voltage: f64,
-    outer_iteration: usize,
-    current_residual: f64,
-    target_residual: f64,
-    time_for_voltage_point: Duration,
-    time_for_outer_iteration: Duration,
+fn render_coherent_tracker<'a, T: Copy + RealField>(
+    progress: &Progress<T>,
 ) -> (Paragraph<'a>, Paragraph<'a>) {
     let upper_title = "Running file";
-    let time_for_voltage_point = time_for_voltage_point.as_secs_f32();
+    let time_for_voltage_point = progress.time_for_voltage_point.as_secs_f32();
     let upper_box = Paragraph::new(vec![
-        Spans::from(Span::raw(format!("Solving for voltage {}V", voltage))),
+        Spans::from(Span::raw(format!(
+            "Solving for voltage {}V",
+            progress.current_voltage
+        ))),
         Spans::from(Span::raw(format!(
             "Current simulation time per voltage {} seconds",
             time_for_voltage_point
@@ -325,12 +327,15 @@ fn render_coherent_tracker<'a>(
     );
 
     let outer_loop_title = "Outer Loop";
-    let time_for_outer_iteration = time_for_outer_iteration.as_secs_f32();
+    let time_for_outer_iteration = progress.time_for_outer_iteration.as_secs_f32();
     let outer_box = Paragraph::new(vec![
-        Spans::from(Span::raw(format!("Outer iteration {}", outer_iteration))),
+        Spans::from(Span::raw(format!(
+            "Outer iteration {}",
+            progress.outer_iteration
+        ))),
         Spans::from(Span::raw(format!(
             "Current residual {} (target {})",
-            current_residual, target_residual
+            progress.current_outer_residual, progress.target_outer_residual
         ))),
         Spans::from(Span::raw(format!(
             "Current time to run one outer loop {:.2} seconds",
@@ -349,56 +354,30 @@ fn render_coherent_tracker<'a>(
     (upper_box, outer_box)
 }
 
-fn render_incoherent_tracker<'a>(
-    voltage: f64,
-    outer_iteration: usize,
-    inner_iteration: usize,
-    _current_residual: f64,
-    _target_residual: f64,
+fn render_incoherent_tracker<'a, T: Copy + RealField>(
+    progress: &Progress<T>,
 ) -> (Paragraph<'a>, Paragraph<'a>, Paragraph<'a>) {
-    let upper_title = "Running file";
-    let time_in_seconds = 10.5;
-    let upper_box = Paragraph::new(vec![
-        Spans::from(Span::raw(format!("Solving for voltage {}V", voltage))),
-        Spans::from(Span::raw(format!(
-            "Current simulation time {} seconds",
-            time_in_seconds
-        ))),
-    ])
-    .style(Style::default().fg(Color::LightCyan))
-    .alignment(Alignment::Left)
-    .block(
-        Block::default()
-            .title(upper_title)
-            .borders(Borders::ALL)
-            .style(Style::default().fg(Color::White))
-            .border_type(BorderType::Plain),
-    );
-
-    let outer_loop_title = "Outer Loop";
-    let outer_box = Paragraph::new(vec![
-        Spans::from(Span::raw(format!("Outer iteration {}", outer_iteration))),
-        Spans::from(Span::raw(format!(
-            "Current time to run one outer loop {}",
-            time_in_seconds
-        ))),
-    ])
-    .style(Style::default().fg(Color::LightCyan))
-    .alignment(Alignment::Left)
-    .block(
-        Block::default()
-            .title(outer_loop_title)
-            .borders(Borders::ALL)
-            .style(Style::default().fg(Color::White))
-            .border_type(BorderType::Plain),
-    );
+    let (upper_box, outer_box) = render_coherent_tracker(progress);
 
     let inner_loop_title = "Inner Loop";
+
+    let time_for_inner_iteration = progress
+        .time_for_inner_iteration
+        .unwrap_or_default()
+        .as_secs_f32();
     let inner_box = Paragraph::new(vec![
-        Spans::from(Span::raw(format!("Inner iteration {}", inner_iteration))),
         Spans::from(Span::raw(format!(
-            "Current time to run one inner loop {}",
-            time_in_seconds
+            "Inner iteration {}",
+            progress.inner_iteration.unwrap_or_default()
+        ))),
+        Spans::from(Span::raw(format!(
+            "Current residual {} (target {})",
+            progress.current_inner_residual.unwrap_or_else(T::zero),
+            progress.target_inner_residual.unwrap_or_else(T::zero)
+        ))),
+        Spans::from(Span::raw(format!(
+            "Current time to run one inner loop {:.2} seconds",
+            time_for_inner_iteration
         ))),
     ])
     .style(Style::default().fg(Color::LightCyan))
@@ -410,6 +389,7 @@ fn render_incoherent_tracker<'a>(
             .style(Style::default().fg(Color::White))
             .border_type(BorderType::Plain),
     );
+
     (upper_box, outer_box, inner_box)
 }
 
@@ -418,27 +398,20 @@ use tui::widgets::Chart;
 use tui::widgets::Dataset;
 use tui::widgets::GraphType;
 
-fn render_electron_density<'a>() -> Chart<'a> {
-    const DATA2: [(f64, f64); 7] = [
-        (0.0, 0.0),
-        (10.0, 1.0),
-        (20.0, 0.5),
-        (30.0, 1.5),
-        (40.0, 1.0),
-        (50.0, 2.5),
-        (60.0, 3.0),
-    ];
+fn render_potential(data: &[(f64, f64)]) -> Chart<'_> {
+    let y_min = data.iter().fold(f64::INFINITY, |a, &(_, b)| a.min(b));
+    let x_max = data.len() as f64;
     let datasets = vec![Dataset::default()
         .name("data")
         .marker(symbols::Marker::Braille)
         .style(Style::default().fg(Color::Yellow))
         .graph_type(GraphType::Line)
-        .data(&DATA2)];
+        .data(data)];
     let chart = Chart::new(datasets)
         .block(
             Block::default()
                 .title(Span::styled(
-                    "Electronic Density",
+                    "Electrostatic Potential",
                     Style::default()
                         .fg(Color::Cyan)
                         .add_modifier(Modifier::BOLD),
@@ -449,30 +422,28 @@ fn render_electron_density<'a>() -> Chart<'a> {
             Axis::default()
                 .title("x-coordinate (nm)")
                 .style(Style::default().fg(Color::Gray))
-                .bounds([0.0, 50.0])
-                .labels(vec![
-                    Span::styled("0", Style::default().add_modifier(Modifier::BOLD)),
-                    Span::raw("25"),
-                    Span::styled("50", Style::default().add_modifier(Modifier::BOLD)),
-                ]),
+                .bounds([0_f64, x_max]), // .labels(vec![
+                                         //     Span::styled("0", Style::default().add_modifier(Modifier::BOLD)),
+                                         //     Span::raw("25"),
+                                         //     Span::styled("50", Style::default().add_modifier(Modifier::BOLD)),
+                                         // ]),
         )
         .y_axis(
             Axis::default()
-                .title("Electron density (x 10^{24})")
+                .title("Potential (V)")
                 .style(Style::default().fg(Color::Gray))
-                .bounds([0.0, 50.0])
-                .labels(vec![
-                    Span::styled("0", Style::default().add_modifier(Modifier::BOLD)),
-                    Span::raw("25"),
-                    Span::styled("50", Style::default().add_modifier(Modifier::BOLD)),
-                ]),
+                .bounds([1.1 * y_min, 0.0]), // .labels(vec![
+                                             //     Span::styled("0", Style::default().add_modifier(Modifier::BOLD)),
+                                             //     Span::raw("25"),
+                                             //     Span::styled("50", Style::default().add_modifier(Modifier::BOLD)),
+                                             // ]),
         );
     chart
 }
 
 use tui::widgets::Wrap;
 
-fn render_calc<'a>(calculation: crate::app::Calculation<f64>) -> Paragraph<'a> {
+fn render_calc<'a, T: Copy + RealField>(calculation: crate::app::Calculation<T>) -> Paragraph<'a> {
     let title = "Calculation Type";
     let para = Paragraph::new(vec![Spans::from(Span::raw(calculation.to_string()))])
         .wrap(Wrap { trim: true })

@@ -21,7 +21,7 @@ impl Action {
             Action::Execute => &[Key::Enter],
             Action::ToggleCalculation => &[Key::Char('x')],
             Action::IncrementVoltageTarget => &[Key::Char('k')],
-            Action::DecrementVoltageTarget => &[Key::Char('l')],
+            Action::DecrementVoltageTarget => &[Key::Char('j')],
         }
     }
 

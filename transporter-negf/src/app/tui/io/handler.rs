@@ -1,4 +1,5 @@
 use log::{error, info};
+use nalgebra::RealField;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -7,12 +8,12 @@ use super::super::App;
 use super::IoEvent;
 
 // We handle IO in the IO thread without blocking the UI thread
-pub struct IoAsyncHandler {
-    app: Arc<Mutex<App>>,
+pub struct IoAsyncHandler<T: RealField + Copy> {
+    app: Arc<Mutex<App<T>>>,
 }
 
-impl IoAsyncHandler {
-    pub fn new(app: Arc<Mutex<App>>) -> Self {
+impl<T: RealField + Copy> IoAsyncHandler<T> {
+    pub fn new(app: Arc<Mutex<App<T>>>) -> Self {
         Self { app }
     }
 

@@ -4,6 +4,8 @@ use super::{inputs::keys::Key, io::IoEvent};
 use crate::app::Calculation;
 use glob::glob;
 use log::{debug, error, warn};
+use nalgebra::RealField;
+use ndarray::Array1;
 use std::path::PathBuf;
 use tokio::sync::mpsc::Sender;
 
@@ -18,9 +20,7 @@ pub enum AppReturn {
     Run,
 }
 
-const VOLTAGE_INCREMENT: f64 = 0.01;
-
-pub struct App {
+pub struct App<T: RealField + Copy> {
     /// The files in the current directory -> read at startup to save overhead
     files_in_directory: Vec<PathBuf>,
     // TODO Re-institute the parsed files when we integrate -> allows for us to display the info in the browser
@@ -32,11 +32,12 @@ pub struct App {
     actions: Actions,
     /// State
     is_loading: bool,
-    state: AppState,
-    calculation_type: Calculation<f64>,
+    state: AppState<T>,
+    calculation_type: Calculation<T>,
+    pub(crate) potential: Option<Array1<T>>,
 }
 
-impl<'a> App {
+impl<'a, T: RealField + Copy> App<T> {
     pub fn new(io_tx: Sender<IoEvent>) -> Self {
         let actions = vec![
             Action::Quit,
@@ -67,8 +68,9 @@ impl<'a> App {
             is_loading,
             state,
             calculation_type: Calculation::Coherent {
-                voltage_target: 0_f64,
+                voltage_target: T::zero(),
             },
+            potential: None,
         }
     }
 
@@ -124,6 +126,7 @@ impl<'a> App {
                     },
                 },
                 Action::DecrementVoltageTarget => {
+                    let voltage_increment: T = T::from_f64(0.01).unwrap();
                     match self.state {
                         // If we are running we currently do nothing, but this could change in the future
                         AppState::Running { .. } => sender.send(AppReturn::Continue).await.unwrap(),
@@ -131,15 +134,17 @@ impl<'a> App {
                             Calculation::Coherent {
                                 ref mut voltage_target,
                             } => {
-                                if *voltage_target > VOLTAGE_INCREMENT {
-                                    *voltage_target -= VOLTAGE_INCREMENT;
+                                *voltage_target -= voltage_increment;
+                                if *voltage_target < T::zero() {
+                                    *voltage_target = T::zero();
                                 }
                             }
                             Calculation::Incoherent {
                                 ref mut voltage_target,
                             } => {
-                                if *voltage_target > VOLTAGE_INCREMENT {
-                                    *voltage_target -= VOLTAGE_INCREMENT;
+                                *voltage_target -= voltage_increment;
+                                if *voltage_target < T::zero() {
+                                    *voltage_target = T::zero();
                                 }
                             }
                         },
@@ -147,6 +152,7 @@ impl<'a> App {
                     sender.send(AppReturn::Continue).await.unwrap()
                 }
                 Action::IncrementVoltageTarget => {
+                    let voltage_increment: T = T::from_f64(0.01).unwrap();
                     match self.state {
                         // If we are running we currently do nothing, but this could change in the future
                         AppState::Running { .. } => sender.send(AppReturn::Continue).await.unwrap(),
@@ -154,12 +160,12 @@ impl<'a> App {
                             Calculation::Coherent {
                                 ref mut voltage_target,
                             } => {
-                                *voltage_target += VOLTAGE_INCREMENT;
+                                *voltage_target += voltage_increment;
                             }
                             Calculation::Incoherent {
                                 ref mut voltage_target,
                             } => {
-                                *voltage_target += VOLTAGE_INCREMENT;
+                                *voltage_target += voltage_increment;
                             }
                         },
                     }
@@ -202,11 +208,11 @@ impl<'a> App {
         &self.actions
     }
 
-    pub(crate) fn state(&self) -> &AppState {
+    pub(crate) fn state(&self) -> &AppState<T> {
         &self.state
     }
 
-    pub(crate) fn state_mut(&mut self) -> &mut AppState {
+    pub(crate) fn state_mut(&mut self) -> &mut AppState<T> {
         &mut self.state
     }
 
@@ -237,11 +243,11 @@ impl<'a> App {
         self.is_loading = false;
     }
 
-    pub(crate) fn calculation_type(&self) -> &Calculation<f64> {
+    pub(crate) fn calculation_type(&self) -> &Calculation<T> {
         &self.calculation_type
     }
 
-    pub(crate) fn running(&mut self, tracker: std::sync::Arc<Progress>) {
+    pub(crate) fn running(&mut self, tracker: std::sync::Arc<Progress<T>>) {
         // Update the contextual variables for the running state
         self.actions = vec![Action::Quit].into();
         self.state = AppState::running(tracker);

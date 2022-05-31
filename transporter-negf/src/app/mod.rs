@@ -27,6 +27,7 @@ pub use configuration::Configuration;
 pub(crate) use error::TransporterError;
 pub use tracker::{Tracker, TrackerBuilder};
 
+use self::tui::NEGFResult;
 use self::tui::Progress;
 use crate::{
     device::{info_desk::BuildInfoDesk, reader::Device},
@@ -84,7 +85,7 @@ pub enum Calculation<T: RealField> {
     },
 }
 
-impl std::fmt::Display for Calculation<f64> {
+impl<T: Copy + RealField> std::fmt::Display for Calculation<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             Calculation::Coherent { voltage_target: x } => {
@@ -110,7 +111,8 @@ enum Dimension {
 pub fn run_simulation(
     file_path: PathBuf,
     calculation: Calculation<f64>,
-    progress_sender: Sender<Progress>,
+    progress_sender: Sender<Progress<f64>>,
+    result_sender: Sender<NEGFResult<f64>>,
 ) -> miette::Result<()> {
     // Initiate the tracing subscriber
 
@@ -144,6 +146,7 @@ pub fn run_simulation(
         calculation,
         progress,
         progress_sender,
+        result_sender,
     )
     .map_err(|e| miette::miette!("{:?}", e))?;
     Ok(())
@@ -182,8 +185,9 @@ fn build_and_run<BandDim: SmallDim>(
     mesh: &Mesh<f64, U1, Segment1dConnectivity>,
     tracker: &Tracker<'_, f64, U1, BandDim>,
     calculation_type: Calculation<f64>,
-    mut progress: Progress,
-    progress_sender: Sender<Progress>,
+    mut progress: Progress<f64>,
+    progress_sender: Sender<Progress<f64>>,
+    result_sender: Sender<NEGFResult<f64>>,
 ) -> Result<(), TransporterError<f64>>
 where
     DefaultAllocator: Allocator<f64, U1>
@@ -219,6 +223,7 @@ where
                     tracker,
                     progress.clone(),
                     progress_sender.clone(),
+                    result_sender.clone(),
                 ) {
                     // If it converged proceed
                     Ok(converged_potential) => {
@@ -262,6 +267,7 @@ where
                     tracker,
                     progress.clone(),
                     progress_sender.clone(),
+                    result_sender.clone(),
                 ) {
                     // If it converged proceed
                     Ok(converged_potential) => {

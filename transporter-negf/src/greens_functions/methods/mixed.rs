@@ -389,9 +389,6 @@ where
             .sqrt();
         let sum_norm = res.sum().norm();
 
-        dbg!(res, sum_norm, norm);
-        std::thread::sleep(std::time::Duration::from_secs(20));
-
         if sum_norm / norm < 1e-3 {
             Ok(())
         } else {
@@ -908,11 +905,9 @@ where
                     let fermi_source = self.info_desk.get_fermi_integral_at_source(energy);
                     let fermi_drain = self.info_desk.get_fermi_integral_at_drain(energy, voltage);
 
-                    // TODO Handle finite internal leads. This assumes the device continues to the contacts
-                    let gf_r_1n = gf_r.as_ref().core_matrix[(
-                        gf_r.as_ref().core_matrix.nrows() - 1,
-                        gf_r.as_ref().core_matrix.nrows() - 1,
-                    )];
+                    // Get the element in row 1, column N of the dense Green's function matrix
+                    let gf_r_1n =
+                        gf_r.as_ref().core_matrix[(0, gf_r.as_ref().core_matrix.nrows() - 1)];
 
                     let abs_gf_r_1n_with_factor = (gf_r_1n * gf_r_1n.conj()).re
                         * width

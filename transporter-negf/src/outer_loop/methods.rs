@@ -165,10 +165,7 @@ where
         )
         .beta(1_f64)
         .memory(2);
-        // let vec_para = potential.as_ref().iter().copied().collect::<Vec<_>>();
-        // let initial_parameter = ndarray::Array1::from(vec_para);
         let initial_parameter = potential.as_ref().clone();
-        // let mut solver = FixedPointSolver::new(mixer, potential.as_ref().clone());
         let mut solver = FixedPointSolver::new(mixer, initial_parameter);
 
         tracing::info!("Outer self-consistent loop with Anderson mixing");
@@ -179,7 +176,7 @@ where
         self.tracker.update_potential(potential);
         //// A single iteration before the loop to avoid updating the potential with an empty charge vector
         // Postprocessing steps
-        self.tracker.write_to_file("coherent")?;
+        // self.tracker.write_to_file("coherent")?;
         Ok(())
     }
 
@@ -347,10 +344,10 @@ where
         let solution = Array1::from(solution.get_param().iter().copied().collect::<Vec<_>>());
         potential = Potential::from_vector(solution);
         self.tracker.update_potential(potential);
-        // potential = Potential::from_vector(solution.get_param());
-        if self.tracker.scattering_scaling > 0.95_f64 {
-            self.tracker.write_to_file("incoherent")?;
-        }
+        // // potential = Potential::from_vector(solution.get_param());
+        // if self.tracker.scattering_scaling > 0.95_f64 {
+        //     self.tracker.write_to_file("incoherent")?;
+        // }
         //// A single iteration before the loop to avoid updating the potential with an empty charge vector
         Ok(())
     }
@@ -546,6 +543,8 @@ where
             .with_hamiltonian(self.hamiltonian)
             .with_greens_functions(greens_functions)
             .with_self_energies(self_energies)
+            .with_progress(&self.progress)
+            .with_sender(&self.mpsc_sender)
             .build(self.tracker.voltage)
     }
 }
@@ -596,6 +595,8 @@ where
             .with_hamiltonian(self.hamiltonian)
             .with_greens_functions(greens_functions)
             .with_self_energies(self_energies)
+            .with_progress(&self.progress)
+            .with_sender(&self.mpsc_sender)
             .build(self.tracker.voltage)
     }
 }
@@ -646,6 +647,8 @@ where
             .with_greens_functions(greens_functions)
             .with_self_energies(self_energies)
             .with_scattering_scaling(self.tracker.scattering_scaling)
+            .with_progress(&self.progress)
+            .with_sender(&self.mpsc_sender)
             .build(self.tracker.voltage)
     }
 
@@ -676,6 +679,8 @@ where
             .with_greens_functions(greens_functions)
             .with_self_energies(self_energies)
             .with_scattering_scaling(self.tracker.scattering_scaling)
+            .with_progress(&self.progress)
+            .with_sender(&self.mpsc_sender)
             .build(self.tracker.voltage)
     }
 }

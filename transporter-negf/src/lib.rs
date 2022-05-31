@@ -41,6 +41,7 @@
 #![warn(missing_docs)]
 #![allow(dead_code)]
 #![allow(clippy::type_complexity)]
+#![feature(path_file_prefix)]
 
 extern crate openblas_src;
 
