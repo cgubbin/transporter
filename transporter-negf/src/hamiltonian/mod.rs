@@ -32,6 +32,9 @@ use crate::{
     utilities::assemblers::VertexAssemblerBuilder,
 };
 use nalgebra::{allocator::Allocator, DefaultAllocator, DimName, OPoint, RealField};
+use ndarray::Array1;
+use ndarray_linalg::eig::EigVals;
+use num_complex::Complex;
 use sprs::CsMat;
 use transporter_mesher::{Connectivity, Mesh, SmallDim};
 
@@ -102,6 +105,21 @@ impl<T: Copy + RealField> Hamiltonian<T> {
             self.wavevector.view(),
             |x, y| x.add(*y * wavevector.powi(2)),
         )
+    }
+}
+
+impl Hamiltonian<f64> {
+    // Find the eigenvalues of the closed system
+    pub(crate) fn eigenvalues(
+        &self,
+        wavevector: f64,
+        initial_potential: &Array1<f64>,
+    ) -> Result<Array1<Complex<f64>>, ndarray_linalg::error::LinalgError> {
+        // Create the dense Hamiltonian
+        let total = self.calculate_total(wavevector).to_dense()
+            - ndarray::Array2::from_diag(initial_potential);
+        // Find the eigenvalues
+        total.eigvals()
     }
 }
 

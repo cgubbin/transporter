@@ -148,7 +148,7 @@ pub async fn start_ui(app: &Arc<Mutex<App<f64>>>) -> Result<(), IOError> {
                             ui_result_sender,
                         ));
                         if let Err(e) = res {
-                            log::warn!("Failed to send...: {:?}", e);
+                            log::warn!("Failed to signal rayon task completion: {:?}", e);
                         }
                     });
                 }

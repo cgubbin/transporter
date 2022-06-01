@@ -91,13 +91,28 @@ where
         .with_info_desk(tracker)
         .build()?;
 
+    // Get the eigenvalues which sit in the range of energies studied
+    let eigenvalues: Array1<f64> = hamiltonian
+        .eigenvalues(0_f64, initial_potential.as_ref())?
+        .into_iter()
+        .map(|x| x.re)
+        .filter(|&x| (x > config.spectral.minimum_energy) & (x < config.spectral.maximum_energy))
+        .collect::<Array1<_>>();
+
+    // Best to maintain a uniform density of energies in the grid to get smooth convergence over a sweep
+    let number_of_energy_points = config.spectral.number_of_energy_points
+        * (((config.spectral.maximum_energy + voltage - config.spectral.minimum_energy)
+            / (config.spectral.maximum_energy - config.spectral.minimum_energy))
+            as usize);
+
     let spectral_space_builder = crate::spectral::SpectralSpaceBuilder::default()
-        .with_number_of_energy_points(config.spectral.number_of_energy_points)
+        .with_number_of_energy_points(number_of_energy_points)
         .with_energy_range(std::ops::Range {
             start: config.spectral.minimum_energy,
             end: config.spectral.maximum_energy + voltage,
         })
-        .with_energy_integration_method(config.spectral.energy_integration_rule);
+        .with_energy_integration_method(config.spectral.energy_integration_rule)
+        .with_zone_centre_eigenvalues(&eigenvalues);
 
     let spectral_space = spectral_space_builder.build_coherent();
     let outer_config = crate::outer_loop::Convergence {

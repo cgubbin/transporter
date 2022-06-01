@@ -3,10 +3,11 @@
 //! Factory builder methods for `SpectralSpace` objects
 
 use super::{
-    energy::EnergySpaceBuilder, wavevector::BuildWavevectorSpace, GenerateWeights, SpectralSpace,
-    WavevectorSpace,
+    energy::EnergySpaceBuilder, wavevector::BuildWavevectorSpace, GenerateWeights, IntegrationRule,
+    SpectralSpace, WavevectorSpace,
 };
 use nalgebra::{allocator::Allocator, DefaultAllocator, RealField, U1};
+use ndarray::Array1;
 use num_traits::NumCast;
 use std::ops::Range;
 use transporter_mesher::{Connectivity, Mesh, Segment1dConnectivity, SmallDim};
@@ -18,6 +19,7 @@ pub struct SpectralSpaceBuilder<
     RefEnergyIntegrationMethod,
     RefWavevectorIntegrationMethod,
     RefMesh,
+    RefEigenvalues,
 > {
     number_of_energy_points: Option<usize>,
     energy_range: RefEnergyRange,
@@ -26,9 +28,10 @@ pub struct SpectralSpaceBuilder<
     energy_integration_rule: RefEnergyIntegrationMethod,
     wavevector_integration_rule: RefWavevectorIntegrationMethod,
     mesh: RefMesh,
+    eigenvalues: RefEigenvalues,
 }
 
-impl<T> Default for SpectralSpaceBuilder<T, (), (), (), ()> {
+impl<T> Default for SpectralSpaceBuilder<T, (), (), (), (), ()> {
     /// Generate an uninitialised `SpectralSpaceBuilder`
     fn default() -> Self {
         Self {
@@ -38,6 +41,7 @@ impl<T> Default for SpectralSpaceBuilder<T, (), (), (), ()> {
             maximum_wavevector: None,
             energy_integration_rule: (),
             wavevector_integration_rule: (),
+            eigenvalues: (),
             mesh: (),
         }
     }
@@ -49,6 +53,7 @@ impl<
         RefEnergyIntegrationMethod,
         RefWavevectorIntegrationMethod,
         RefMesh,
+        RefEigenvalues,
     >
     SpectralSpaceBuilder<
         T,
@@ -56,6 +61,7 @@ impl<
         RefEnergyIntegrationMethod,
         RefWavevectorIntegrationMethod,
         RefMesh,
+        RefEigenvalues,
     >
 {
     /// Attach the `number_of_energy_points` to use in the energy grid
@@ -67,6 +73,7 @@ impl<
             maximum_wavevector: self.maximum_wavevector,
             energy_integration_rule: self.energy_integration_rule,
             wavevector_integration_rule: self.wavevector_integration_rule,
+            eigenvalues: self.eigenvalues,
             mesh: self.mesh,
         }
     }
@@ -83,6 +90,7 @@ impl<
             maximum_wavevector: self.maximum_wavevector,
             energy_integration_rule: self.energy_integration_rule,
             wavevector_integration_rule: self.wavevector_integration_rule,
+            eigenvalues: self.eigenvalues,
             mesh: self.mesh,
         }
     }
@@ -97,6 +105,7 @@ impl<
         RefEnergyIntegrationMethod,
         RefWavevectorIntegrationMethod,
         RefMesh,
+        RefEigenvalues,
     > {
         SpectralSpaceBuilder {
             number_of_energy_points: self.number_of_energy_points,
@@ -105,6 +114,7 @@ impl<
             maximum_wavevector: Some(maximum_wavevector),
             energy_integration_rule: self.energy_integration_rule,
             wavevector_integration_rule: self.wavevector_integration_rule,
+            eigenvalues: self.eigenvalues,
             mesh: self.mesh,
         }
     }
@@ -119,6 +129,7 @@ impl<
         RefEnergyIntegrationMethod,
         RefWavevectorIntegrationMethod,
         RefMesh,
+        RefEigenvalues,
     > {
         SpectralSpaceBuilder {
             number_of_energy_points: self.number_of_energy_points,
@@ -128,6 +139,7 @@ impl<
             energy_integration_rule: self.energy_integration_rule,
             wavevector_integration_rule: self.wavevector_integration_rule,
             mesh: self.mesh,
+            eigenvalues: self.eigenvalues,
         }
     }
 
@@ -141,6 +153,7 @@ impl<
         EnergyIntegrationMethod,
         RefWavevectorIntegrationMethod,
         RefMesh,
+        RefEigenvalues,
     > {
         SpectralSpaceBuilder {
             number_of_energy_points: self.number_of_energy_points,
@@ -150,6 +163,7 @@ impl<
             energy_integration_rule,
             wavevector_integration_rule: self.wavevector_integration_rule,
             mesh: self.mesh,
+            eigenvalues: self.eigenvalues,
         }
     }
 
@@ -163,6 +177,7 @@ impl<
         RefEnergyIntegrationMethod,
         WavevectorIntegrationMethod,
         RefMesh,
+        RefEigenvalues,
     > {
         SpectralSpaceBuilder {
             number_of_energy_points: self.number_of_energy_points,
@@ -172,6 +187,7 @@ impl<
             energy_integration_rule: self.energy_integration_rule,
             wavevector_integration_rule,
             mesh: self.mesh,
+            eigenvalues: self.eigenvalues,
         }
     }
 
@@ -186,6 +202,7 @@ impl<
         RefEnergyIntegrationMethod,
         RefWavevectorIntegrationMethod,
         &Mesh<T, GeometryDim, Conn>,
+        RefEigenvalues,
     >
     where
         DefaultAllocator: Allocator<T, GeometryDim>,
@@ -198,14 +215,38 @@ impl<
             energy_integration_rule: self.energy_integration_rule,
             wavevector_integration_rule: self.wavevector_integration_rule,
             mesh,
+            eigenvalues: self.eigenvalues,
+        }
+    }
+
+    /// Attach the zone-centre eigenvalues of the Hamiltonian
+    pub(crate) fn with_zone_centre_eigenvalues<Eigenvalues>(
+        self,
+        eigenvalues: &Eigenvalues,
+    ) -> SpectralSpaceBuilder<
+        T,
+        RefEnergyRange,
+        RefEnergyIntegrationMethod,
+        RefWavevectorIntegrationMethod,
+        RefMesh,
+        &Eigenvalues,
+    > {
+        SpectralSpaceBuilder {
+            number_of_energy_points: self.number_of_energy_points,
+            energy_range: self.energy_range,
+            number_of_wavevector_points: self.number_of_wavevector_points,
+            maximum_wavevector: self.maximum_wavevector,
+            energy_integration_rule: self.energy_integration_rule,
+            wavevector_integration_rule: self.wavevector_integration_rule,
+            mesh: self.mesh,
+            eigenvalues,
         }
     }
 }
 
-impl<T, EnergyIntegrationRule> SpectralSpaceBuilder<T, Range<T>, EnergyIntegrationRule, (), ()>
+impl<T> SpectralSpaceBuilder<T, Range<T>, IntegrationRule, (), (), ()>
 where
     T: Copy + RealField + NumCast,
-    EnergyIntegrationRule: super::GenerateWeights<T, U1, Segment1dConnectivity>,
 {
     /// Build a `Coherent` `SpectralSpace`, to be used when no scattering is present in the system
     pub fn build_coherent(self) -> SpectralSpace<T, ()> {
@@ -221,18 +262,36 @@ where
     }
 }
 
-impl<T, WavevectorIntegrationRule, EnergyIntegrationRule>
+impl<T> SpectralSpaceBuilder<T, Range<T>, IntegrationRule, (), (), &Array1<T>>
+where
+    T: Copy + RealField + NumCast,
+{
+    /// Build a `Coherent` `SpectralSpace`, to be used when no scattering is present in the system
+    pub fn build_coherent(self) -> SpectralSpace<T, ()> {
+        let energy = super::energy::EnergySpaceBuilder::new()
+            .with_integration_rule(self.energy_integration_rule)
+            .with_number_of_points(self.number_of_energy_points.unwrap())
+            .with_energy_range(self.energy_range)
+            .with_eigenvalues(self.eigenvalues)
+            .build();
+        SpectralSpace {
+            energy,
+            wavevector: (),
+        }
+    }
+}
+
+impl<T>
     SpectralSpaceBuilder<
         T,
         Range<T>,
-        EnergyIntegrationRule,
-        WavevectorIntegrationRule,
+        IntegrationRule,
+        IntegrationRule,
         &Mesh<T, U1, Segment1dConnectivity>,
+        (),
     >
 where
     T: Copy + RealField + NumCast,
-    EnergyIntegrationRule: GenerateWeights<T, U1, Segment1dConnectivity>,
-    WavevectorIntegrationRule: GenerateWeights<T, U1, Segment1dConnectivity>,
     DefaultAllocator: Allocator<T, U1>,
 {
     /// Build an `Incoherent` `SpectralSpace`, to be used when scattering is present in the system or the
@@ -244,6 +303,39 @@ where
             .with_integration_rule(self.energy_integration_rule)
             .with_number_of_points(self.number_of_energy_points.unwrap())
             .with_energy_range(self.energy_range)
+            .build();
+        let wavevector = super::wavevector::WavevectorSpaceBuilder::new()
+            .with_integration_rule(self.wavevector_integration_rule)
+            .with_number_of_points(self.number_of_wavevector_points.unwrap())
+            .with_maximum_wavevector(self.maximum_wavevector.unwrap())
+            .build();
+        SpectralSpace { energy, wavevector }
+    }
+}
+
+impl<T>
+    SpectralSpaceBuilder<
+        T,
+        Range<T>,
+        IntegrationRule,
+        IntegrationRule,
+        &Mesh<T, U1, Segment1dConnectivity>,
+        &Array1<T>,
+    >
+where
+    T: Copy + RealField + NumCast,
+    DefaultAllocator: Allocator<T, U1>,
+{
+    /// Build an `Incoherent` `SpectralSpace`, to be used when scattering is present in the system or the
+    /// effective mass is non-constant through the device
+    pub(crate) fn build_incoherent(
+        self,
+    ) -> SpectralSpace<T, WavevectorSpace<T, U1, Segment1dConnectivity>> {
+        let energy = EnergySpaceBuilder::new()
+            .with_integration_rule(self.energy_integration_rule)
+            .with_number_of_points(self.number_of_energy_points.unwrap())
+            .with_energy_range(self.energy_range)
+            .with_eigenvalues(self.eigenvalues)
             .build();
         let wavevector = super::wavevector::WavevectorSpaceBuilder::new()
             .with_integration_rule(self.wavevector_integration_rule)

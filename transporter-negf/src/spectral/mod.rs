@@ -183,13 +183,7 @@ where
 
     #[allow(clippy::needless_collect)]
     fn iter_energy_widths(&self) -> Self::Iter {
-        let x = self
-            .energy
-            .grid
-            .elements()
-            .iter()
-            .map(|x| x.0.diameterb())
-            .collect::<Vec<_>>();
+        let x = self.energy.widths().copied().collect::<Vec<_>>();
         x.into_iter()
     }
 
@@ -296,13 +290,7 @@ impl<T: RealField + Copy> SpectralDiscretisation<T> for SpectralSpace<T, ()> {
 
     #[allow(clippy::needless_collect)]
     fn iter_energy_widths(&self) -> Self::Iter {
-        let x = self
-            .energy
-            .grid
-            .elements()
-            .iter()
-            .map(|x| x.0.diameterb())
-            .collect::<Vec<_>>();
+        let x = self.energy.widths().copied().collect::<Vec<_>>();
         x.into_iter()
     }
 
@@ -359,6 +347,8 @@ pub enum IntegrationRule {
     Romberg,
     /// Three point integration
     ThreePoint,
+    /// Gauss-Kronrod
+    GaussKronrod,
 }
 
 /// trait to generate weights for the spectral space
@@ -419,6 +409,7 @@ where
                         T::one()
                     }
                 }
+                IntegrationRule::GaussKronrod => unreachable!(),
             }
         };
         Array1::from_iter((0..num_points).map(weight))

@@ -49,6 +49,35 @@ where
     }
 }
 
+pub fn create_line_segment_from_vertices<T>(vertices: Vec<T>) -> Mesh1d<T>
+where
+    T: Copy + RealField,
+{
+    let num_vertices_x = vertices.len();
+
+    let vertices = vertices
+        .into_iter()
+        .map(Vector1::new)
+        .map(|x| (Point1::from(x), Assignment::Core(0)))
+        .collect::<Vec<_>>();
+
+    let mut cells = Vec::with_capacity(num_vertices_x);
+
+    let to_global_vertex_index = |i| i;
+    cells.push(Segment1dConnectivity::Boundary([to_global_vertex_index(1)]));
+    for i in 1..num_vertices_x - 1 {
+        cells.push(Segment1dConnectivity::Core([
+            to_global_vertex_index(i - 1),
+            to_global_vertex_index(i + 1),
+        ]));
+    }
+    cells.push(Segment1dConnectivity::Boundary([to_global_vertex_index(
+        num_vertices_x - 2,
+    )]));
+
+    Mesh1d::single_region_from_vertices_and_connectivity(vertices, cells, 0)
+}
+
 pub fn create_line_segment_mesh_1d<T>(
     unit_length: T,
     units_x: usize,

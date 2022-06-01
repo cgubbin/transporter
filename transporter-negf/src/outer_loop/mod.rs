@@ -56,6 +56,9 @@ pub(crate) enum OuterLoopError<T: RealField> {
     // Write errors in post-processing. Non-recoverable
     #[error(transparent)]
     IoError(#[from] std::io::Error),
+    // Errors from linear algebra failure
+    #[error(transparent)]
+    LinAlg(#[from] ndarray_linalg::error::LinalgError),
 }
 
 /// Builder struct for the outer loop
