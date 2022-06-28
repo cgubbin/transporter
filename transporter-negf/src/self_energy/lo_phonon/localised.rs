@@ -427,20 +427,6 @@ where
                             .identify_bracketing_weights(energy_scattered_from)
                             .unwrap();
 
-                        // // TODO remove these checks when satisfied with security checks elsewhere
-                        // assert!(crate::utilities::matrices::is_anti_hermitian(
-                        //     greens_functions.lesser[global_indices[0]]
-                        //         .as_ref()
-                        //         .core_as_ref()
-                        //         .view()
-                        // ));
-                        // assert!(crate::utilities::matrices::is_anti_hermitian(
-                        //     greens_functions.lesser[global_indices[1]]
-                        //         .as_ref()
-                        //         .core_as_ref()
-                        //         .view()
-                        // ));
-
                         *lesser_self_energy_matrix = lesser_self_energy_matrix.clone()
                             + (&phonon_workspace
                                 * Complex::from((1_f64 + n_0) * weight * width * wavevector_l)
@@ -475,20 +461,6 @@ where
                         let weights = spectral_space
                             .identify_bracketing_weights(energy_scattered_to)
                             .unwrap();
-
-                        // // TODO remove these checks when satisfied with security checks elsewhere
-                        // assert!(crate::utilities::matrices::is_anti_hermitian(
-                        //     greens_functions.lesser[global_indices[0]]
-                        //         .as_ref()
-                        //         .core_as_ref()
-                        //         .view()
-                        // ));
-                        // assert!(crate::utilities::matrices::is_anti_hermitian(
-                        //     greens_functions.lesser[global_indices[1]]
-                        //         .as_ref()
-                        //         .core_as_ref()
-                        //         .view()
-                        // ));
 
                         *lesser_self_energy_matrix = lesser_self_energy_matrix.clone()
                             + &(&phonon_workspace
@@ -580,9 +552,6 @@ where
                 let wavevector_k = spectral_space.wavevector_at(wavevector_index_k);
                 let mut phonon_workspace: Array2<Complex<f64>> =
                     Array2::zeros((num_vertices_in_core, num_vertices_in_core));
-
-                // let phonon_workspace =
-                //     Array2::from_diag_elem(num_vertices_in_core, Complex::from(1_f64));
 
                 // Reset the matrix
                 retarded_self_energy_matrix.fill(Complex::from(0_f64));
@@ -816,7 +785,7 @@ where
             GeometryDim,
             BandDim,
         >,
-    ) -> Result<Array1<Complex<f64>>, SelfEnergyError>
+    ) -> Result<Array1<f64>, SelfEnergyError>
     where
         Spectral: SpectralDiscretisation<f64>,
         DefaultAllocator: Allocator<f64, BandDim> + Allocator<[f64; 3], BandDim>,
@@ -832,11 +801,9 @@ where
         let eps_fr = 20_f64;
         let gamma_frohlich = ELECTRON_CHARGE / 2_f64 / EPSILON_0 * e_0 * eps_fr; // In electron volts
 
-        let prefactor = Complex::from(
-            gamma_frohlich * 1. / 4. / std::f64::consts::PI * 2_f64
-                / crate::constants::HBAR
-                / (2_f64 * std::f64::consts::PI).powi(2),
-        );
+        let prefactor = gamma_frohlich * 1. / 4. / std::f64::consts::PI * 2_f64
+            / crate::constants::HBAR
+            / (2_f64 * std::f64::consts::PI).powi(2);
 
         let num_vertices_in_reservoir = greens_functions.retarded[0].as_ref().drain_diagonal.len();
         let num_vertices_in_core = greens_functions.retarded[0].as_ref().core_matrix.shape()[0];
@@ -874,6 +841,7 @@ where
                             mesh,
                             (wavevector_k - wavevector_l).abs(),
                         );
+
                         if spectral_space.energy_at(energy_index)
                             < spectral_space.energy_at(spectral_space.number_of_energy_points() - 1)
                                 - e_0
@@ -896,43 +864,65 @@ where
                                 .identify_bracketing_weights(energy_scattered_from)
                                 .unwrap();
 
-                            let g_advanced = greens_functions.retarded[base_index]
-                                .as_ref()
-                                .core_matrix
-                                .clone()
-                                .t()
-                                .mapv(|x| x.conj());
-                            let g_greater =
-                                &greens_functions.retarded[base_index].as_ref().core_matrix
-                                    - &g_advanced
-                                    + &greens_functions.lesser[base_index].as_ref().core_matrix;
+                            // let g_advanced = greens_functions.retarded[base_index]
+                            //     .as_ref()
+                            //     .core_matrix
+                            //     .clone()
+                            //     .t()
+                            //     .mapv(|x| x.conj());
+                            // let g_greater =
+                            //     &greens_functions.retarded[base_index].as_ref().core_matrix
+                            //         - &g_advanced
+                            //         + &greens_functions.lesser[base_index].as_ref().core_matrix;
 
-                            *element += ((&phonon_workspace
-                                * Complex::from(
-                                    (1_f64 + n_0)
-                                        * weight
-                                        * width
-                                        * wavevector_k
-                                        * energy_weight
-                                        * energy_width
-                                        * crate::constants::ELECTRON_CHARGE,
-                                )
-                                * prefactor)
-                                .dot(
-                                    &(greens_functions.lesser[global_indices[0]]
-                                        .as_ref()
-                                        .core_as_ref()
-                                        * Complex::from(weights[0])
-                                        + greens_functions.lesser[global_indices[1]]
-                                            .as_ref()
-                                            .core_as_ref()
-                                            * Complex::from(weights[1]))
-                                    .dot(&phonon_workspace.t()),
-                                ))
-                            .dot(&g_greater)
-                            .diag()
-                            .sum()
-                                * mesh.elements()[0].0.diameter();
+                            let g_lesser_mixed = &(greens_functions.lesser[global_indices[0]]
+                                .as_ref()
+                                .core_as_ref()
+                                * Complex::from(weights[0])
+                                + greens_functions.lesser[global_indices[1]]
+                                    .as_ref()
+                                    .core_as_ref()
+                                    * Complex::from(weights[1]));
+
+                            // Sigma = M G^< M
+                            let sigma_lesser =
+                                &phonon_workspace.dot(&g_lesser_mixed.dot(&phonon_workspace.t()));
+
+                            // Gamma = -Im { \Sigma_{LL} }
+                            let mut gamma = -sigma_lesser.diag().mapv(|x| x.im);
+                            let pre = (1_f64 + n_0)
+                                * (weight * width * wavevector_k) // k * dk
+                                * (energy_weight * energy_width * crate::constants::ELECTRON_CHARGE) // de
+                                * prefactor;
+                            gamma *= pre;
+
+                            *element += gamma.sum();
+                            //  ((&phonon_workspace
+                            //     * Complex::from(
+                            //         (1_f64 + n_0)
+                            //             * weight
+                            //             * width
+                            //             * wavevector_k
+                            //             * energy_weight
+                            //             * energy_width
+                            //             * crate::constants::ELECTRON_CHARGE,
+                            //     )
+                            //     * prefactor)
+                            //     .dot(
+                            //         &(greens_functions.lesser[global_indices[0]]
+                            //             .as_ref()
+                            //             .core_as_ref()
+                            //             * Complex::from(weights[0])
+                            //             + greens_functions.lesser[global_indices[1]]
+                            //                 .as_ref()
+                            //                 .core_as_ref()
+                            //                 * Complex::from(weights[1]))
+                            //         .dot(&phonon_workspace.t()),
+                            //     ))
+                            // .dot(&g_greater)
+                            // .diag()
+                            // .sum()
+                            //     * mesh.elements()[0].0.diameter();
                             //TODO Currently assuming a uniform meshing
                         }
 
@@ -954,42 +944,64 @@ where
                                 .identify_bracketing_weights(energy_scattered_to)
                                 .unwrap();
 
-                            let g_advanced = greens_functions.retarded[base_index]
+                            let g_lesser_mixed = &(greens_functions.lesser[global_indices[0]]
                                 .as_ref()
-                                .core_matrix
-                                .clone()
-                                .t()
-                                .mapv(|x| x.conj());
+                                .core_as_ref()
+                                * Complex::from(weights[0])
+                                + greens_functions.lesser[global_indices[1]]
+                                    .as_ref()
+                                    .core_as_ref()
+                                    * Complex::from(weights[1]));
 
-                            let g_greater =
-                                &greens_functions.retarded[base_index].as_ref().core_matrix
-                                    - &g_advanced
-                                    + &greens_functions.lesser[base_index].as_ref().core_matrix;
+                            // Sigma = M G^< M
+                            let sigma_lesser =
+                                &phonon_workspace.dot(&g_lesser_mixed.dot(&phonon_workspace.t()));
 
-                            *element += ((&phonon_workspace
-                                * Complex::from(
-                                    n_0 * weight
-                                        * width
-                                        * wavevector_k
-                                        * energy_width
-                                        * energy_weight
-                                        * crate::constants::ELECTRON_CHARGE,
-                                )
-                                * prefactor)
-                                .dot(
-                                    &(greens_functions.lesser[global_indices[0]]
-                                        .as_ref()
-                                        .core_as_ref()
-                                        * Complex::from(weights[0])
-                                        + greens_functions.lesser[global_indices[1]]
-                                            .as_ref()
-                                            .core_as_ref()
-                                            * Complex::from(weights[1]))
-                                    .dot(&phonon_workspace.t()),
-                                ))
-                            .dot(&g_greater)
-                            .sum()
-                                * mesh.elements()[0].0.diameter();
+                            // Gamma = -Im { \Sigma_{LL} }
+                            let mut gamma = -sigma_lesser.diag().mapv(|x| x.im);
+                            let pre = (n_0)
+                                * (weight * width * wavevector_k) // k * dk
+                                * (energy_weight * energy_width * crate::constants::ELECTRON_CHARGE) // de
+                                * prefactor;
+                            gamma *= pre;
+
+                            *element += gamma.sum();
+                            // let g_advanced = greens_functions.retarded[base_index]
+                            //     .as_ref()
+                            //     .core_matrix
+                            //     .clone()
+                            //     .t()
+                            //     .mapv(|x| x.conj());
+
+                            // let g_greater =
+                            //     &greens_functions.retarded[base_index].as_ref().core_matrix
+                            //         - &g_advanced
+                            //         + &greens_functions.lesser[base_index].as_ref().core_matrix;
+
+                            // *element += ((&phonon_workspace
+                            //     * Complex::from(
+                            //         n_0 * weight
+                            //             * width
+                            //             * wavevector_k
+                            //             * energy_width
+                            //             * energy_weight
+                            //             * crate::constants::ELECTRON_CHARGE,
+                            //     )
+                            //     * prefactor)
+                            //     .dot(
+                            //         &(greens_functions.lesser[global_indices[0]]
+                            //             .as_ref()
+                            //             .core_as_ref()
+                            //             * Complex::from(weights[0])
+                            //             + greens_functions.lesser[global_indices[1]]
+                            //                 .as_ref()
+                            //                 .core_as_ref()
+                            //                 * Complex::from(weights[1]))
+                            //         .dot(&phonon_workspace.t()),
+                            //     ))
+                            // .dot(&g_greater)
+                            // .sum()
+                            //     * mesh.elements()[0].0.diameter();
                         };
                     }
                 }
@@ -1010,7 +1022,7 @@ where
             GeometryDim,
             BandDim,
         >,
-    ) -> Result<Array1<Complex<f64>>, SelfEnergyError>
+    ) -> Result<Array1<f64>, SelfEnergyError>
     where
         Spectral: SpectralDiscretisation<f64>,
         DefaultAllocator: Allocator<f64, BandDim> + Allocator<[f64; 3], BandDim>,
@@ -1026,11 +1038,9 @@ where
         let eps_fr = 20_f64;
         let gamma_frohlich = ELECTRON_CHARGE / 2_f64 / EPSILON_0 * e_0 * eps_fr; // In electron volts
 
-        let prefactor = Complex::from(
-            gamma_frohlich * 1. / 4. / std::f64::consts::PI * 2_f64
-                / crate::constants::HBAR
-                / (2_f64 * std::f64::consts::PI).powi(2),
-        );
+        let prefactor = gamma_frohlich * 1. / 4. / std::f64::consts::PI * 2_f64
+            / crate::constants::HBAR
+            / (2_f64 * std::f64::consts::PI).powi(2);
 
         let num_vertices_in_reservoir = greens_functions.retarded[0].as_ref().drain_diagonal.len();
         let num_vertices_in_core = greens_functions.retarded[0].as_ref().core_matrix.shape()[0];
@@ -1090,67 +1100,66 @@ where
                                 .identify_bracketing_weights(energy_scattered_from)
                                 .unwrap();
 
-                            let lesser_se = (&phonon_workspace
-                                * Complex::from(
-                                    (1_f64 + n_0)
-                                        * weight
-                                        * width
-                                        * wavevector_k
-                                        * energy_width
-                                        * energy_weight
-                                        * crate::constants::ELECTRON_CHARGE,
-                                )
-                                * prefactor)
-                                .dot(
-                                    &(greens_functions.lesser[global_indices[0]]
-                                        .as_ref()
-                                        .core_as_ref()
-                                        * Complex::from(weights[0])
-                                        + greens_functions.lesser[global_indices[1]]
-                                            .as_ref()
-                                            .core_as_ref()
-                                            * Complex::from(weights[1]))
-                                    .dot(&phonon_workspace.t()),
-                                );
+                            let g_lesser_mixed = &(greens_functions.lesser[global_indices[0]]
+                                .as_ref()
+                                .core_as_ref()
+                                * Complex::from(weights[0])
+                                + greens_functions.lesser[global_indices[1]]
+                                    .as_ref()
+                                    .core_as_ref()
+                                    * Complex::from(weights[1]));
 
-                            let retarded_se = (&phonon_workspace
-                                * Complex::from(
-                                    weight
-                                        * width
-                                        * wavevector_k
-                                        * energy_width
-                                        * energy_weight
-                                        * crate::constants::ELECTRON_CHARGE,
-                                )
-                                * prefactor)
-                                .dot(
-                                    &(greens_functions.retarded[global_indices[0]]
+                            let lesser_se = Complex::from(n_0 + 1_f64)
+                                * &phonon_workspace.dot(&g_lesser_mixed.dot(&phonon_workspace.t()));
+
+                            let retarded_se = &phonon_workspace.dot(
+                                &(greens_functions.retarded[global_indices[0]]
+                                    .as_ref()
+                                    .core_as_ref()
+                                    * Complex::from(weights[0] * (n_0))
+                                    + greens_functions.retarded[global_indices[1]]
                                         .as_ref()
                                         .core_as_ref()
-                                        * Complex::from(weights[0] * (n_0))
-                                        + greens_functions.retarded[global_indices[1]]
-                                            .as_ref()
-                                            .core_as_ref()
-                                            * Complex::from(weights[1] * (n_0))
-                                        - greens_functions.lesser[global_indices[0]]
-                                            .as_ref()
-                                            .core_as_ref()
-                                            * Complex::from(weights[0] / (2_f64))
-                                        - greens_functions.lesser[global_indices[1]]
-                                            .as_ref()
-                                            .core_as_ref()
-                                            * Complex::from(weights[1] / (2_f64)))
-                                    .dot(&phonon_workspace.t()),
-                                );
+                                        * Complex::from(weights[1] * (n_0))
+                                    - greens_functions.lesser[global_indices[0]]
+                                        .as_ref()
+                                        .core_as_ref()
+                                        * Complex::from(weights[0] / (2_f64))
+                                    - greens_functions.lesser[global_indices[1]]
+                                        .as_ref()
+                                        .core_as_ref()
+                                        * Complex::from(weights[1] / (2_f64)))
+                                .dot(&phonon_workspace.t()),
+                            );
 
                             let advanced_se = retarded_se.clone().t().mapv(|x| x.conj());
-                            let greater_se = &retarded_se - &advanced_se + &lesser_se;
+                            let greater_se = retarded_se - &advanced_se + lesser_se;
 
-                            *element += greater_se
-                                .dot(greens_functions.lesser[base_index].as_ref().core_as_ref())
-                                .diag()
-                                .sum()
-                                * mesh.elements()[0].0.diameter();
+                            let mut gamma = -greater_se.diag().mapv(|x| x.im);
+
+                            let pre = (weight * width * wavevector_k) // k * dk
+                                * (energy_weight * energy_width * crate::constants::ELECTRON_CHARGE) // de
+                                * prefactor;
+                            gamma *= pre;
+
+                            *element += gamma.sum();
+                            // let g_advanced = greens_functions.retarded[base_index]
+
+                            // * Complex::from(
+                            //     weight
+                            //         * width
+                            //         * wavevector_k
+                            //         * energy_width
+                            //         * energy_weight
+                            //         * crate::constants::ELECTRON_CHARGE,
+                            // )
+                            // * prefactor)
+
+                            // *element += greater_se
+                            //     .dot(greens_functions.lesser[base_index].as_ref().core_as_ref())
+                            //     .diag()
+                            //     .sum()
+                            //     * mesh.elements()[0].0.diameter();
 
                             //TODO Currently assuming uniform meshing
                         }
@@ -1173,65 +1182,54 @@ where
                                 .identify_bracketing_weights(energy_scattered_to)
                                 .unwrap();
 
-                            let lesser_se = (&phonon_workspace
-                                * Complex::from(
-                                    n_0 * weight
-                                        * width
-                                        * wavevector_k
-                                        * energy_width
-                                        * energy_weight
-                                        * crate::constants::ELECTRON_CHARGE,
-                                )
-                                * prefactor)
-                                .dot(
-                                    &(greens_functions.lesser[global_indices[0]]
-                                        .as_ref()
-                                        .core_as_ref()
-                                        * Complex::from(weights[0])
-                                        + greens_functions.lesser[global_indices[1]]
-                                            .as_ref()
-                                            .core_as_ref()
-                                            * Complex::from(weights[1]))
-                                    .dot(&phonon_workspace.t()),
-                                );
+                            let g_lesser_mixed = &(greens_functions.lesser[global_indices[0]]
+                                .as_ref()
+                                .core_as_ref()
+                                * Complex::from(weights[0])
+                                + greens_functions.lesser[global_indices[1]]
+                                    .as_ref()
+                                    .core_as_ref()
+                                    * Complex::from(weights[1]));
 
-                            let retarded_se = (&phonon_workspace
-                                * Complex::from(
-                                    weight
-                                        * width
-                                        * wavevector_k
-                                        * energy_width
-                                        * energy_weight
-                                        * crate::constants::ELECTRON_CHARGE,
-                                )
-                                * prefactor)
-                                .dot(
-                                    &(greens_functions.retarded[global_indices[0]]
+                            let lesser_se = Complex::from(n_0)
+                                * &phonon_workspace.dot(&g_lesser_mixed.dot(&phonon_workspace.t()));
+
+                            let retarded_se = &phonon_workspace.dot(
+                                &(greens_functions.retarded[global_indices[0]]
+                                    .as_ref()
+                                    .core_as_ref()
+                                    * Complex::from(weights[0] * (1_f64 + n_0))
+                                    + greens_functions.retarded[global_indices[1]]
                                         .as_ref()
                                         .core_as_ref()
-                                        * Complex::from(weights[0] * (1_f64 + n_0))
-                                        + greens_functions.retarded[global_indices[1]]
-                                            .as_ref()
-                                            .core_as_ref()
-                                            * Complex::from(weights[1] * (1_f64 + n_0))
-                                        + greens_functions.lesser[global_indices[0]]
-                                            .as_ref()
-                                            .core_as_ref()
-                                            * Complex::from(weights[0] / (2_f64))
-                                        + greens_functions.lesser[global_indices[1]]
-                                            .as_ref()
-                                            .core_as_ref()
-                                            * Complex::from(weights[1] / (2_f64)))
-                                    .dot(&phonon_workspace.t()),
-                                );
+                                        * Complex::from(weights[1] * (1_f64 + n_0))
+                                    + greens_functions.lesser[global_indices[0]]
+                                        .as_ref()
+                                        .core_as_ref()
+                                        * Complex::from(weights[0] / (2_f64))
+                                    + greens_functions.lesser[global_indices[1]]
+                                        .as_ref()
+                                        .core_as_ref()
+                                        * Complex::from(weights[1] / (2_f64)))
+                                .dot(&phonon_workspace.t()),
+                            );
 
                             let advanced_se = retarded_se.clone().t().mapv(|x| x.conj());
-                            let greater_se = &retarded_se - &advanced_se + &lesser_se;
+                            let greater_se = retarded_se - &advanced_se + &lesser_se;
 
-                            *element += greater_se
-                                .dot(greens_functions.lesser[base_index].as_ref().core_as_ref())
-                                .sum()
-                                * mesh.elements()[0].0.diameter();
+                            let mut gamma = -greater_se.diag().mapv(|x| x.im);
+
+                            let pre = (weight * width * wavevector_k) // k * dk
+                                * (energy_weight * energy_width * crate::constants::ELECTRON_CHARGE) // de
+                                * prefactor;
+                            gamma *= pre;
+
+                            *element += gamma.sum();
+
+                            // *element += greater_se
+                            //     .dot(greens_functions.lesser[base_index].as_ref().core_as_ref())
+                            //     .sum()
+                            //     * mesh.elements()[0].0.diameter();
                         };
                     }
                 }
@@ -1239,7 +1237,7 @@ where
         Ok(result)
     }
 
-    fn assemble_phonon_potential(
+    pub(crate) fn assemble_phonon_potential(
         output: &mut Array2<Complex<f64>>,
         number_of_vertices_in_reservoir: usize,
         mesh: &Mesh<f64, GeometryDim, Conn>,

@@ -23,8 +23,9 @@ where
     /// Compute the updated charge and current densities, and confirm
     /// whether the change is within tolerance of the values on the
     /// previous loop iteration
+    /// This takes a mutable reference to self to enable update of the progress struct
     fn is_loop_converged(
-        &self,
+        &mut self,
         charge_and_current: &mut ChargeAndCurrent<T, BandDim>,
     ) -> Result<bool, InnerLoopError>;
     /// Carry out a single iteration of the self-consistent inner loop
@@ -53,7 +54,7 @@ where
 {
     /// Check convergence and re-assign the new charge density to the old one
     fn is_loop_converged(
-        &self,
+        &mut self,
         previous_charge_and_current: &mut ChargeAndCurrent<f64, BandDim>,
     ) -> Result<bool, InnerLoopError> {
         let postprocessor: PostProcessor<f64, GeometryDim, Conn> =
@@ -66,7 +67,7 @@ where
                 self.spectral,
             )
             .unwrap();
-        let result = charge_and_current.is_change_within_tolerance(
+        let (result, _) = charge_and_current.is_change_within_tolerance(
             previous_charge_and_current,
             self.convergence_settings.inner_tolerance(),
         )?;
@@ -133,7 +134,7 @@ where
 {
     /// Check convergence and re-assign the new charge density to the old one
     fn is_loop_converged(
-        &self,
+        &mut self,
         previous_charge_and_current: &mut ChargeAndCurrent<f64, BandDim>,
     ) -> Result<bool, InnerLoopError> {
         let postprocessor: PostProcessor<f64, GeometryDim, Conn> =
@@ -146,7 +147,7 @@ where
                 self.spectral,
             )?;
 
-        let result = charge_and_current.is_change_within_tolerance(
+        let (result, _) = charge_and_current.is_change_within_tolerance(
             previous_charge_and_current,
             self.convergence_settings.inner_tolerance(),
         )?;
@@ -209,7 +210,7 @@ where
 {
     /// Check convergence and re-assign the new charge density to the old one
     fn is_loop_converged(
-        &self,
+        &mut self,
         previous_charge_and_current: &mut ChargeAndCurrent<f64, BandDim>,
     ) -> Result<bool, InnerLoopError> {
         let postprocessor: PostProcessor<f64, GeometryDim, Conn> =
@@ -221,10 +222,12 @@ where
                 self.self_energies,
                 self.spectral,
             )?;
-        let result = charge_and_current.is_change_within_tolerance(
+        let (result, current_value) = charge_and_current.is_change_within_tolerance(
             previous_charge_and_current,
             self.convergence_settings.inner_tolerance(),
         )?;
+        self.progress.set_inner_residual(current_value);
+
         let _ = std::mem::replace(previous_charge_and_current, charge_and_current);
         Ok(result)
     }
@@ -270,17 +273,6 @@ where
             )?
             .charge_as_ref()
             .net_charge();
-
-        // let system_time = std::time::SystemTime::now();
-        // let datetime: chrono::DateTime<chrono::Utc> = system_time.into();
-        // let mut file = std::fs::File::create(format!(
-        //     "../results/inner_charge_{}_{}.txt",
-        //     self.scattering_scaling, datetime
-        // ))?;
-        // for value in charge.row_iter() {
-        //     let value = value[0].to_f64().unwrap().to_string();
-        //     writeln!(file, "{}", value)?;
-        // }
         Ok(())
     }
 
@@ -290,15 +282,32 @@ where
     ) -> Result<(), InnerLoopError> {
         //}
         // TODO Only on the first full iteration
-        // self.coherent_step()?;
-        // self.ramp_scattering()?;
         tracing::info!("Beginning loop");
+        let now = Instant::now();
         self.single_iteration()?;
+
+        self.progress.set_inner_iteration(1);
+        self.progress
+            .set_target_inner_residual(self.convergence_settings.inner_tolerance());
+        self.progress.set_time_for_inner_iteration(now.elapsed());
 
         let mut iteration = 0;
         while !self.is_loop_converged(previous_charge_and_current)? {
-            tracing::info!("The inner loop at iteration {iteration}");
+            // Communicate progress to the main thread
+            if let Err(e) = self.mpsc_sender.blocking_send(self.progress.clone()) {
+                tracing::warn!("Failed to emit progress from the Inner Loop: {:?}", e);
+            }
+
+            tracing::info!("Inner loop at iteration {}", iteration + 2);
+
+            let now = Instant::now();
+
             self.single_iteration()?;
+
+            // Set the iteration and the inner iteration time
+            self.progress.set_inner_iteration(iteration + 2);
+            self.progress.set_time_for_inner_iteration(now.elapsed());
+
             iteration += 1;
             if iteration >= self.convergence_settings.maximum_inner_iterations() {
                 return Err(InnerLoopError::OutOfIterations);
@@ -444,7 +453,7 @@ where
 {
     /// Check convergence and re-assign the new charge density to the old one
     fn is_loop_converged(
-        &self,
+        &mut self,
         previous_charge_and_current: &mut ChargeAndCurrent<f64, BandDim>,
     ) -> Result<bool, InnerLoopError> {
         let postprocessor: PostProcessor<f64, GeometryDim, Conn> =
@@ -456,18 +465,12 @@ where
                 self.self_energies,
                 self.spectral,
             )?;
-        //let system_time = std::time::SystemTime::now();
-        //let datetime: chrono::DateTime<chrono::Utc> = system_time.into();
-        //let mut file = std::fs::File::create(format!("../results/inner_charge_{}.txt", datetime))?;
-        //for value in charge_and_current.charge_as_ref().net_charge().row_iter() {
-        //    let value = value[0].to_f64().unwrap().to_string();
-        //    writeln!(file, "{}", value)?;
-        //}
 
-        let result = charge_and_current.is_change_within_tolerance(
+        let (result, value) = charge_and_current.is_change_within_tolerance(
             previous_charge_and_current,
             self.convergence_settings.inner_tolerance(),
         )?;
+        self.progress.set_inner_residual(value);
         let _ = std::mem::replace(previous_charge_and_current, charge_and_current);
         Ok(result)
     }
@@ -517,15 +520,17 @@ where
         self.progress.set_inner_iteration(1);
         self.progress
             .set_target_inner_residual(self.convergence_settings.inner_tolerance());
-        self.progress.set_inner_residual(1_f64); // Todo -> Currently we are not computing and storing the inner residual
         self.progress.set_time_for_inner_iteration(now.elapsed());
-        if let Err(e) = self.mpsc_sender.blocking_send(self.progress.clone()) {
-            tracing::warn!("Failed to emit progress from the Inner Loop: {:?}", e);
-        }
+
         let mut iteration = 0;
         // Run to iteration == 2 because on the first iteration incoherent
         // self energies will be trivially zero as the Greens functions are uninitialised
         while !self.is_loop_converged(previous_charge_and_current)? | (iteration < 2) {
+            // Communicate progress to the main thread
+            if let Err(e) = self.mpsc_sender.blocking_send(self.progress.clone()) {
+                tracing::warn!("Failed to emit progress from the Inner Loop: {:?}", e);
+            }
+
             tracing::info!("Inner loop at iteration {}", iteration + 2);
 
             let now = Instant::now();
@@ -535,13 +540,8 @@ where
 
             // Communicate the progress of the simulation to the `Master` thread
             self.progress.set_inner_iteration(iteration + 2);
-            self.progress
-                .set_target_inner_residual(self.convergence_settings.inner_tolerance());
-            self.progress.set_inner_residual(1_f64); // Todo -> Currently we are not computing and storing the inner residual
             self.progress.set_time_for_inner_iteration(now.elapsed());
-            if let Err(e) = self.mpsc_sender.blocking_send(self.progress.clone()) {
-                tracing::warn!("Failed to emit progress from the Inner Loop: {:?}", e);
-            }
+
             iteration += 1;
             if iteration >= self.convergence_settings.maximum_inner_iterations() {
                 return Err(InnerLoopError::OutOfIterations);
@@ -554,40 +554,41 @@ where
             self.greens_functions,
         )?);
 
-        let resolved_emission = self
+        Ok(())
+    }
+}
+
+impl<'a, GeometryDim, Conn, BandDim>
+    InnerLoop<
+        'a,
+        f64,
+        GeometryDim,
+        Conn,
+        MMatrix<Complex<f64>>,
+        SpectralSpace<f64, WavevectorSpace<f64, GeometryDim, Conn>>,
+        BandDim,
+    >
+where
+    GeometryDim: SmallDim,
+    BandDim: SmallDim,
+    Conn: Connectivity<f64, GeometryDim> + Send + Sync,
+    <Conn as Connectivity<f64, GeometryDim>>::Element: Send + Sync,
+    DefaultAllocator: Allocator<f64, GeometryDim>
+        + Allocator<Array1<f64>, BandDim>
+        + Allocator<f64, BandDim>
+        + Allocator<[f64; 3], BandDim>,
+    <DefaultAllocator as Allocator<f64, GeometryDim>>::Buffer: Send + Sync,
+    <DefaultAllocator as Allocator<f64, BandDim>>::Buffer: Send + Sync,
+    <DefaultAllocator as Allocator<[f64; 3], BandDim>>::Buffer: Send + Sync,
+{
+    pub(crate) fn rate(&self) -> Result<Array1<f64>, InnerLoopError> {
+        let rate = self
             .self_energies
             .calculate_resolved_localised_lo_emission_rate(
                 self.spectral,
                 self.mesh,
                 self.greens_functions,
             )?;
-
-        let resolved_absorption = self
-            .self_energies
-            .calculate_resolved_localised_lo_absorption_rate(
-                self.spectral,
-                self.mesh,
-                self.greens_functions,
-            )?;
-
-        // let system_time = std::time::SystemTime::now();
-        // let datetime: chrono::DateTime<chrono::Utc> = system_time.into();
-        let mut file =
-            std::fs::File::create(format!("../results/resolved_emission_{}.txt", self.voltage))?;
-        for value in resolved_emission.iter() {
-            let value = value.re.to_string();
-            writeln!(file, "{}", value)?;
-        }
-
-        let mut file = std::fs::File::create(format!(
-            "../results/resolved_absorption_{}.txt",
-            self.voltage
-        ))?;
-        for value in resolved_absorption.iter() {
-            let value = value.re.to_string();
-            writeln!(file, "{}", value)?;
-        }
-
-        Ok(())
+        Ok(rate)
     }
 }

@@ -1,6 +1,7 @@
 use crate::app::Calculation;
 use nalgebra::RealField;
 
+/// Holds the convergence criterion for the `OuterLoop` and `InnerLoop` as defined in the configuration file
 pub(crate) struct Convergence<T>
 where
     T: RealField,

@@ -21,6 +21,7 @@ impl<T: RealField + Copy> IoAsyncHandler<T> {
         let result = match io_event {
             IoEvent::Initialize => self.do_initialize().await,
             IoEvent::Run(file_to_run) => self.run_simulation(file_to_run).await,
+          
         };
         if let Err(err) = result {
             error!("Oops, bad has happened: {:?}", err);

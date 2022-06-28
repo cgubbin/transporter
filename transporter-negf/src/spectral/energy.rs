@@ -160,30 +160,34 @@ where
         assert!(self.energy_range.end > self.energy_range.start); // Need an ordered range, or something upsteam went wrong
                                                                   // Need the first cell to have zero, and the last cell end energy
 
-        let x = self.eigenvalues.iter().map(|x| *x).collect::<Vec<_>>();
-        let integrator = quad_rs::GaussKronrod::default();
-        let (vertices, weights) =
-            integrator.generate(self.energy_range, Some(x), self.number_of_points);
+        let (grid, weights, widths) = match self.integration_rule {
+            IntegrationRule::GaussKronrod => {
+                let integrator = quad_rs::GaussKronrod::default();
+                let (vertices, weights) =
+                    integrator.generate(self.energy_range, None, self.number_of_points);
 
-        let vertices = vertices.iter().map(|x| *x).collect::<Vec<_>>();
-        let widths = weights.iter().map(|x| *x).collect::<Array1<_>>();
+                let vertices = vertices.iter().map(|x| *x).collect::<Vec<_>>();
+                let widths = weights.iter().map(|x| *x).collect::<Array1<_>>();
+                let grid = create_line_segment_from_vertices(vertices);
+                let weights = Array1::ones(grid.elements().len());
+                (grid, weights, widths)
+            }
+            _ => {
+                let grid = create_line_segment_from_endpoints_and_number_of_points(
+                    self.energy_range,
+                    self.number_of_points,
+                    0,
+                );
+                let weights = self.integration_rule.generate_weights_from_grid(&grid);
+                let widths = grid
+                    .elements()
+                    .iter()
+                    .map(|element| element.0.diameterb())
+                    .collect::<Array1<T>>();
+                (grid, weights, widths)
+            }
+        };
 
-        // let grid = create_line_segment_from_endpoints_and_number_of_points(
-        //     self.energy_range,
-        //     self.number_of_points - self.eigenvalues.len(),
-        //     0,
-        // );
-        // let mut vertices = grid
-        //     .vertices()
-        //     .iter()
-        //     .map(|x| x.0[0])
-        //     .chain(self.eigenvalues.into_iter().map(|x| *x))
-        //     .collect::<Vec<_>>();
-        // vertices.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        let grid = create_line_segment_from_vertices(vertices);
-        let weights = Array1::ones(grid.elements().len());
-
-        // let weights = self.integration_rule.generate_weights_from_grid(&grid);
         EnergySpace {
             grid,
             weights,

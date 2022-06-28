@@ -1,7 +1,14 @@
+// Copyright 2022 Chris Gubbin
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT or
+// http://opensource.org/licenses/MIT>, at your option. This file may not be
+// copied, modified, or distributed except according to those terms.
+
 //! # Green's Functions
 //!
 //! This module calculates the Green's functions utilised to find the
-//! quantum electronic density in a device at fixed electrostatic potential
+//! quantum electronic density in a device at fixed electrostatic potential.
 
 /// Methods for computation of the Green's functions
 pub mod methods;
@@ -42,17 +49,22 @@ pub enum RecursionError {}
 #[derive(thiserror::Error, Debug, miette::Diagnostic)]
 #[error("Security error in {calculation:?} at global index {index:?}")]
 pub struct SecurityCheck {
+    /// The calculation that has failed
     pub(crate) calculation: String,
+    /// The global index in the spectral space that has failed
     pub(crate) index: usize,
 }
 
+/// A Greens function for a single spectral point
 #[derive(Clone, Debug)]
 pub(crate) struct GreensFunction<Matrix, T>
 where
     Matrix: GreensFunctionMethods<T> + Send + Sync,
     T: RealField + Copy + Send + Sync,
 {
+    /// The matrix storing the Green's function
     matrix: Matrix,
+    /// A marker type for the numerical field (f64, f32 etc)
     marker: std::marker::PhantomData<T>,
 }
 
@@ -1086,7 +1098,7 @@ mod test {
             .build()
             .unwrap();
         let mut rng = thread_rng();
-        let potential = crate::outer_loop::Potential::from_vector(ndarray::Array1::from(
+        let potential = crate::outer_loop::Potential::from(ndarray::Array1::from(
             (0..mesh.vertices().len())
                 .map(|_| rng.gen())
                 .collect::<Vec<_>>(),

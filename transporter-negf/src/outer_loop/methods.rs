@@ -1,9 +1,23 @@
+// Copyright 2022 Chris Gubbin
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT or
+// http://opensource.org/licenses/MIT>, at your option. This file may not be
+// copied, modified, or distributed except according to those terms.
+
+//! # Outer Loop Methods
+//!
+//! Methods to drive an `OuterLoop` to completion
+
 use super::{OuterLoop, OuterLoopError};
 use crate::{
     app::Calculation,
+    device::info_desk::DeviceInfoDesk,
     greens_functions::{AggregateGreensFunctions, GreensFunctionBuilder, MMatrix},
     inner_loop::{Inner, InnerLoop, InnerLoopBuilder},
+    postprocessor::Charge,
     self_energy::{SelfEnergy, SelfEnergyBuilder},
+    spectral::{SpectralSpace, WavevectorSpace},
 };
 use argmin::core::{ArgminOp, Executor};
 use conflux::{core::FixedPointSolver, solvers::anderson::Type1AndersonMixer};
@@ -12,19 +26,23 @@ use ndarray::{Array1, Array2};
 use ndarray_stats::DeviationExt;
 use num_complex::Complex;
 use num_traits::ToPrimitive;
-use std::fs::OpenOptions;
-use std::io::Write;
+use sprs::CsMat;
 use std::time::Instant;
-use transporter_mesher::{Connectivity, SmallDim};
+use transporter_mesher::{Connectivity, Mesh, SmallDim};
 
-/// A wrapper for the calculated electrostatic potential
+/// A wrapper type for the calculated electrostatic potential
 #[derive(Clone, Debug)]
 pub(crate) struct Potential<T: RealField>(Array1<T>);
 
-impl<T: Copy + RealField + ToPrimitive> Potential<T> {
-    pub(crate) fn from_vector(vector: Array1<T>) -> Self {
-        Self(vector)
+use std::convert::From;
+
+impl<T: RealField> From<Array1<T>> for Potential<T> {
+    fn from(array: Array1<T>) -> Self {
+        Self(array)
     }
+}
+
+impl<T: Copy + RealField + ToPrimitive> Potential<T> {
     /// Check whether the change in the normalised potential is within the requested tolerance
     fn is_change_within_tolerance(&self, other: &Potential<T>, tolerance: T) -> bool {
         let norm = self
@@ -52,24 +70,31 @@ impl<T: Copy + RealField> Potential<T> {
     }
 }
 
+/// The `Outer` trait contains all the methods necessary to run an outer loop from an initial electrostatic
+/// potential to completion. Implementing `Outer` as a trait allows it to utilised for both incoherent and
+/// coherent calculations
 pub(crate) trait Outer {
-    /// Compute the updated electric potential and confirm
-    /// whether the change is within tolerance of the values on the
-    /// previous loop iteration
+    /// Returns a `bool` indicating whether the last calculated two electrostatic potentials satisfy the
+    /// convergence criterion. The updated electric potential is placed in `previous_potential` after the convergence
+    /// check has been made
     fn is_loop_converged(
         &self,
         previous_potential: &mut Potential<f64>,
     ) -> Result<bool, OuterLoopError<f64>>;
-    /// Carry out a single iteration of the self-consistent inner loop
+    /// Carries out a full outer iteration. An inner loop is constructed, which calculates the charge density in the device
+    /// and subsequently the new electrostatic potential is calculated using the Poisson equation
     fn single_iteration(
         &mut self,
         potential: &Array1<f64>,
     ) -> Result<Array1<f64>, OuterLoopError<f64>>;
-    /// Run the self-consistent inner loop to convergence
+    /// A wrapper function which drives the outer loop to convergence. This constructs a solver to enact Anderson mixing
+    /// of the calculated electrostatic potential, which runs `single_iteration` until convergence is satisfied.
     fn run_loop(&mut self, potential: Potential<f64>) -> Result<(), OuterLoopError<f64>>;
+    /// Returns the electrostatic potential as an owned `Potential`
     fn potential_owned(&self) -> Potential<f64>;
 }
 
+/// An implementation for coherent scattering in devices with homogeneous effective mass
 impl<GeometryDim, Conn, BandDim> Outer
     for OuterLoop<'_, f64, GeometryDim, Conn, BandDim, SpectralSpace<f64, ()>>
 where
@@ -97,23 +122,12 @@ where
         let _ = std::mem::replace(previous_potential, potential);
         Ok(result)
     }
-    /// Carry out a single iteration of the self-consistent outer loop
     fn single_iteration(
         &mut self,
         previous_potential: &Array1<f64>,
     ) -> Result<Array1<f64>, OuterLoopError<f64>> {
-        // Build the inner loop, if we are running a ballistic calculation or have not arrived
-        // at an initial converged ballistic solution then we create a
-        // coherent inner loop, with sparse matrices, else we create a dense one.
-        // Update the Fermi level in the device
-        // self.tracker.fermi_level = Array1::from(self.info_desk.determine_fermi_level(
-        //     self.mesh,
-        //     &Potential::from_vector(previous_potential.clone()),
-        //     self.tracker.charge_as_ref(),
-        // ));
-        // Put the new potential into the tracker so the GF can see it.
         self.tracker
-            .update_potential(Potential::from_vector(previous_potential.clone()));
+            .update_potential(Potential::from(previous_potential.clone()));
 
         // TODO Building the gfs and SE here is a bad idea, we should do this else where so it is not redone on every iteration
         tracing::trace!("Initialising Greens Functions");
@@ -136,21 +150,18 @@ where
             self.build_coherent_inner_loop(&mut greens_functions, &mut self_energies);
         let mut charge_and_currents = self.tracker.charge_and_currents.clone();
 
-        inner_loop
-            .run_loop(&mut charge_and_currents)
-            .expect("Inner loop failed");
+        inner_loop.run_loop(&mut charge_and_currents)?;
         let _ = std::mem::replace(self.tracker.charge_and_currents_mut(), charge_and_currents);
 
         // Update the Fermi level in the device
         self.tracker.fermi_level = Array1::from(self.info_desk.determine_fermi_level(
             self.mesh,
-            &Potential::from_vector(previous_potential.clone()),
+            &Potential::from(previous_potential.clone()),
             self.tracker.charge_as_ref(),
         ));
 
-        let (potential, residual) = self
-            .update_potential(&Potential::from_vector(previous_potential.clone()))
-            .expect("Potential update failed");
+        let (potential, residual) =
+            self.update_potential(&Potential::from(previous_potential.clone()))?;
         self.tracker.current_residual = residual;
 
         Ok(potential.as_ref().clone())
@@ -158,6 +169,7 @@ where
 
     #[tracing::instrument(name = "Outer loop", skip_all)]
     fn run_loop(&mut self, mut potential: Potential<f64>) -> Result<(), OuterLoopError<f64>> {
+        // Create the Anderson Mixer
         let mixer = Type1AndersonMixer::new(
             potential.as_ref().len(),
             self.convergence_settings.outer_tolerance(),
@@ -169,14 +181,12 @@ where
         let mut solver = FixedPointSolver::new(mixer, initial_parameter);
 
         tracing::info!("Outer self-consistent loop with Anderson mixing");
+        // Run the solver to completion
         let solution = solver.run(self)?;
 
         let solution = Array1::from(solution.get_param().iter().copied().collect::<Vec<_>>());
-        potential = Potential::from_vector(solution);
+        potential = Potential::from(solution);
         self.tracker.update_potential(potential);
-        //// A single iteration before the loop to avoid updating the potential with an empty charge vector
-        // Postprocessing steps
-        // self.tracker.write_to_file("coherent")?;
         Ok(())
     }
 
@@ -185,8 +195,7 @@ where
     }
 }
 
-use crate::spectral::{SpectralSpace, WavevectorSpace};
-
+/// An implementation for incoherent scattering, or coherent scattering in a device with non-uniform effective mass
 impl<GeometryDim, Conn, BandDim> Outer
     for OuterLoop<
         '_,
@@ -227,12 +236,12 @@ where
         previous_potential: &Array1<f64>,
     ) -> Result<Array1<f64>, OuterLoopError<f64>> {
         self.tracker
-            .update_potential(Potential::from_vector(previous_potential.clone()));
+            .update_potential(Potential::from(previous_potential.clone()));
 
         // TODO Building the gfs and SE here is a bad idea, we should do this else where so it is not redone on every iteration
-        match self.tracker.calculation {
+        // THe calculation branches depending on whether it is coherent or incoherent
+        let rate = match self.tracker.calculation {
             Calculation::Coherent { voltage_target: _ } => {
-                dbg!("Coherent Path");
                 tracing::trace!("Initialising Greens Functions");
                 let mut greens_functions = GreensFunctionBuilder::default()
                     .with_info_desk(self.info_desk)
@@ -259,6 +268,7 @@ where
                     .expect("Inner loop failed");
                 let _ =
                     std::mem::replace(self.tracker.charge_and_currents_mut(), charge_and_currents);
+                None
             }
             Calculation::Incoherent { voltage_target: _ } => {
                 tracing::trace!("Initialising Greens Functions");
@@ -288,34 +298,29 @@ where
                     .run_loop(&mut charge_and_currents)
                     .expect("Inner loop failed");
 
-                let mut file = OpenOptions::new()
-                    .write(true)
-                    .append(true)
-                    .create(true)
-                    .open("../results/scattering_rate.txt")
-                    .unwrap();
-                writeln!(
-                    file,
-                    "{}, {}, {}, {}",
-                    self.tracker.voltage,
-                    self.tracker.scattering_scaling,
-                    inner_loop.rate.unwrap().re,
-                    inner_loop.rate.unwrap().im,
-                )?;
+                let rate = Some(crate::postprocessor::ScatteringRate::new(
+                    inner_loop.rate()?,
+                ));
 
                 let _ =
                     std::mem::replace(self.tracker.charge_and_currents_mut(), charge_and_currents);
+
+                rate
             }
+        };
+
+        if let Some(rate) = rate {
+            self.tracker.update_rate(rate);
         }
 
         // Update the Fermi level in the device
         self.tracker.fermi_level = Array1::from(self.info_desk.determine_fermi_level(
             self.mesh,
-            &Potential::from_vector(previous_potential.clone()),
+            &Potential::from(previous_potential.clone()),
             self.tracker.charge_as_ref(),
         ));
         let (potential, residual) = self
-            .update_potential(&Potential::from_vector(previous_potential.clone()))
+            .update_potential(&Potential::from(previous_potential.clone()))
             .expect("Potential update failed");
         self.tracker.current_residual = residual;
 
@@ -328,27 +333,12 @@ where
             self.convergence_settings.outer_tolerance(),
             self.convergence_settings.maximum_outer_iterations() as u64,
         );
-        // let vec_para = potential.as_ref().iter().copied().collect::<Vec<_>>();
-        // let initial_parameter = ndarray::Array1::from(vec_para);
         let initial_parameter = potential.as_ref().clone();
         let mut solver = FixedPointSolver::new(mixer, initial_parameter);
 
-        // We print 1 line further down in an incoherent loop
-        match self.tracker.calculation {
-            Calculation::Coherent { voltage_target: _ } => {}
-            Calculation::Incoherent { voltage_target: _ } => {}
-        }
         tracing::info!("Beginning outer self-consistent loop with Anderson Mixing");
-        let solution = solver.run(self)?;
+        let _ = solver.run(self)?;
 
-        let solution = Array1::from(solution.get_param().iter().copied().collect::<Vec<_>>());
-        potential = Potential::from_vector(solution);
-        self.tracker.update_potential(potential);
-        // // potential = Potential::from_vector(solution.get_param());
-        // if self.tracker.scattering_scaling > 0.95_f64 {
-        //     self.tracker.write_to_file("incoherent")?;
-        // }
-        //// A single iteration before the loop to avoid updating the potential with an empty charge vector
         Ok(())
     }
 
@@ -368,6 +358,10 @@ where
         + Allocator<f64, BandDim>
         + Allocator<[f64; 3], BandDim>,
 {
+    /// Carry out the potential update
+    ///
+    /// This function arranges the Poisson problem, constructs a Newton-Raphson solver and runs it to
+    /// completion
     #[tracing::instrument("Potential update", skip_all)]
     fn update_potential(
         &self,
@@ -420,22 +414,7 @@ where
         let output =
             previous_potential.as_ref() + &output - Array1::from(vec![output[0]; output.len()]);
 
-        // Writing to file
-        // let system_time = std::time::SystemTime::now();
-        // let datetime: chrono::DateTime<chrono::Utc> = system_time.into();
-        // let mut file = std::fs::File::create(format!("../results/potential_{}.txt", datetime))?;
-        // for value in previous_potential.as_ref().iter() {
-        //     let value = value.to_string();
-        //     writeln!(file, "{}", value)?;
-        // }
-        // let mut file = std::fs::File::create(format!("../results/charge_{}.txt", datetime))?;
-        // for value in self.tracker.charge_as_ref().net_charge().iter() {
-        //     let value = value.to_string();
-        //     writeln!(file, "{}", value)?;
-        // }
-        // panic!();
-
-        Ok((Potential::from_vector(output), residual))
+        Ok((Potential::from(output), residual))
     }
 
     pub(crate) fn scattering_scaling(&self) -> f64 {
@@ -447,10 +426,17 @@ where
     }
 }
 
+/// The methods necesary to run a Newton-Raphson solver for the Poisson problem. We utilise a
+/// predictor-corrector scheme to guess the effect of small change in the electrostatic potential
+/// on the charge density, which requires that the residual and Jacobian are recalculated on each
+/// potential update
 trait PoissonMethods<T: Copy + RealField, GeometryDim: SmallDim, Conn: Connectivity<T, GeometryDim>>
 where
     DefaultAllocator: Allocator<T, GeometryDim>,
 {
+    /// Update the diagonal component of the Jacobian matrix by estimating the differential of the electronic
+    /// charge with respect to the electrostatic potential using the Fermi distribution function.
+    /// $$q / K T N_C Fermi_{-0.5} ((E_F - E_C + q \phi) / K T)$$
     fn update_jacobian_diagonal(
         &self,
         mesh: &Mesh<T, GeometryDim, Conn>,
@@ -459,8 +445,8 @@ where
         output: &mut Array1<T>,
     ) -> color_eyre::Result<()>;
 
-    // Find the updated charge density estimated on switching to a new potential
-    // 'q * (N_C Fermi_{0.5} ((E_F - E_C + q \phi) / K T) + N_A - N_D)`
+    /// Find the updated charge density estimated on switching to a new potential using the Fermi distribution function
+    /// $$q * (N_C Fermi_{0.5} ((E_F - E_C + q \phi) / K T) + N_A - N_D)$$
     fn update_charge_density(
         &self,
         mesh: &Mesh<T, GeometryDim, Conn>,
@@ -479,8 +465,6 @@ where
         + Allocator<T, GeometryDim>
         + Allocator<Array1<T>, BandDim>,
 {
-    // Solve for the diagonal of the Jacobian, given in this approximation by
-    // 'q / K T N_C Fermi_{-0.5} ((E_F - E_C + q \phi) / K T)
     fn update_jacobian_diagonal(
         &self,
         mesh: &Mesh<T, GeometryDim, Conn>,
@@ -495,8 +479,6 @@ where
         Ok(())
     }
 
-    // Find the updated charge density estimated on switching to a new potential
-    // 'q * (N_C Fermi_{0.5} ((E_F - E_C + q \phi) / K T) + N_A - N_D)`
     fn update_charge_density(
         &self,
         mesh: &Mesh<T, GeometryDim, Conn>,
@@ -510,8 +492,6 @@ where
     }
 }
 
-use sprs::CsMat;
-
 impl<GeometryDim, Conn, BandDim>
     OuterLoop<'_, f64, GeometryDim, Conn, BandDim, SpectralSpace<f64, ()>>
 where
@@ -524,6 +504,7 @@ where
         + Allocator<f64, BandDim>
         + Allocator<[f64; 3], BandDim>,
 {
+    /// Build the inner loop from a coherent spectral space (ie. one with a single wavevector value)
     fn build_coherent_inner_loop<'a>(
         &'a self,
         greens_functions: &'a mut AggregateGreensFunctions<
@@ -569,6 +550,7 @@ where
         + Allocator<T, BandDim>
         + Allocator<[T; 3], BandDim>,
 {
+    /// Build the inner loop from a coherent spectral space (ie. one with a single wavevector value)
     fn build_coherent_inner_loop<'a>(
         &'a self,
         greens_functions: &'a mut AggregateGreensFunctions<
@@ -620,6 +602,7 @@ where
         + Allocator<f64, BandDim>
         + Allocator<[f64; 3], BandDim>,
 {
+    /// Build the inner loop from an incoherent spectral space (ie. one with a wavevector spectrum)
     fn build_incoherent_inner_loop<'a>(
         &'a self,
         greens_functions: &'a mut AggregateGreensFunctions<
@@ -684,10 +667,6 @@ where
             .build(self.tracker.voltage)
     }
 }
-
-use crate::device::info_desk::DeviceInfoDesk;
-use crate::postprocessor::Charge;
-use transporter_mesher::Mesh;
 
 pub(crate) trait OuterLoopInfoDesk<
     T: Copy + RealField,
@@ -1078,7 +1057,7 @@ mod test {
 
         let mut rng = rand::thread_rng();
 
-        let potential = Potential::from_vector(Array1::from(
+        let potential = Potential::from(Array1::from(
             (0..mesh.vertices().len())
                 .map(|_| rng.gen::<f64>())
                 .collect::<Vec<_>>(),
@@ -1133,7 +1112,7 @@ mod test {
 
         let mut rng = rand::thread_rng();
 
-        let potential = Potential::from_vector(Array1::from(
+        let potential = Potential::from(Array1::from(
             (0..mesh.vertices().len())
                 .map(|_| rng.gen::<f64>())
                 .collect::<Vec<_>>(),
@@ -1191,21 +1170,21 @@ mod test {
 
         let mut rng = rand::thread_rng();
 
-        let potential = Potential::from_vector(Array1::from(
+        let potential = Potential::from(Array1::from(
             (0..mesh.vertices().len())
                 .map(|_| rng.gen::<f64>())
                 .collect::<Vec<_>>(),
         ));
 
         let dphi = 1e-8;
-        let potential_plus_dphi = Potential::from_vector(Array1::from(
+        let potential_plus_dphi = Potential::from(Array1::from(
             potential
                 .as_ref()
                 .iter()
                 .map(|phi| phi + dphi)
                 .collect::<Vec<_>>(),
         ));
-        let potential_minus_dphi = Potential::from_vector(Array1::from(
+        let potential_minus_dphi = Potential::from(Array1::from(
             potential
                 .as_ref()
                 .iter()

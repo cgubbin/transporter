@@ -1,14 +1,26 @@
+// Copyright 2022 Chris Gubbin
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT or
+// http://opensource.org/licenses/MIT>, at your option. This file may not be
+// copied, modified, or distributed except according to those terms.
+
+//! # Local
+//!
 //! Element level constructors for the Poisson equation operator
 //!
 //! This submodule constructs the components of the Hamiltonian differential operator, and diagonal
 //! for a single element of the mesh, over `NumBands` (ie: the number of carrier bands in the problem).
 use super::{BuildError, PoissonInfoDesk};
-use crate::constants::{ELECTRON_CHARGE, EPSILON_0};
+use crate::{
+    constants::{ELECTRON_CHARGE, EPSILON_0},
+
+utilities::assemblers::{VertexAssembler, VertexConnectivityAssembler}
+};
 use nalgebra::{allocator::Allocator, DefaultAllocator, OPoint, OVector, RealField};
 use ndarray::{Array1, ArrayViewMut1};
 use transporter_mesher::{Assignment, Connectivity, Mesh};
 
-use crate::utilities::assemblers::{VertexAssembler, VertexConnectivityAssembler};
 
 /// Helper trait to construct the diagonal elements of a differential operator
 pub(crate) trait AssembleVertexPoissonDiagonal<T: RealField>:

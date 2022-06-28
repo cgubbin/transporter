@@ -11,9 +11,22 @@
 //! $$ \frac{\mathrm{d}}{\mathrm{d} z} \left[ \epsilon\left(z\right) \frac{\mathrm{d} \phi}{\mathrm{d} z} + q \left[N_D^+ - N_A^- - n \right]$$
 //! which gives the electrostatic potential, and the Schrödinger equation which yields the
 //! carrier density.
+//!
+//! Utilising an initial guess for the electrostatic potential, an [Inner Loop](crate::inner_loop) is spawned. The inner loop calculates the
+//! charge density in the device under the constraints laid out in the configuration file. The outer loop then calculates the electrostatic potential
+//! using the [Poisson](crate::outer_loop::poisson) module. When the Poisson residual falls below a preset value the outer loop terminates.
+//!
+//! To accelerate convergence the outer loop mixes the potential update at each iteration using an Anderson acceleration scheme as described in the
+//! [Conflux](conflux) crate. This increases the robustness of the outer iteration procedure, reducing the likelihood the calculation will diverge from
+//! the true solution.
 
+/// Convergence information for the inner and outer loops
 mod convergence;
+
+/// The methods which run the outer loop to convergence
 mod methods;
+
+/// Solvers and constructors for the Poisson equation
 mod poisson;
 
 pub(crate) use convergence::Convergence;
@@ -35,30 +48,34 @@ use std::marker::PhantomData;
 use tokio::sync::mpsc::Sender;
 use transporter_mesher::{Connectivity, Mesh, SmallDim};
 
-///Error for the outer loop
+/// Error alias for the outer loop
 
 #[derive(thiserror::Error, Debug, Diagnostic)]
 pub(crate) enum OuterLoopError<T: RealField> {
-    // An error in building an operator, or a self energy. These errors are non-recoverable
+    /// An error in building an operator, or a self energy. These errors are non-recoverable and lead to termination
     #[error(transparent)]
     BuilderError(#[from] BuildError),
-    // #[error(transparent)]
-    // InnerLoopError,
-    // An error in the fixed-point iteration convergence: this can be recoverable if it is an
-    // out-of-iteration variant. Sometimes convergence is close and we should just advance
+    /// An error in the fixed-point iteration convergence: this can be recoverable if it is an
+    /// out-of-iteration variant and convergence is close, or the voltage step can be reduced
     #[error(transparent)]
     FixedPoint(#[from] conflux::core::FixedPointError<T>),
-    // Errors from the Poisson equation convergence. These errors are probably non-recoverable
+    /// Errors from the Poisson equation convergence. These errors are probably non-recoverable and indicate that the
+    /// calculation has diverged from the true solution. This indicates a problem with the structure provided
     #[error(transparent)]
     PoissonError(#[from] argmin::core::Error),
-    // #[error(transparent)]
-    // Stagnation,
-    // Write errors in post-processing. Non-recoverable
-    #[error(transparent)]
-    IoError(#[from] std::io::Error),
-    // Errors from linear algebra failure
+    /// An additional error variant for fixed point iterations. Before `max_iterations` is reached the calculation
+    /// stagnates if it cannot advance beyond the current residual after `n` iterations. This indicates the voltage step
+    /// is too large
+    #[error("The fixed point iteration has stagnated at residual {0}")]
+    Stagnation(T),
+    /// Errors from linear algebra failure. These indicate something has gone wrong with the core logic: perhaps matrices
+    /// have incompatible dimensions for linear algebra. It could also indicate failure in matrix inversion when calculating
+    /// the retarded Green's function. These are non-recoverable errors.
     #[error(transparent)]
     LinAlg(#[from] ndarray_linalg::error::LinalgError),
+    // Errors bubbled up from the inner loop
+    #[error(transparent)]
+    Inner(#[from] crate::inner_loop::InnerLoopError),
 }
 
 /// Builder struct for the outer loop
@@ -444,6 +461,7 @@ where
     charge_and_currents: ChargeAndCurrent<T, BandDim>,
     potential: Potential<T>,
     fermi_level: Array1<T>,
+    rate: Option<crate::postprocessor::ScatteringRate<T>>,
     iteration: usize,
     calculation: Calculation<T>,
     pub(crate) scattering_scaling: T,
@@ -476,6 +494,7 @@ where
                     .map(|_| T::zero())
                     .collect::<Vec<_>>(),
             ),
+            rate: None,
             calculation: global_tracker.calculation(),
             iteration: 0,
             scattering_scaling: T::from_f64(1.0).unwrap(),
@@ -508,6 +527,10 @@ where
         self.potential = potential;
     }
 
+    pub(crate) fn update_rate(&mut self, rate: crate::postprocessor::ScatteringRate<T>) {
+        self.rate = Some(rate);
+    }
+
     pub(crate) fn fermi_level_mut(&mut self) -> &mut Array1<T> {
         &mut self.fermi_level
     }
@@ -518,6 +541,10 @@ where
 
     pub(crate) fn potential_as_ref(&self) -> &Array1<T> {
         self.potential.as_ref()
+    }
+
+    pub(crate) fn rate(&self) -> Option<crate::postprocessor::ScatteringRate<T>> {
+        self.rate.clone()
     }
 
     pub(crate) fn write_to_file(&self, calculation: &str) -> Result<(), std::io::Error>

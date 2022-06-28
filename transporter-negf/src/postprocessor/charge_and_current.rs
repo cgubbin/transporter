@@ -79,8 +79,8 @@ where
         &self,
         previous: &ChargeAndCurrent<T, BandDim>,
         tolerance: T,
-    ) -> Result<bool, PostProcessorError> {
-        Ok(self
+    ) -> Result<(bool, T), PostProcessorError> {
+        let change = self
             .charge_and_current_iter()
             .zip(previous.charge_and_current_iter())
             .map(|(new, previous)| {
@@ -97,7 +97,13 @@ where
             .filter(|&x| {
                 !((x != T::zero()) & !(x > T::zero())) // Hacky trick to filter NaN from the result
             })
-            .all(|difference| difference < tolerance))
+            .collect::<Vec<T>>();
+        if change.len() > 0 {
+            // Currently just check the charge density
+            return Ok((change[0] < tolerance, change[0]));
+        } else {
+            panic!()
+        }
     }
 }
 

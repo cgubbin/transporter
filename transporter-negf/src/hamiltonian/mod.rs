@@ -38,7 +38,7 @@ use num_complex::Complex;
 use sprs::CsMat;
 use transporter_mesher::{Connectivity, Mesh, SmallDim};
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 /// The Hamiltonian wrapper. Data is stored in `CsMat` as the differential operator is sparse, although the constructor
 /// should be generic it is intended to work with nearest neighbour coupling schemes
 pub struct Hamiltonian<T: Copy + RealField> {

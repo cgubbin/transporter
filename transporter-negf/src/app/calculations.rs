@@ -85,6 +85,9 @@ where
     <DefaultAllocator as Allocator<f64, BandDim>>::Buffer: Send + Sync,
     <DefaultAllocator as Allocator<[f64; 3], BandDim>>::Buffer: Send + Sync,
 {
+    tracing::info!(
+        "Coherent calculation with fixed voltage for structure with uniform effective mass"
+    );
     // Build calculation independent structures
     let mut hamiltonian = crate::hamiltonian::HamiltonianBuilder::default()
         .with_mesh(mesh)
@@ -125,39 +128,48 @@ where
             voltage_target: 0_f64,
         },
     };
-    let mut outer_loop: crate::outer_loop::OuterLoop<
-        f64,
-        U1,
-        Segment1dConnectivity,
-        BandDim,
-        crate::spectral::SpectralSpace<f64, ()>,
-    > = crate::outer_loop::OuterLoopBuilder::new()
-        .with_mesh(mesh)
-        .with_hamiltonian(&mut hamiltonian)
-        .with_spectral_space(&spectral_space)
-        .with_convergence_settings(&outer_config)
-        .with_tracker(tracker)
-        .with_info_desk(tracker.info_desk)
-        .with_progress(&progress)
-        .with_sender(&progress_sender)
-        .build(voltage)
-        .unwrap();
+    let (current, potential, electron_density) = {
+        let mut outer_loop: crate::outer_loop::OuterLoop<
+            f64,
+            U1,
+            Segment1dConnectivity,
+            BandDim,
+            crate::spectral::SpectralSpace<f64, ()>,
+        > = crate::outer_loop::OuterLoopBuilder::new()
+            .with_mesh(mesh)
+            .with_hamiltonian(&mut hamiltonian)
+            .with_spectral_space(&spectral_space)
+            .with_convergence_settings(&outer_config)
+            .with_tracker(tracker)
+            .with_info_desk(tracker.info_desk)
+            .with_progress(&progress)
+            .with_sender(&progress_sender)
+            .build(voltage)
+            .unwrap();
 
-    outer_loop.run_loop(initial_potential)?;
+        outer_loop.run_loop(initial_potential)?;
+        (
+            outer_loop.tracker.current_as_ref().net_current()[0],
+            outer_loop.potential_owned(),
+            outer_loop.tracker.charge_as_ref().clone().net_charge(),
+        )
+    };
+
+    let scattering_rates = None;
 
     let result = crate::app::tui::NEGFResult {
         calculation: Calculation::Coherent {
             voltage_target: voltage,
         },
-        current: outer_loop.tracker.current_as_ref().net_current()[0],
-        potential: outer_loop.tracker.potential_as_ref().clone(),
-        electron_density: outer_loop.tracker.charge_as_ref().clone().net_charge(),
-        scattering_rates: None,
+        current,
+        potential: potential.as_ref().clone(),
+        electron_density,
+        scattering_rates,
     };
     if let Err(err) = result_sender.blocking_send(result) {
         tracing::warn!("Failed to communicate result at {voltage}V: {:?}", err);
     }
-    Ok(outer_loop.potential_owned())
+    Ok(potential)
 }
 
 fn coherent_calculation_at_fixed_voltage_with_changing_mass<BandDim: SmallDim>(
@@ -179,6 +191,9 @@ where
     <DefaultAllocator as Allocator<f64, BandDim>>::Buffer: Send + Sync,
     <DefaultAllocator as Allocator<[f64; 3], BandDim>>::Buffer: Send + Sync,
 {
+    tracing::info!(
+        "Coherent calculation with fixed voltage for structure with non-uniform effective mass"
+    );
     // Build calculation independent structures
     let mut hamiltonian = crate::hamiltonian::HamiltonianBuilder::default()
         .with_mesh(mesh)
@@ -372,6 +387,8 @@ where
         outer_loop.increment_scattering_scaling();
     }
 
+    // let rate = outer_loop.tracker.
+
     // Arrange the results of the calculation and communicate them to the master process
     let result = crate::app::tui::NEGFResult {
         calculation: Calculation::Incoherent {
@@ -380,7 +397,7 @@ where
         current: outer_loop.tracker.current_as_ref().net_current()[0],
         potential: outer_loop.tracker.potential_as_ref().clone(),
         electron_density: outer_loop.tracker.charge_as_ref().clone().net_charge(),
-        scattering_rates: None,
+        scattering_rates: outer_loop.tracker.rate(),
     };
     if let Err(err) = result_sender.blocking_send(result) {
         tracing::warn!("Failed to communicate result at {voltage}V: {:?}", err);

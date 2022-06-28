@@ -200,7 +200,7 @@ where
 {
     // Todo allow an initial potential to be read from a file
     let mut initial_potential: Potential<f64> =
-        Potential::from_vector(ndarray::Array1::from(vec![0_f64; mesh.num_nodes()]));
+        Potential::from(ndarray::Array1::from(vec![0_f64; mesh.num_nodes()]));
     match calculation_type {
         Calculation::Coherent { voltage_target } => {
             let mut current_voltage = 0_f64;

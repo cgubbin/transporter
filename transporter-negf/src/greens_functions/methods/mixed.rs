@@ -80,9 +80,9 @@ where
             spectral_space,
         )?;
 
-        if self.security_checks {
-            self.check_carrier_conservation(voltage, hamiltonian, self_energy, spectral_space)?;
-        }
+        // if self.security_checks {
+        //     self.check_carrier_conservation(voltage, hamiltonian, self_energy, spectral_space)?;
+        // }
         Ok(())
     }
 
@@ -200,8 +200,18 @@ where
                 // Security check (anti-hermitian self energy)
                 for contact_lesser_se in contact_lesser.data().iter() {
                     let sum = contact_lesser_se + contact_lesser_se.conj();
-                    approx::assert_relative_eq!(sum.re, 0_f64, epsilon = std::f64::EPSILON);
-                    approx::assert_relative_eq!(sum.im, 0_f64, epsilon = std::f64::EPSILON);
+                    if sum.norm() > std::f64::EPSILON {
+                        tracing::error!(
+                            "External contact lesser self energy is not anti-hermitian"
+                        );
+                        return Err(GreensFunctionError::SecurityCheck(
+                            super::super::SecurityCheck {
+                                calculation: "External contact lesser self energy initialisation"
+                                    .into(),
+                                index,
+                            },
+                        ));
+                    }
                 }
 
                 let internal_lesser = compute_internal_lesser_self_energies(
@@ -219,15 +229,36 @@ where
                 // Security check (anti-hermitian self energy)
                 for internal_lesser_se in internal_lesser.iter() {
                     let sum = internal_lesser_se + internal_lesser_se.conj();
-                    approx::assert_relative_eq!(sum.re, 0_f64, epsilon = std::f64::EPSILON);
-                    approx::assert_relative_eq!(sum.im, 0_f64, epsilon = std::f64::EPSILON);
+                    if sum.norm() > std::f64::EPSILON {
+                        tracing::error!(
+                            "Internal contact lesser self energy is not anti-hermitian"
+                        );
+                        return Err(GreensFunctionError::SecurityCheck(
+                            super::super::SecurityCheck {
+                                calculation: "Internal contact lesser self energy initialisation"
+                                    .into(),
+                                index,
+                            },
+                        ));
+                    }
                 }
 
                 let nrows = self_energy.incoherent_lesser.as_deref().unwrap()[index].nrows();
                 let mut se_lesser_core =
                     self_energy.incoherent_lesser.as_deref().unwrap()[index].clone();
+                se_lesser_core *= Complex::from(0_f64);
                 se_lesser_core[(0, 0)] += internal_lesser[0];
                 se_lesser_core[(nrows - 1, nrows - 1)] += internal_lesser[1];
+
+                if !crate::utilities::matrices::is_anti_hermitian(se_lesser_core.view()) {
+                    tracing::error!("Full lesser self energy is not anti-hermitian");
+                    return Err(GreensFunctionError::SecurityCheck(
+                        super::super::SecurityCheck {
+                            calculation: "Full lesser self energy initialisation".into(),
+                            index,
+                        },
+                    ));
+                }
 
                 gf.as_mut().generate_lesser_into(
                     energy,
@@ -645,17 +676,27 @@ impl GreensFunctionMethods<f64> for MMatrix<Complex<f64>> {
             });
 
         // Security check, it should be the case that G^< = - [G^<]^{\dag}
-        let norm = self
-            .source_diagonal
-            .iter()
-            .chain(self.drain_diagonal.iter())
-            .fold(Complex::from(0_f64), |acc, x| acc + (x + x.conj()).abs());
+        // let norm = self
+        //     .source_diagonal
+        //     .iter()
+        //     .chain(self.drain_diagonal.iter())
+        //     .fold(Complex::from(0_f64), |acc, x| acc + (x + x.conj()).abs());
 
-        approx::assert_relative_eq!(norm.re, 0_f64, epsilon = std::f64::EPSILON * 100_f64);
-        approx::assert_relative_eq!(norm.im, 0_f64, epsilon = std::f64::EPSILON * 100_f64);
-        assert!(crate::utilities::matrices::is_anti_hermitian(
-            self.core_as_ref().view()
-        ));
+        // approx::assert_relative_eq!(norm.re, 0_f64, epsilon = std::f64::EPSILON * 100_f64);
+        // approx::assert_relative_eq!(norm.im, 0_f64, epsilon = std::f64::EPSILON * 100_f64);
+        // TODO -> Should be antihermitian
+        let is_antihermitian =
+            crate::utilities::matrices::is_anti_hermitian(self.core_as_ref().view());
+
+        if !is_antihermitian {
+            tracing::error!("Computed lesser Green function is not anti-hermitian");
+            return Err(GreensFunctionError::SecurityCheck(
+                super::super::SecurityCheck {
+                    calculation: "Mixed representation Lesser Green's function".into(),
+                    index: 0,
+                },
+            ));
+        }
 
         Ok(())
     }

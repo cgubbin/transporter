@@ -23,13 +23,13 @@ pub(crate) fn is_anti_hermitian(matrix: ArrayView2<Complex<f64>>) -> bool {
     if mean == 0_f64 {
         mean = 1_f64;
     }
-    let matrix_transpose = matrix.t();
-    matrix
-        .iter()
-        .zip(matrix_transpose.iter())
-        .all(|(element, adjoint_element)| {
-            (element + adjoint_element.conj()).norm() / mean < std::f64::EPSILON * 10000_f64
-        })
+    let conjugate_transpose = matrix.t().mapv(|x| x.conj());
+    let should_be_zero = &matrix + &conjugate_transpose;
+    let val = should_be_zero
+        .into_iter()
+        .fold(0_f64, |acc, x| acc + x.norm());
+
+    val < mean / 1e-6
 }
 
 #[cfg(test)]

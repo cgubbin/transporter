@@ -1,22 +1,41 @@
+// Copyright 2022 Chris Gubbin
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT or
+// http://opensource.org/licenses/MIT>, at your option. This file may not be
+// copied, modified, or distributed except according to those terms.
+
+//! # Operator
+//!
+//! Constructors to build the differential operator and source term for a Poisson problem
+
+/// Constructors for the global (whole mesh) operator
 mod global;
+
+/// Constructors for single finite elements
 mod local;
 
 use global::CsrAssembler;
 
 use super::{BuildError, PoissonProblemBuilder};
-use crate::device::info_desk::DeviceInfoDesk;
-use crate::outer_loop::Potential;
-use crate::postprocessor::Charge;
-use crate::utilities::assemblers::VertexAssemblerBuilder;
+use crate::{
+    device::info_desk::DeviceInfoDesk, outer_loop::Potential, postprocessor::Charge,
+    utilities::assemblers::VertexAssemblerBuilder,
+};
 use nalgebra::{allocator::Allocator, DefaultAllocator, RealField};
 use ndarray::Array1;
 use sprs::CsMat;
 use transporter_mesher::{Connectivity, Mesh, SmallDim};
 
+/// Common behaviours for a PoissonOperator -> allows for an agnostic backend
 pub(crate) trait PoissonOperator {
+    /// The type of the differential operator
     type Operator;
+    /// The type of the source term
     type Source;
+    /// Builds the differential operator
     fn build_operator(&self) -> Result<Self::Operator, BuildError>;
+    /// Builds the source term
     fn build_source(&self) -> Result<Self::Source, BuildError>;
 }
 
@@ -61,14 +80,21 @@ where
     }
 }
 
+/// An `InfoDesk` trait defining the necessary methods to construct the Poisson problem
 pub trait PoissonInfoDesk<T: Copy + RealField> {
+    /// The spatial dimension
     type GeometryDim: SmallDim;
+    /// The number of bands in the problem
     type BandDim: SmallDim;
+    /// The zero-frequency dielectric constant along the three Cartesian axis
     fn get_static_dielectric_constant(&self, region_index: usize) -> &[T; 3];
+    /// The acceptor dopant density in 1 / m^3
     fn get_acceptor_density(&self, region_index: usize) -> T;
+    /// The donor dopant density in 1 / m^3
     fn get_donor_density(&self, region_index: usize) -> T;
 }
 
+/// Implement the PoissonInfoDesk for the general DeviceInfoDesk struct
 impl<T, GeometryDim, BandDim> PoissonInfoDesk<T> for DeviceInfoDesk<T, GeometryDim, BandDim>
 where
     T: Copy + RealField,

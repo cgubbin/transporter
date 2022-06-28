@@ -143,7 +143,7 @@ where
 {
     /// Build an instance of `Tracker`
     pub fn build(self) -> color_eyre::Result<Tracker<'a, T, GeometryDim, BandDim>> {
-        let potential = Potential::from_vector(Array1::zeros(self.mesh.vertices().len()));
+        let potential = Potential::from(Array1::zeros(self.mesh.vertices().len()));
         let empty_vector: Array1<T> = Array1::zeros(self.mesh.vertices().len());
         let charge_densities: Charge<T, BandDim> = Charge::new(
             OVector::<Array1<T>, BandDim>::from_element(empty_vector.clone()),

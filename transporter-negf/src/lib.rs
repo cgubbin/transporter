@@ -21,9 +21,32 @@
 //! modelling the interaction through a coupling self energy. Emission of LO phonons shuffles electrons between states, this
 //! means describing the process entails a second self-consistent calculation.
 //!
+//! # High Level Outline
+//!
+//! The electron wavefunctions, which determine the electron density in a non-uniform system, are calculated from the Schrodinger
+//! equation
+//!
+//! $\mathcal{H} \Psi = E \Psi,$
+//!
+//! where $\mathcal{H}$ is the system Hamiltonian, which describes the potential experienced by an electron. This potential encompasses
+//! the band structure, which determines both the relationship between energy and momentum and the density of electronic states for a
+//! given energy. It also describes the effect of the electrostatic potential, which describes the repulsion and attraction between
+//! charge in the system. The electrostatic potential $\phi$ is determined by solving the Poisson equation
+//!
+//! $    \nabla \left[ \epsilon \nabla \phi \right] = e \left[n - N_A + N_D\right], $
+//!
+//! where $\nabla$ is a differential operator, $\epsilon$ describes the dielectric response of the material, $n$ is the electron density
+//! and $N_A, N_D$ are the densities of dopants in the system. The true electrostatic potential in the system is found when both equations
+//! are satisfied simultaneously.
+//!
+//! As simulatenously solving both equations is complex we take an iterative approach. From an initial guess $\phi_0$ we calculate the
+//! corresponding electronic density, and then utilise this to calculate a new electrostatic potential $\phi_1$. This procedure is repeated
+//! until convergence is reached, meaning the change in $\phi$ over the course of the iteration is below a pre-defined threshold and the
+//! residual of the Poisson equation is below a set tolerance. This is carried out in the [Outer Loop](outer_loop) sub-crate.
+//!
 //! # Usage
 //! Transporter is distributed as a binary crate, and is intended to be run from the command line. To run the software first define
-//! a structure in a `.toml` file:
+//! a structure in a `.toml` file in a `structures` subdirectory:
 //!
 //! ```toml
 //! temperature = 300.0
@@ -36,7 +59,8 @@
 //! donor_density = 1e23
 //! ```
 //!
-//! where additional layers can be appended with subsequent `layers` fields.
+//! where additional layers can be appended with subsequent `layers` fields. To launch the GUI run transporter from the directory above
+//! the `structures` folder. Output by default will be placed in a directory with the same name as the `.toml` file selected to run.
 
 #![warn(missing_docs)]
 #![allow(dead_code)]
@@ -55,7 +79,7 @@ mod constants;
 pub mod device;
 
 /// Error handling
-mod error;
+pub mod error;
 
 /// Fermi integrals and their inverses
 pub mod fermi;
@@ -67,13 +91,13 @@ pub mod greens_functions;
 pub mod hamiltonian;
 
 /// The inner loop, which computes the electronic density
-mod inner_loop;
+pub mod inner_loop;
 
 /// The outer loop, which iteratively solves an inner loop and the Poisson equation for the electric potential
-mod outer_loop;
+pub mod outer_loop;
 
 /// Computes quantities of interest from Greens functions, such as the electron density and current
-mod postprocessor;
+pub mod postprocessor;
 
 /// Self energies for coherent and incoherent transport
 pub mod self_energy;

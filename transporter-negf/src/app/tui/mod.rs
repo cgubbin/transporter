@@ -3,6 +3,7 @@ mod inputs;
 mod io;
 mod rayon_async;
 
+use crate::postprocessor::ScatteringRate;
 use crate::{
     app::{run_simulation, Calculation},
     error::IOError,
@@ -15,7 +16,7 @@ use inputs::events::Events;
 use inputs::Event;
 use io::{handler::IoAsyncHandler, IoEvent};
 use nalgebra::RealField;
-use ndarray::{Array1, Array2};
+use ndarray::Array1;
 use rayon_async::async_threadpool::AsyncThreadPool;
 use std::io::Write;
 use std::{sync::Arc, time::Duration};
@@ -39,7 +40,7 @@ pub struct NEGFResult<T: Copy + RealField> {
     /// The converged charge density
     pub(crate) electron_density: Array1<T>,
     /// The converged momentum-resolved LO phonon scattering rate
-    pub(crate) scattering_rates: Option<Array2<T>>,
+    pub(crate) scattering_rates: Option<ScatteringRate<T>>,
 }
 
 #[tokio::main]
@@ -252,6 +253,18 @@ async fn write_result_to_file<T: Copy + RealField>(
     for value in result.electron_density.iter() {
         let value = value.to_string();
         writeln!(file, "{}", value)?;
+    }
+
+    if let Some(lo_scattering) = result.scattering_rates {
+        let mut rate_path = write_path.clone();
+        rate_path.push(format!("{}_rate.csv", calculation_type));
+
+        let mut file = std::fs::File::create(rate_path)?;
+        // Write the charge
+        for value in lo_scattering.rate.iter() {
+            let value = value.to_string();
+            writeln!(file, "{}", value)?;
+        }
     }
 
     Ok(())

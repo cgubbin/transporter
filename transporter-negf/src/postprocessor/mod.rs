@@ -6,8 +6,20 @@ pub(crate) use postprocess::PostProcess;
 
 use miette::Diagnostic;
 use nalgebra::{allocator::Allocator, ComplexField, DefaultAllocator};
+use ndarray::Array1;
 use std::marker::PhantomData;
 use transporter_mesher::{Connectivity, Mesh, SmallDim};
+
+#[derive(Clone, Debug)]
+pub(crate) struct ScatteringRate<T> {
+    pub(crate) rate: Array1<T>,
+}
+
+impl<T> ScatteringRate<T> {
+    pub(crate) fn new(rate: Array1<T>) -> Self {
+        Self { rate }
+    }
+}
 
 #[derive(thiserror::Error, Debug, Diagnostic)]
 pub enum PostProcessorError {

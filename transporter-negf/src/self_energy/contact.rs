@@ -4,6 +4,7 @@ use crate::{
     spectral::SpectralDiscretisation,
 };
 use nalgebra::{allocator::Allocator, ComplexField, DefaultAllocator, RealField};
+use ndarray::Array2;
 use num_complex::Complex;
 use transporter_mesher::{Connectivity, Mesh, SmallDim};
 
@@ -89,5 +90,34 @@ where
             }
             _ => unimplemented!("No self-energy implementation for 2D geometries"),
         }
+    }
+
+    pub(crate) fn contact_dense_retarded_self_energy(
+        mesh: &Mesh<T, GeometryDim, Conn>,
+        hamiltonian: &Hamiltonian<T>,
+        energy: T,
+        wavevector: T,
+    ) -> Array2<Complex<T>> {
+        let hamiltonian_matrix = hamiltonian.calculate_total(wavevector);
+        let n_vertices = mesh.vertices().len();
+        let imaginary_unit = Complex::new(T::zero(), T::one());
+        let mut se = Array2::zeros((n_vertices, n_vertices));
+        for ([boundary_element, diagonal_element], ind) in [
+            (hamiltonian_matrix.get_elements_at_source(), 0),
+            (hamiltonian_matrix.get_elements_at_drain(), n_vertices - 1),
+        ]
+        .into_iter()
+        {
+            let d = diagonal_element; // The hamiltonian is minus itself. Dumbo
+            let t = -boundary_element;
+            let z = Complex::from((d - energy) / (t + t));
+            if ind == 0 {
+                se[(0, 0)] = -Complex::from(t) * (imaginary_unit * z.acos()).exp();
+            } else {
+                se[(n_vertices - 1, n_vertices - 1)] =
+                    -Complex::from(t) * (imaginary_unit * z.acos()).exp();
+            }
+        }
+        se
     }
 }

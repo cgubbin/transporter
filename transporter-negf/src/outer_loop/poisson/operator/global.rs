@@ -1,11 +1,22 @@
+// Copyright 2022 Chris Gubbin
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT or
+// http://opensource.org/licenses/MIT>, at your option. This file may not be
+// copied, modified, or distributed except according to those terms.
+
+//! # Global
+//!
 //! Global assemblers for the `Poisson` system
 //!
 //! This module provides global assemblers for the `Hamiltonian` matrix, taking the elements produced in the
 //! local subcrate and throwing them into a global CsrMatrix
 
-use super::local::{AssembleVertexPoissonDiagonal, AssembleVertexPoissonMatrix};
-use super::{super::super::CsrError, BuildError, PoissonInfoDesk};
-use crate::utilities::assemblers::VertexConnectivityAssembler;
+use super::{
+    local::{AssembleVertexPoissonDiagonal, AssembleVertexPoissonMatrix},
+    BuildError, PoissonInfoDesk,
+};
+use crate::{error::CsrError, utilities::assemblers::VertexConnectivityAssembler};
 use nalgebra::{allocator::Allocator, DefaultAllocator, RealField};
 use nalgebra_sparse::{
     pattern::{SparsityPattern, SparsityPatternFormatError},

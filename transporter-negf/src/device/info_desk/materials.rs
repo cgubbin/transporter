@@ -55,7 +55,7 @@ impl<T: RealField> LayerInfoDesk<T, U1> {
     #[numeric_literals::replace_float_literals(T::from_f64(literal).unwrap())]
     fn algaas() -> Self {
         Self {
-            effective_mass: nalgebra::Vector1::new([0.067, 0.067, 0.067]),
+            effective_mass: nalgebra::Vector1::new([0.066669, 0.066669, 0.066669]),
             band_offset: Point1::new(0.3),
             dielectric_constant: [11.5, 11.5, 11.5],
         }
